@@ -212,3 +212,15 @@
 
 /* 返回批次入口：内容区（左栏）左上角 */
 .panel-back { padding: var(--s3) var(--s4) 0; }
+
+/* 已存档快照标记（快照回显态，chip 样式区分实时预览） */
+.snapshot-tag {
+  display: inline-block;
+  font-size: var(--t-caption);
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+  background: var(--accent-bg);
+  border-radius: 999px;
+  padding: 2px 10px;
+  margin-bottom: var(--s3);
+}

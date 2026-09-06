@@ -238,9 +238,9 @@ export default function Settings() {
 
         <SectionCard title="关于">
           <RowItem icon={<IconDoc />} tint="var(--danger)" label="用户协议与隐私政策" onClick={() => setLegalOpen(true)} />
-          <RowItem icon={<IconHistory />} tint="var(--accent)" label="版本日志" value="V0.2.0" onClick={() => setChangelogOpen(true)} />
+          <RowItem icon={<IconHistory />} tint="var(--accent)" label="版本日志" value="V0.3.0" onClick={() => setChangelogOpen(true)} />
           <RowItem icon={<IconCode />} tint="var(--success)" label="开源声明" onClick={() => setOpenSourceOpen(true)} />
-          <RowItem icon={<IconInfo />} tint="var(--ink-2)" label="版本" value="V0.2.0" arrow={false} onClick={null} />
+          <RowItem icon={<IconInfo />} tint="var(--ink-2)" label="版本" value="V0.3.0" arrow={false} onClick={null} />
         </SectionCard>
 
         <SectionCard>

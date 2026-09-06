@@ -266,18 +266,20 @@ export default function Login() {
               {busy ? "验证中…" : "验证并登录"}
             </button>
             <div className="login-resend">
-              {/* 重发必须现场完成新的图形验证码（票据一次性）；dev 模式组件自动隐藏 */}
-              <CaptchaField
-                key={`code-${captchaRefresh}`}
-                refreshKey={captchaRefresh}
-                onChange={(c) => (captchaRef.current = c)}
-              />
+              {/* 倒计时结束后才展人机验证（重发必须现场完成新票据，一次性）；倒计时期间只显示等待文案 */}
+              {countdown <= 0 && (
+                <CaptchaField
+                  key={`code-${captchaRefresh}`}
+                  refreshKey={captchaRefresh}
+                  onChange={(c) => (captchaRef.current = c)}
+                />
+              )}
               <button
                 type="button"
                 onClick={resend}
                 disabled={countdown > 0}
               >
-                {countdown > 0 ? `${countdown}s 后可重发` : "重新发送"}
+                {countdown > 0 ? `${countdown}s 后可重发` : "完成验证并重发"}
               </button>
             </div>
           </div>

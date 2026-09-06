@@ -56,6 +56,8 @@ export default function Grading() {
   const [noteSaving, setNoteSaving] = useState(false);
   const [retroOpen, setRetroOpen] = useState(false); // 补录弹窗（线下已批，回填数据）
   const [retroText, setRetroText] = useState("");
+  const [snapshotMap, setSnapshotMap] = useState({}); // studentId -> 最新反馈快照原文（落库真值）
+  const [dirtyMap, setDirtyMap] = useState({}); // studentId -> 有未保存的表单编辑（脏标记）
 
   useEffect(() => {
     Promise.all([
@@ -72,12 +74,16 @@ export default function Grading() {
         if (list.length) setGreetingId(list[Math.floor(Math.random() * list.length)].id);
         const checked = {};
         const notes = {};
+        const snapshots = {};
         for (const stu of s) {
           checked[stu.id] = [...stu.error_question_ids];
           notes[stu.id] = { ...stu.error_notes };
+          snapshots[stu.id] = stu.feedback_text ?? null;
         }
         setCheckedMap(checked);
         setNotesMap(notes);
+        setSnapshotMap(snapshots);
+        setDirtyMap({}); // 重新加载 = 与库内一致，全部干净
         const firstTodo = s.find((stu) => !stu.submission || stu.submission.status === "待批改");
         setCurrentId((firstTodo || s[0] || {}).id ?? null);
       })
@@ -99,6 +105,9 @@ export default function Grading() {
   const checkedIds = current ? checkedMap[current.id] || [] : [];
   const checkedSet = useMemo(() => new Set(checkedIds), [checkedIds]);
   const currentNotes = current ? notesMap[current.id] || {} : {};
+  // 预览三态：有存档快照且未 dirty → 快照原文；无快照或表单已改 → 实时拼装
+  const snapshot = current ? snapshotMap[current.id] || null : null;
+  const showSnapshot = Boolean(snapshot) && !dirtyMap[current?.id];
 
   const checkedWeight = checkedIds.reduce(
     (sum, qid) => sum + (questionById[qid]?.score_weight || 0),
@@ -173,6 +182,12 @@ export default function Grading() {
     setCheckedMap((prev) => ({ ...prev, [studentId]: updater(prev[studentId] || []) }));
   }
 
+  // 任何表单编辑动作都把当前学生标脏：有快照但 dirty 时预览切回实时拼装
+  function markDirty() {
+    if (!current) return;
+    setDirtyMap((prev) => (prev[current.id] ? prev : { ...prev, [current.id]: true }));
+  }
+
   function toggleChip(qid) {
     if (!current) return;
     // 已勾选的芯片点击 = 弹出统一编辑窗；未勾选点击 = 勾上
@@ -181,6 +196,7 @@ export default function Grading() {
       return;
     }
     setCheckedFor(current.id, (ids) => [...ids, qid]);
+    markDirty();
     // 勾选变化后回到自动预选，清除手动覆盖
     setRatingOverrides((prev) => {
       const next = { ...prev };
@@ -196,11 +212,13 @@ export default function Grading() {
     setCheckedFor(current.id, (prev) =>
       allOn ? prev.filter((x) => !ids.includes(x)) : [...new Set([...prev, ...ids])]
     );
+    markDirty();
   }
 
   function pickRating(r) {
     if (!current) return;
     setRatingOverrides((prev) => ({ ...prev, [current.id]: r }));
+    markDirty();
   }
 
   function saveNote(qid, note) {
@@ -210,16 +228,19 @@ export default function Grading() {
       [current.id]: { ...(prev[current.id] || {}), [qid]: note },
     }));
     setEditingQid(null);
+    markDirty();
   }
 
   function uncheckFromEditor(qid) {
     if (!current) return;
     setCheckedFor(current.id, (ids) => ids.filter((x) => x !== qid));
     setEditingQid(null);
+    markDirty();
   }
 
   function toggleIssue(phraseId) {
     if (!current) return;
+    markDirty();
     const ids = issuesMap[current.id] || [];
     const unchecking = ids.includes(phraseId);
     setIssuesMap((prev) => ({
@@ -242,6 +263,7 @@ export default function Grading() {
       ...prev,
       [current.id]: { ...(prev[current.id] || {}), [phraseId]: n },
     }));
+    markDirty();
   }
 
   function rerollGreeting() {
@@ -325,8 +347,10 @@ export default function Grading() {
 
   async function copyAll() {
     try {
-      const body = buildPlainText();
-      await navigator.clipboard.writeText(greeting ? `${greeting}\n${body}` : body);
+      // 快照视图下复制存档原文（那才是真正发出去的内容）；否则复制实时拼装
+      const body = showSnapshot ? snapshot : buildPlainText();
+      const text = showSnapshot ? body : greeting ? `${greeting}\n${body}` : body;
+      await navigator.clipboard.writeText(text);
       message.success("已复制全部反馈");
     } catch {
       message.error("复制失败，请检查浏览器剪贴板权限");
@@ -365,6 +389,7 @@ export default function Grading() {
     if (!current) return;
     setLostSectionsMap((prev) => ({ ...prev, [current.id]: lostText.trim() }));
     setLostOpen(false);
+    markDirty();
   }
 
   // 批改落库：分数/等级由后端按 score_weight 复算，成功后学生状态灯与分数改由后端数据驱动
@@ -396,6 +421,9 @@ export default function Grading() {
       });
       const fresh = await apiGet(`/assignments/${assignmentId}/students`);
       setStudents(fresh);
+      // 快照回显：落库后预览立即显示存档原文；dirty 清除
+      setSnapshotMap(Object.fromEntries(fresh.map((s) => [s.id, s.feedback_text ?? null])));
+      setDirtyMap((prev) => ({ ...prev, [current.id]: false }));
       const me = fresh.find((s) => s.id === current.id);
       if (me) {
         setCheckedMap((prev) => ({ ...prev, [me.id]: [...me.error_question_ids] }));
@@ -619,7 +647,10 @@ export default function Grading() {
                 <span className="lab">提交状态</span>
                 <Select
                   value={statusDraft}
-                  onChange={(v) => setStatusDrafts((prev) => ({ ...prev, [current.id]: v }))}
+                  onChange={(v) => {
+                    setStatusDrafts((prev) => ({ ...prev, [current.id]: v }));
+                    markDirty();
+                  }}
                   options={STATUS_OPTIONS}
                   style={{ width: 110 }}
                 />
@@ -745,37 +776,48 @@ export default function Grading() {
             </div>
           )}
           <div className="preview">
-            {current && <h3>{feedbackTitle()}</h3>}
-            {ratingPhrase && <p className="rating-line">{ratingPhrase}</p>}
-            {previewBlocks.map((block) => (
-              <div key={block.section}>
-                <h3>
-                  <strong>{block.section} 部分</strong>
-                </h3>
-                {block.items.map((item) =>
-                  item.text ? (
-                    <p key={item.id}>{item.text}</p>
-                  ) : (
-                    <p key={item.id}>
-                      <span className="blank">{item.blank}</span>
+            {showSnapshot ? (
+              <>
+                <div>
+                  <span className="snapshot-tag">已存档快照</span>
+                </div>
+                <p>{snapshot}</p>
+              </>
+            ) : (
+              <>
+                {current && <h3>{feedbackTitle()}</h3>}
+                {ratingPhrase && <p className="rating-line">{ratingPhrase}</p>}
+                {previewBlocks.map((block) => (
+                  <div key={block.section}>
+                    <h3>
+                      <strong>{block.section} 部分</strong>
+                    </h3>
+                    {block.items.map((item) =>
+                      item.text ? (
+                        <p key={item.id}>{item.text}</p>
+                      ) : (
+                        <p key={item.id}>
+                          <span className="blank">{item.blank}</span>
+                        </p>
+                      )
+                    )}
+                  </div>
+                ))}
+                {/* Issue 话术：多行块首行即标题，预览加粗；复制的纯文本不受影响 */}
+                {issueLines.map((text, i) => {
+                  const [head, ...rest] = text.split("\n");
+                  return rest.length > 0 ? (
+                    <p key={i}>
+                      <strong>{head}</strong>
+                      {"\n"}
+                      {rest.join("\n")}
                     </p>
-                  )
-                )}
-              </div>
-            ))}
-            {/* Issue 话术：多行块首行即标题，预览加粗；复制的纯文本不受影响 */}
-            {issueLines.map((text, i) => {
-              const [head, ...rest] = text.split("\n");
-              return rest.length > 0 ? (
-                <p key={i}>
-                  <strong>{head}</strong>
-                  {"\n"}
-                  {rest.join("\n")}
-                </p>
-              ) : (
-                <p key={i}>{text}</p>
-              );
-            })}
+                  ) : (
+                    <p key={i}>{text}</p>
+                  );
+                })}
+              </>
+            )}
           </div>
         </section>
       </main>

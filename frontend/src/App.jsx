@@ -4,6 +4,7 @@ import Dashboard from "./pages/Dashboard";
 import ClassDetail from "./pages/ClassDetail";
 import AssignmentDetail from "./pages/AssignmentDetail";
 import Grading from "./pages/Grading";
+import QuickGrade from "./pages/QuickGrade";
 import Login from "./pages/Login";
 import Settings from "./pages/Settings";
 import Admin from "./pages/Admin";
@@ -66,6 +67,14 @@ export default function App() {
         element={
           <RequireAuth>
             <AssignmentDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/assignments/:id/quick"
+        element={
+          <RequireAuth>
+            <QuickGrade />
           </RequireAuth>
         }
       />

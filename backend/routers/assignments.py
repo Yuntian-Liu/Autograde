@@ -150,6 +150,18 @@ async def get_assignment_students(
         )
     ).scalars().all()
 
+    # 最新反馈快照（每生一条，整批一次查询避免 N+1；供批改页快照回显）
+    snap_rows = (
+        await db.execute(
+            select(FeedbackSnapshot.student_id, FeedbackSnapshot.final_text)
+            .where(FeedbackSnapshot.assignment_id == assignment_id)
+            .order_by(FeedbackSnapshot.id.desc())
+        )
+    ).all()
+    latest_snapshots: dict[int, str] = {}
+    for sid, text in snap_rows:
+        latest_snapshots.setdefault(sid, text)
+
     result = []
     for s in students:
         sub = (
@@ -208,6 +220,7 @@ async def get_assignment_students(
                 "submission": submission_brief(sub) if sub else None,
                 "error_question_ids": error_question_ids,
                 "error_notes": error_notes,
+                "feedback_text": latest_snapshots.get(s.id),
                 "recent_avg_5": recent_avg_5,
                 "last_score": last_score,
                 "weak_sections": weak_sections,

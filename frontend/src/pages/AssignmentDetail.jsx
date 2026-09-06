@@ -115,6 +115,9 @@ export default function AssignmentDetail() {
           <Link className="btn primary" to={`/grading/${assignment.id}`}>
             进入批改
           </Link>
+          <Link className="btn" to={`/assignments/${assignment.id}/quick`}>
+            快捷批改
+          </Link>
           <button className="btn" onClick={() => setAiOpen(true)}>
             AI 录题
           </button>
@@ -137,15 +140,11 @@ export default function AssignmentDetail() {
                 <span className="row-name">{s.name}</span>
                 {status === "缺作业" && <span className="tag-lack">缺项</span>}
                 {status === "未交" && <span className="tag-miss">未交</span>}
-                <span className={`mono ${sub && sub.score !== null ? scoreTone(sub.score) : ""}`}>
+                <span className={`mono score-col ${sub && sub.score !== null ? scoreTone(sub.score) : ""}`}>
                   {sub && sub.score !== null ? fmtScore(sub.score) : "—"}
-                  {sub && sub.rating ? (
-                    <span className={ratingTone(sub.rating_override || sub.rating)}>
-                      {` · ${sub.rating_override || sub.rating}`}
-                    </span>
-                  ) : (
-                    ""
-                  )}
+                </span>
+                <span className={`mono rating-col ${sub && sub.rating ? ratingTone(sub.rating_override || sub.rating) : ""}`}>
+                  {sub && sub.rating ? `· ${sub.rating_override || sub.rating}` : ""}
                 </span>
               </div>
             );

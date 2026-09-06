@@ -106,6 +106,10 @@ a.row:hover { background: var(--bg-soft); }
 }
 .tag-miss { font-size: var(--t-micro); color: var(--danger); }
 
+/* 分数与等级列宽固定：A+ 与 A 不等宽也不再错位 */
+.score-col { min-width: 6.5ch; text-align: right; }
+.rating-col { min-width: 4ch; text-align: left; }
+
 /* ---------- 按钮（描边风，主按钮用主题色） ---------- */
 .btn {
   font-size: var(--t-caption);
@@ -716,3 +720,69 @@ a.row:hover { background: var(--bg-soft); }
 .os-ack-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
 .os-ack-name { font-weight: 500; width: 110px; flex: none; }
 .os-ack-desc { color: var(--ink-2); }
+
+/* 录题验收区顶部工具行 */
+.editor-toolbar { display: flex; justify-content: flex-end; margin-bottom: var(--s2); }
+
+/* ---------- 快捷批改页 ---------- */
+.wrap-wide { max-width: 1200px; }
+
+/* 答案速查：紧凑多列卡片，chip 固定列宽 grid（短答案整齐对齐，长答案跨满整行） */
+.qa-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--s3); }
+.qa-sec { border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s3); }
+.qa-sec-name { font-weight: 600; font-size: var(--t-caption); margin-bottom: var(--s2); }
+.qa-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--s1); }
+.qa-chip {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: 3px var(--s2);
+  background: var(--surface);
+}
+.qa-chip.long { grid-column: 1 / -1; }
+.qa-chip b { font-family: var(--font-mono); font-size: var(--t-micro); color: var(--accent); font-weight: 600; flex: none; }
+.qa-ans { font-size: var(--t-strong); font-weight: 600; color: var(--ink); }
+
+/* 标错矩阵 */
+.qg-scroll { overflow-x: auto; }
+.qg-table { border-collapse: collapse; }
+.qg-table th {
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  color: var(--ink-3);
+  font-weight: 500;
+  padding: 0 1px var(--s1);
+  text-align: center;
+}
+.qg-table td { padding: 1px; text-align: center; vertical-align: middle; }
+.qg-seclab { color: var(--ink-2); border-bottom: 1px solid var(--line); white-space: nowrap; }
+/* 学生列 sticky 左，分数/保存列 sticky 右（加背景防穿透） */
+.qg-stucol {
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  text-align: left;
+  padding-right: var(--s3);
+  white-space: nowrap;
+}
+.qg-stu { display: flex; align-items: center; gap: var(--s2); }
+.qg-name { font-weight: 500; font-size: var(--t-body); }
+.qg-right { position: sticky; background: var(--surface); }
+.qg-scorecol { right: 64px; border-left: 1px solid var(--line); }
+.qg-savecol { right: 0; width: 64px; }
+.qg-cell {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  cursor: pointer;
+  padding: 0;
+  transition: all var(--dur) var(--ease);
+}
+.qg-cell:hover { border-color: var(--danger); }
+.qg-cell.on { background: var(--danger); border-color: var(--danger); }
+.qg-score { font-family: var(--font-mono); font-size: var(--t-caption); white-space: nowrap; }
+.qg-dirty .qg-name { color: var(--accent); }

@@ -43,8 +43,23 @@ function groupRows(rows) {
 
 // 验收区：一个板块一张卡片，卡片头可编辑板块名 + 整组统一分值
 function SectionsEditor({ rows, setRows, sections }) {
+  const { message } = AntApp.useApp();
   const sectionOptions = sections.map((s) => ({ value: s }));
   const groups = groupRows(rows);
+
+  // 统一补「解析：」前缀：不以「解析」开头的非空解析补前缀；已有/空的不动
+  function fillExplanationPrefix() {
+    let count = 0;
+    const next = rows.map((r) => {
+      const text = (r.explanation || "").trim();
+      if (!text || text.startsWith("解析")) return r;
+      count += 1;
+      return { ...r, explanation: `解析：${text}` };
+    });
+    if (count === 0) return message.success("解析前缀齐全，无需补齐");
+    setRows(next);
+    message.success(`已为 ${count} 题补上「解析：」前缀`);
+  }
 
   function patchRow(idx, field, value) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
@@ -67,6 +82,11 @@ function SectionsEditor({ rows, setRows, sections }) {
 
   return (
     <div>
+      <div className="editor-toolbar">
+        <button type="button" className="btn" onClick={fillExplanationPrefix}>
+          统一补「解析：」前缀
+        </button>
+      </div>
       {groups.map((g) => {
         const first = rows[g.indices[0]];
         // key 用首行索引而非板块名：板块名一改就 remount 会导致输入框每敲一个字丢焦点

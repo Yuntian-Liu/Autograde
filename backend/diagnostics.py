@@ -26,7 +26,7 @@ from database import DATABASE_PATH
 from llm_events_store import get_prices
 from models import Assignment, Class, LlmCallEvent, Phrase, Student, Submission
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 _STARTED_AT = datetime.now(timezone.utc)
 
 MAX_LOG_ENTRIES = 500
