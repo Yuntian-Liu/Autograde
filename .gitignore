@@ -13,3 +13,9 @@ dist/
 
 # 系统
 .DS_Store
+
+# 会话导出（含私人对话，不入库）
+kimi-session-*/
+# 本地文档（私人/交接用，不进公开仓库，对齐 Stellaris 惯例）
+DEVELOPMENT.md
+AGENTS.md
