@@ -1,0 +1,68 @@
+/* ==========================================================================
+   Autograde 设计令牌 · v2（学术沉稳 × 理性冷调 · 浅亮蓝绿）
+   单一事实来源：所有组件只允许消费本文件变量，禁止硬编码色值/字号/阴影。
+   v2 变更：藏青 → 浅亮蓝绿；剔除灰色提示文本与英文微标签风格；白底 hairline。
+   验收通过后，本表将 1:1 映射为 Ant Design 5 主题 token。
+   ========================================================================== */
+
+:root {
+  /* ---- 色彩 · 冷调中性（白底，hairline 分层） ---- */
+  --bg:            #ffffff;  /* 页面底：纯白 */
+  --bg-soft:       #f7fafa;  /* 极浅蓝绿灰：大面积分区备用，慎用 */
+  --surface:       #ffffff;
+  --ink:           #16202b;  /* 主文字：蓝黑 */
+  --ink-2:         #51606f;  /* 次级文字 */
+  --ink-3:         #93a1af;  /* 辅助文字（仅用于占位/禁用，不写提示句） */
+  --line:          #e5ebee;  /* 细分隔线 */
+  --line-strong:   #d4dde3;
+
+  /* ---- 主题色 · 浅亮蓝绿（唯一强调色） ---- */
+  --accent:        #0d9aa7;
+  --accent-hover:  #0a7f8a;
+  --accent-bg:     #e6f5f6;  /* 选中态浅底 */
+  --accent-line:   #bde3e7;
+
+  /* ---- 语义色（降饱和） ---- */
+  --success:       #3d9a72;
+  --warning:       #a8842a;
+  --danger:        #c05a45;
+
+  /* ---- 字体 ---- */
+  --font-display:  "Noto Serif SC", "Source Serif 4", "Songti SC", serif;
+  --font-body:     "Inter", "PingFang SC", -apple-system, "Helvetica Neue", sans-serif;
+  --font-mono:     "JetBrains Mono", "SF Mono", Menlo, monospace;
+
+  /* ---- 字号阶梯 ---- */
+  --t-micro:   11px;   /* 仅用于徽章/状态点旁注，不写句子 */
+  --t-caption: 12px;
+  --t-body:    13px;
+  --t-strong:  14px;
+  --t-title:   17px;   /* 面板标题 */
+  --t-display: 22px;   /* 页面主标题（衬线） */
+  --t-hero:    44px;   /* 大数字（总分等，mono） */
+
+  /* ---- 圆角 ---- */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+
+  /* ---- 阴影（仅浮层） ---- */
+  --shadow-1: 0 1px 2px rgba(22, 32, 43, .05);
+  --shadow-2: 0 6px 20px rgba(22, 32, 43, .09);
+
+  /* ---- 间距 · 8px 网格 ---- */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px; --s8: 48px;
+
+  /* ---- 动效 ---- */
+  --ease: cubic-bezier(.2, .6, .2, 1);
+  --dur:  160ms;
+}
+
+/* 硬性规则（写组件前默读）：
+   1. 无渐变、无玻璃拟态、无 emoji 图标（仅极简 SVG）
+   2. 层级用 hairline 分隔线表达，阴影仅用于浮层
+   3. 主题色只出现在：主按钮、选中态、关键数据
+   4. 不写解释性灰色提示句；标签用中文，直接给名词
+   5. prefers-reduced-motion 下关闭所有过渡
+*/

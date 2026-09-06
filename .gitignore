@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+dist/
+
+# 环境与数据
+.env
+*.db
+
+# 系统
+.DS_Store

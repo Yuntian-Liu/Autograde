@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Autograde · 工作台</title>
+<link rel="stylesheet" href="tokens.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Serif+SC:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font-body); font-size: var(--t-body);
+    color: var(--ink); background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  header {
+    height: 54px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; padding: 0 var(--s8);
+  }
+  .wordmark { font-family: var(--font-display); font-weight: 600; font-size: 17px; }
+  .wordmark em { font-style: normal; color: var(--accent); }
+  .date { margin-left: auto; font-family: var(--font-mono); font-size: var(--t-caption); color: var(--ink-2); }
+
+  .wrap { max-width: 880px; margin: 0 auto; padding: var(--s8) var(--s8) 64px; }
+
+  h1 { font-family: var(--font-display); font-weight: 600; font-size: 28px; }
+
+  section { margin-top: var(--s8); }
+  .sec-title { font-size: var(--t-title); font-weight: 600; margin-bottom: var(--s2); }
+
+  .row {
+    display: flex; align-items: center; gap: var(--s4);
+    padding: var(--s4) var(--s2);
+    border-bottom: 1px solid var(--line);
+    text-decoration: none; color: inherit;
+    transition: background var(--dur) var(--ease);
+  }
+  .row:first-of-type { border-top: 1px solid var(--line); }
+  .row:hover { background: var(--bg-soft); }
+
+  .todo-main { flex: 1; }
+  .todo-main b { font-weight: 600; }
+  .todo-when { font-family: var(--font-mono); font-size: var(--t-caption); color: var(--warning); }
+
+  .class-name { font-family: var(--font-display); font-size: var(--t-title); font-weight: 600; }
+  .class-name span { color: var(--ink-2); font-size: var(--t-body); font-weight: 500; margin-left: var(--s2); }
+  .class-meta { color: var(--ink-2); font-size: var(--t-caption); margin-top: 2px; }
+  .class-nums { margin-left: auto; display: flex; gap: var(--s8); text-align: right; }
+  .num { font-family: var(--font-mono); font-size: 20px; font-weight: 500; }
+  .num.accent { color: var(--accent); }
+  .num-label { font-size: var(--t-micro); color: var(--ink-3); margin-top: 2px; }
+
+  .batch-name { flex: 1; font-weight: 500; }
+  .batch-name span { color: var(--ink-2); font-weight: 400; margin-left: var(--s2); font-size: var(--t-caption); }
+  .mono { font-family: var(--font-mono); font-size: var(--t-caption); color: var(--ink-2); }
+  .status-doing { color: var(--accent); font-size: var(--t-caption); }
+  .status-done { color: var(--success); font-size: var(--t-caption); }
+
+  .ribbon {
+    position: fixed; right: var(--s4); bottom: var(--s4);
+    font-family: var(--font-mono); font-size: var(--t-micro); color: var(--ink-3);
+    background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+    padding: 4px 10px; box-shadow: var(--shadow-1);
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="wordmark">Auto<em>grade</em></span>
+  <span class="date">2026-09-07 周一</span>
+</header>
+
+<div class="wrap">
+  <h1>工作台</h1>
+
+  <section>
+    <div class="sec-title">待办</div>
+    <a class="row" href="grading.html">
+      <span class="todo-main"><b>厚少 WW5A · U7Day1</b>　还有 5 人未批改</span>
+      <span class="todo-when">距上课 2 天</span>
+    </a>
+    <a class="row" href="grading.html">
+      <span class="todo-main"><b>厚中 NG3B · U8L1</b>　题库待录入</span>
+      <span class="todo-when">距上课 3 天</span>
+    </a>
+  </section>
+
+  <section>
+    <div class="sec-title">班级</div>
+    <a class="row" href="grading.html">
+      <span>
+        <div class="class-name">WW5A<span>厚少</span></div>
+        <div class="class-meta">Wonderful World 五级上册（U1-6）· 周六 14:00 · 24 名学生</div>
+      </span>
+      <span class="class-nums">
+        <span><div class="num accent">5</div><div class="num-label">待批改</div></span>
+        <span><div class="num">91.20</div><div class="num-label">上批平均分</div></span>
+      </span>
+    </a>
+    <a class="row" href="grading.html">
+      <span>
+        <div class="class-name">NG3B<span>厚中</span></div>
+        <div class="class-meta">NG 三级下册（U7-12）· 周四 18:30 · 18 名学生</div>
+      </span>
+      <span class="class-nums">
+        <span><div class="num">0</div><div class="num-label">待批改</div></span>
+        <span><div class="num">88.60</div><div class="num-label">上批平均分</div></span>
+      </span>
+    </a>
+  </section>
+
+  <section>
+    <div class="sec-title">最近批次</div>
+    <a class="row" href="grading.html">
+      <span class="batch-name">U7Day1 伴学手册<span>厚少 WW5A · 第 7 次课</span></span>
+      <span class="mono">18 / 24</span>
+      <span class="status-doing">批改中</span>
+    </a>
+    <a class="row" href="grading.html">
+      <span class="batch-name">U7L2 练习<span>厚中 NG3B · 第 8 次课</span></span>
+      <span class="mono">18 / 18</span>
+      <span class="status-done">已完成</span>
+    </a>
+    <a class="row" href="grading.html">
+      <span class="batch-name">U6Day2 伴学手册<span>厚少 WW5A · 第 6 次课</span></span>
+      <span class="mono">24 / 24</span>
+      <span class="status-done">已完成</span>
+    </a>
+  </section>
+</div>
+
+<div class="ribbon">概念稿 v2 · 一级 · 工作台</div>
+
+</body>
+</html>
