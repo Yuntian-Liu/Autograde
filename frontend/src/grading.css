@@ -153,3 +153,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* 保存行：提交状态 + 保存批改 */
+.save-row {
+  padding: var(--s3) var(--s6);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+.save-row .lab { font-weight: 600; font-size: var(--t-strong); }

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from database import init_db
-from routers import assignments, classes, health
+from routers import ai, assignments, classes, health, questions, students
 
 load_dotenv()
 
@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Autograde", version="0.0.1", lifespan=lifespan)
+app = FastAPI(title="Autograde", version="0.1.0", lifespan=lifespan)
 
 # Vite 开发端口
 app.add_middleware(
@@ -51,4 +51,7 @@ async def access_token_guard(request: Request, call_next):
 
 app.include_router(health.router)
 app.include_router(classes.router)
+app.include_router(students.router)
 app.include_router(assignments.router)
+app.include_router(questions.router)
+app.include_router(ai.router)

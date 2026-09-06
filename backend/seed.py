@@ -14,6 +14,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 
 from database import DATABASE_PATH, SessionLocal, init_db
+from feedback import sync_unit_label
 from models import (
     Assignment,
     Class,
@@ -75,15 +76,19 @@ async def seed() -> None:
         db.add_all([*ww.values(), *ng.values()])
         await db.flush()
 
-        # ---------- WW5A 上一批：U6Day2（已完成，供「上批平均分 / 近 5 次平均」） ----------
+        # ---------- WW5A 上一批：U6L2（已完成，供「上批平均分 / 近 5 次平均」） ----------
+        # 厚少用 L 课型、无预习；unit_label 由结构化字段自动生成
         u6 = Assignment(
             class_id=ww5a.id,
-            unit_label="U6Day2",
+            unit_no=6,
+            lesson_type="L",
+            unit_lesson_no=2,
             lesson_no=6,
             class_time=next_class_time(ww5a.schedule, weeks_ahead=-1),
-            content="伴学手册",
+            content="练习",
             status="已完成",
         )
+        sync_unit_label(u6)
         db.add(u6)
         await db.flush()
 
@@ -137,15 +142,18 @@ async def seed() -> None:
             ]
         )
 
-        # ---------- WW5A 当前批：U7Day1 伴学手册（第 7 次课，4 个 Task 共 20 题） ----------
+        # ---------- WW5A 当前批：U7L1 练习（第 7 次课，4 个 Task 共 20 题） ----------
         u7 = Assignment(
             class_id=ww5a.id,
-            unit_label="U7Day1",
+            unit_no=7,
+            lesson_type="L",
+            unit_lesson_no=1,
             lesson_no=7,
             class_time=next_class_time(ww5a.schedule),
-            content="伴学手册",
+            content="练习",
             status="批改中",
         )
+        sync_unit_label(u7)
         db.add(u7)
         await db.flush()
 
@@ -227,30 +235,39 @@ async def seed() -> None:
                 student_id=ww["Amy"].id,
                 assignment_id=u7.id,
                 final_text=(
-                    "Amy U7Day1 伴学手册反馈\n"
+                    "Amy U7L1 练习反馈\n"
                     "下午好[太阳]这是孩子本次的练习反馈，辛苦查收[玫瑰]\n"
                     "收到宝贝的作业喽~咱们这次作业完成非常棒！全部正确，继续保持！"
                 ),
             )
         )
 
-        # ---------- NG3B ----------
+        # ---------- NG3B（厚中用 Day 课型；当前批带预习：U8Day1&U7B Preview） ----------
         ng_u7 = Assignment(
             class_id=ng3b.id,
-            unit_label="U7L2",
+            unit_no=7,
+            lesson_type="Day",
+            unit_lesson_no=1,
             lesson_no=7,
             class_time=next_class_time(ng3b.schedule, weeks_ahead=-1),
-            content="练习",
+            content="伴学手册",
             status="已完成",
         )
         ng_u8 = Assignment(
             class_id=ng3b.id,
-            unit_label="U8L1",
+            unit_no=8,
+            lesson_type="Day",
+            unit_lesson_no=1,
+            has_preview=True,
+            preview_unit_no=7,
+            preview_half="B",
             lesson_no=8,
             class_time=next_class_time(ng3b.schedule),
-            content="",
+            content="伴学手册",
             status="未开始",
         )
+        sync_unit_label(ng_u7)
+        sync_unit_label(ng_u8)
         db.add_all([ng_u7, ng_u8])
         await db.flush()
 
@@ -288,7 +305,7 @@ async def seed() -> None:
         print(
             f"seed 完成：{DATABASE_PATH}\n"
             f"  班级 2 个（WW5A 8 名学生 / NG3B 6 名学生）\n"
-            f"  批次 4 个（U7Day1 含 {len(t1) + len(t2) + len(t3) + len(t4)} 题，三种 mode）\n"
+            f"  批次 4 个（WW5A 当前批 U7L1 含 {len(t1) + len(t2) + len(t3) + len(t4)} 题，三种 mode）\n"
             f"  提交状态四态示例齐全：已批改 / 缺作业 / 未交 / 待批改"
         )
 

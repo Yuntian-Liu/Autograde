@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiGet } from "../api";
 import AppHeader from "../components/AppHeader";
+import AssignmentForm from "../components/AssignmentForm";
+import { AiEntryModal, ManualEntryModal } from "../components/QuestionEntry";
 import { STATUS_META, deadlineText, fmtScore, modeLabel, seriesLabel } from "../meta";
 
 function StatusDot({ status }) {
@@ -14,8 +16,11 @@ export default function AssignmentDetail() {
   const [assignment, setAssignment] = useState(null);
   const [students, setStudents] = useState([]);
   const [error, setError] = useState(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     Promise.all([apiGet(`/assignments/${id}`), apiGet(`/assignments/${id}/students`)])
       .then(([a, s]) => {
         setAssignment(a);
@@ -24,10 +29,15 @@ export default function AssignmentDetail() {
       .catch((e) => setError(e.message));
   }, [id]);
 
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
   if (error) return <div className="page-error">加载失败：{error}</div>;
   if (!assignment) return null;
 
   const c = assignment.class;
+  const sectionNames = assignment.sections.map((s) => s.section);
 
   return (
     <>
@@ -44,10 +54,19 @@ export default function AssignmentDetail() {
           {assignment.class_time ? ` · ${assignment.class_time}` : ""} · {assignment.status}
           {deadlineText(assignment.class_time) ? ` · ${deadlineText(assignment.class_time)}` : ""}
         </div>
-        <div style={{ marginTop: "var(--s4)" }}>
+        <div className="btn-row" style={{ marginTop: "var(--s4)" }}>
           <Link className="btn primary" to={`/grading/${assignment.id}`}>
             进入批改
           </Link>
+          <button className="btn" onClick={() => setAiOpen(true)}>
+            AI 录题
+          </button>
+          <button className="btn" onClick={() => setManualOpen(true)}>
+            录题
+          </button>
+          <button className="btn" onClick={() => setEditOpen(true)}>
+            编辑批次
+          </button>
         </div>
 
         <section className="block">
@@ -100,6 +119,30 @@ export default function AssignmentDetail() {
           {assignment.sections.length === 0 && <div className="row">题库待录入</div>}
         </section>
       </div>
+
+      {c && (
+        <AssignmentForm
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          classInfo={c}
+          assignment={assignment}
+          onSaved={reload}
+        />
+      )}
+      <ManualEntryModal
+        open={manualOpen}
+        onClose={() => setManualOpen(false)}
+        assignmentId={id}
+        sections={sectionNames}
+        onSaved={reload}
+      />
+      <AiEntryModal
+        open={aiOpen}
+        onClose={() => setAiOpen(false)}
+        assignmentId={id}
+        sections={sectionNames}
+        onSaved={reload}
+      />
     </>
   );
 }

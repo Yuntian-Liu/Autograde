@@ -1,5 +1,6 @@
 """只读接口的序列化辅助。"""
 
+from feedback import feedback_type, unit_progress
 from models import Assignment, Class, Question, Student, Submission
 
 GRADED_STATUSES = ("已批改", "缺作业")  # 有分数的状态
@@ -13,6 +14,7 @@ def class_brief(c: Class) -> dict:
         "level": c.level,
         "term": c.term,
         "schedule": c.schedule,
+        "feedback_type": feedback_type(c.series),
     }
 
 
@@ -21,6 +23,13 @@ def assignment_brief(a: Assignment) -> dict:
         "id": a.id,
         "class_id": a.class_id,
         "unit_label": a.unit_label,
+        "unit_no": a.unit_no,
+        "lesson_type": a.lesson_type,
+        "unit_lesson_no": a.unit_lesson_no,
+        "has_preview": a.has_preview,
+        "preview_unit_no": a.preview_unit_no,
+        "preview_half": a.preview_half,
+        "unit_progress": unit_progress(a),
         "lesson_no": a.lesson_no,
         "class_time": a.class_time,
         "content": a.content,

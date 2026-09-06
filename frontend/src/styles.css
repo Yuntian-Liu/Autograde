@@ -23,7 +23,7 @@ body {
 .wordmark {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: var(--t-title);
+  font-size: var(--t-display);
   color: var(--ink);
   text-decoration: none;
 }
@@ -121,3 +121,40 @@ a.row:hover { background: var(--bg-soft); }
 .page-error { padding: var(--s8); color: var(--danger); font-size: var(--t-body); }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* ---------- 按钮组与表单（modal 内） ---------- */
+.btn-row { display: flex; gap: var(--s2); }
+.sec-title-row { display: flex; align-items: center; justify-content: space-between; }
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: var(--s3);
+  align-items: center;
+  padding: var(--s3) 0;
+}
+.form-grid .flab { font-size: var(--t-caption); color: var(--ink-2); }
+
+/* ---------- 录题验收表格 ---------- */
+.qrow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  margin-bottom: var(--s3);
+}
+.qrow-head { display: flex; gap: var(--s2); align-items: center; }
+.qrow-head .grow { flex: 1; }
+
+/* ---------- 统一编辑窗 ---------- */
+.qinfo {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--s3);
+  margin-bottom: var(--s3);
+}
+.qinfo-line { font-size: var(--t-caption); color: var(--ink-2); }
+.qinfo-line + .qinfo-line { margin-top: var(--s1); }
+.frozen-text { font-size: var(--t-body); line-height: 1.85; }

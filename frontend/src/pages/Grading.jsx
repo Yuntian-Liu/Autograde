@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { App as AntApp } from "antd";
-import { apiGet } from "../api";
+import { App as AntApp, Select } from "antd";
+import { apiGet, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
+import QuestionEditor from "../components/QuestionEditor";
 import { STATUS_META, deadlineText, fmtScore, modeLabel, seriesLabel } from "../meta";
 import { RATINGS, ratingFor } from "../rating";
 import "../grading.css";
 
 const GRADED_STATUSES = new Set(["已批改", "缺作业"]);
+const STATUS_OPTIONS = ["已批改", "缺作业", "未交", "待批改"].map((s) => ({ value: s, label: s }));
 
 export default function Grading() {
   const { assignmentId } = useParams();
@@ -17,9 +19,13 @@ export default function Grading() {
   const [students, setStudents] = useState([]);
   const [error, setError] = useState(null);
   const [currentId, setCurrentId] = useState(null);
-  // 勾选状态只存前端内存（studentId -> questionId[]），初始值取已入库的错题记录
+  // 勾选与定稿内容只存前端内存，「保存批改」时才落库；初始值取已入库的错题记录
   const [checkedMap, setCheckedMap] = useState({});
+  const [notesMap, setNotesMap] = useState({});
   const [ratingOverrides, setRatingOverrides] = useState({});
+  const [statusDrafts, setStatusDrafts] = useState({});
+  const [editingQid, setEditingQid] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -29,9 +35,14 @@ export default function Grading() {
       .then(([a, s]) => {
         setAssignment(a);
         setStudents(s);
-        const initial = {};
-        for (const stu of s) initial[stu.id] = [...stu.error_question_ids];
-        setCheckedMap(initial);
+        const checked = {};
+        const notes = {};
+        for (const stu of s) {
+          checked[stu.id] = [...stu.error_question_ids];
+          notes[stu.id] = { ...stu.error_notes };
+        }
+        setCheckedMap(checked);
+        setNotesMap(notes);
         const firstTodo = s.find((stu) => !stu.submission || stu.submission.status === "待批改");
         setCurrentId((firstTodo || s[0] || {}).id ?? null);
       })
@@ -52,16 +63,25 @@ export default function Grading() {
   const current = students.find((s) => s.id === currentId) || null;
   const checkedIds = current ? checkedMap[current.id] || [] : [];
   const checkedSet = useMemo(() => new Set(checkedIds), [checkedIds]);
+  const currentNotes = current ? notesMap[current.id] || {} : {};
 
   const checkedWeight = checkedIds.reduce(
     (sum, qid) => sum + (questionById[qid]?.score_weight || 0),
     0
   );
-  // 总分 100 按权重归一化，扣掉勾选错题权重，保留两位小数
+  // 总分 100 按权重归一化，扣掉勾选错题权重，保留两位小数（与后端复算同规则）
   const score =
     totalWeight > 0 ? ((100 * (totalWeight - checkedWeight)) / totalWeight).toFixed(2) : "100.00";
   const autoRating = ratingFor(Number(score));
   const rating = (current && ratingOverrides[current.id]) || autoRating;
+
+  // 本次保存要写入的提交状态：默认沿用已入库状态，未批过时默认「已批改」
+  const statusDraft = current
+    ? statusDrafts[current.id] ??
+      (current.submission && current.submission.status !== "待批改"
+        ? current.submission.status
+        : "已批改")
+    : "已批改";
 
   const gradedCount = students.filter(
     (s) => s.submission && GRADED_STATUSES.has(s.submission.status)
@@ -73,9 +93,12 @@ export default function Grading() {
 
   function toggleChip(qid) {
     if (!current) return;
-    setCheckedFor(current.id, (ids) =>
-      ids.includes(qid) ? ids.filter((x) => x !== qid) : [...ids, qid]
-    );
+    // 已勾选的芯片点击 = 弹出统一编辑窗；未勾选点击 = 勾上
+    if (checkedSet.has(qid)) {
+      setEditingQid(qid);
+      return;
+    }
+    setCheckedFor(current.id, (ids) => [...ids, qid]);
     // 勾选变化后回到自动预选，清除手动覆盖
     setRatingOverrides((prev) => {
       const next = { ...prev };
@@ -98,7 +121,29 @@ export default function Grading() {
     setRatingOverrides((prev) => ({ ...prev, [current.id]: r }));
   }
 
-  // 只读预览：按板块分组拼装，verbatim 直出冻结解析，其余留待填充位
+  function saveNote(qid, note) {
+    if (!current) return;
+    setNotesMap((prev) => ({
+      ...prev,
+      [current.id]: { ...(prev[current.id] || {}), [qid]: note },
+    }));
+    setEditingQid(null);
+  }
+
+  function uncheckFromEditor(qid) {
+    if (!current) return;
+    setCheckedFor(current.id, (ids) => ids.filter((x) => x !== qid));
+    setEditingQid(null);
+  }
+
+  // 反馈标题规则由后端定义（feedback.py），此处按返回字段拼装：
+  // 厚少 {学生} U{n}L{m} 练习反馈；厚中 {学生} U{n}Day{m}[&U{n}B Preview] 伴学手册反馈
+  function feedbackTitle() {
+    if (!current || !assignment) return "";
+    return `${current.name} ${assignment.unit_progress} ${assignment.class?.feedback_type || "反馈"}`;
+  }
+
+  // 只读预览：按板块分组拼装，verbatim 直出冻结解析，manual/ai_expand 用已定稿 note
   const previewBlocks = useMemo(() => {
     if (!assignment || !current) return [];
     const blocks = [];
@@ -107,22 +152,26 @@ export default function Grading() {
       if (picked.length === 0) continue;
       blocks.push({
         section: sec.section,
-        items: picked.map((q) => ({
-          id: q.id,
-          text:
-            q.mode === "verbatim" && q.explanation
-              ? `${q.seq}. ${q.explanation}`
-              : null,
-          blank: `${sec.section} · 第 ${q.seq} 题 · 待填充`,
-        })),
+        items: picked.map((q) => {
+          const note = currentNotes[q.id];
+          const text =
+            q.mode === "verbatim"
+              ? q.explanation
+                ? `${q.seq}. ${q.explanation}`
+                : null
+              : note
+                ? `${q.seq}. ${note}`
+                : null;
+          return { id: q.id, text, blank: `${sec.section} · 第 ${q.seq} 题 · 待填充` };
+        }),
       });
     }
     return blocks;
-  }, [assignment, current, checkedSet]);
+  }, [assignment, current, checkedSet, currentNotes]);
 
   function buildPlainText() {
     if (!current || !assignment) return "";
-    const lines = [`${current.name} ${assignment.unit_label} ${assignment.content}反馈`, ""];
+    const lines = [feedbackTitle(), ""];
     for (const block of previewBlocks) {
       lines.push(`【${block.section} 部分】`);
       for (const item of block.items) lines.push(item.text ?? item.blank);
@@ -140,10 +189,39 @@ export default function Grading() {
     }
   }
 
+  // 批改落库：分数/等级由后端按 score_weight 复算，成功后学生状态灯与分数改由后端数据驱动
+  async function saveGrading() {
+    if (!current || saving) return;
+    setSaving(true);
+    try {
+      await apiPut(`/assignments/${assignment.id}/students/${current.id}/grading`, {
+        status: statusDraft,
+        checked_question_ids: checkedIds,
+        rating_override: ratingOverrides[current.id] || "",
+        notes: currentNotes,
+        final_text: buildPlainText(),
+      });
+      const fresh = await apiGet(`/assignments/${assignmentId}/students`);
+      setStudents(fresh);
+      const me = fresh.find((s) => s.id === current.id);
+      if (me) {
+        setCheckedMap((prev) => ({ ...prev, [me.id]: [...me.error_question_ids] }));
+        setNotesMap((prev) => ({ ...prev, [me.id]: { ...me.error_notes } }));
+        setStatusDrafts((prev) => ({ ...prev, [me.id]: me.submission?.status || statusDraft }));
+      }
+      message.success(`已保存：${current.name}`);
+    } catch (e) {
+      message.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (error) return <div className="page-error">加载失败：{error}</div>;
   if (!assignment) return null;
 
   const c = assignment.class;
+  const editingQuestion = editingQid ? questionById[editingQid] : null;
 
   return (
     <>
@@ -268,6 +346,19 @@ export default function Grading() {
                 </span>
               </div>
 
+              <div className="save-row">
+                <span className="lab">提交状态</span>
+                <Select
+                  value={statusDraft}
+                  onChange={(v) => setStatusDrafts((prev) => ({ ...prev, [current.id]: v }))}
+                  options={STATUS_OPTIONS}
+                  style={{ width: 110 }}
+                />
+                <button className="btn primary" onClick={saveGrading} disabled={saving}>
+                  {saving ? "保存中…" : "保存批改"}
+                </button>
+              </div>
+
               {assignment.sections.map((sec) => {
                 const ids = sec.questions.map((q) => q.id);
                 const allOn = ids.length > 0 && ids.every((qid) => checkedSet.has(qid));
@@ -313,11 +404,7 @@ export default function Grading() {
             </div>
           </div>
           <div className="preview">
-            {current && (
-              <h3>
-                {current.name} {assignment.unit_label} {assignment.content}反馈
-              </h3>
-            )}
+            {current && <h3>{feedbackTitle()}</h3>}
             {previewBlocks.map((block) => (
               <div key={block.section}>
                 <h3>
@@ -337,6 +424,15 @@ export default function Grading() {
           </div>
         </section>
       </main>
+
+      <QuestionEditor
+        question={editingQuestion}
+        note={editingQid ? currentNotes[editingQid] : ""}
+        open={Boolean(editingQid)}
+        onClose={() => setEditingQid(null)}
+        onSave={(note) => saveNote(editingQid, note)}
+        onUncheck={() => uncheckFromEditor(editingQid)}
+      />
     </>
   );
 }

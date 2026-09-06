@@ -50,3 +50,11 @@ def _ensure_columns(conn) -> None:
             conn.execute(
                 text(f'ALTER TABLE {table.name} ADD COLUMN "{column.name}" {col_type}')
             )
+            # SQLite 补列不带默认值时旧行为 NULL，用模型默认值回填
+            default = getattr(column, "default", None)
+            if default is not None and default.is_scalar:
+                conn.execute(
+                    table.update()
+                    .where(column.is_(None))
+                    .values({column.name: default.arg})
+                )

@@ -1,12 +1,32 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
+from feedback import SERIES_DEFAULT_LESSON_TYPE, sync_unit_label, validate_unit_fields
 from models import Assignment, Class, Question, Student, Submission
 from serializers import GRADED_STATUSES, assignment_brief, class_brief, student_brief
 
 router = APIRouter(prefix="/api/classes", tags=["classes"])
+
+
+class StudentCreate(BaseModel):
+    name: str
+    note: str = ""
+
+
+class AssignmentCreate(BaseModel):
+    unit_no: int
+    lesson_type: str | None = None  # 缺省按班级系列预填：WW→L，NG→Day
+    unit_lesson_no: int = 1
+    has_preview: bool = False
+    preview_unit_no: int | None = None
+    preview_half: str = ""
+    lesson_no: int
+    class_time: str = ""
+    content: str = ""
+    status: str = "未开始"
 
 
 async def _class_stats(db: AsyncSession, class_id: int) -> dict:
@@ -118,3 +138,51 @@ async def get_class(class_id: int, db: AsyncSession = Depends(get_db)) -> dict:
         "students": [student_brief(s) for s in students],
         "assignments": assignment_items,
     }
+
+
+@router.post("/{class_id}/students", status_code=201)
+async def create_student(
+    class_id: int, body: StudentCreate, db: AsyncSession = Depends(get_db)
+) -> dict:
+    c = await db.get(Class, class_id)
+    if c is None:
+        raise HTTPException(status_code=404, detail="班级不存在")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="学生姓名不能为空")
+    s = Student(name=name, class_id=class_id, note=body.note)
+    db.add(s)
+    await db.commit()
+    return student_brief(s)
+
+
+@router.post("/{class_id}/assignments", status_code=201)
+async def create_assignment(
+    class_id: int, body: AssignmentCreate, db: AsyncSession = Depends(get_db)
+) -> dict:
+    c = await db.get(Class, class_id)
+    if c is None:
+        raise HTTPException(status_code=404, detail="班级不存在")
+    lesson_type = body.lesson_type or SERIES_DEFAULT_LESSON_TYPE.get(c.series, "L")
+    error = validate_unit_fields(
+        c, body.unit_no, lesson_type, body.has_preview, body.preview_unit_no, body.preview_half
+    )
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    a = Assignment(
+        class_id=class_id,
+        unit_no=body.unit_no,
+        lesson_type=lesson_type,
+        unit_lesson_no=body.unit_lesson_no,
+        has_preview=body.has_preview,
+        preview_unit_no=body.preview_unit_no,
+        preview_half=body.preview_half if body.has_preview else "",
+        lesson_no=body.lesson_no,
+        class_time=body.class_time,
+        content=body.content,
+        status=body.status,
+    )
+    sync_unit_label(a)
+    db.add(a)
+    await db.commit()
+    return assignment_brief(a)

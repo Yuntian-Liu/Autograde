@@ -6,7 +6,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -56,7 +56,14 @@ class Assignment(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"))
-    unit_label: Mapped[str] = mapped_column(String(32))  # 如 U7Day1
+    unit_label: Mapped[str] = mapped_column(String(32))  # 展示冗余，由结构化字段自动生成，如 U7Day1&U7B Preview
+    # 结构化单元进度（feedback.py 据此生成 unit_label 与反馈标题）
+    unit_no: Mapped[int] = mapped_column(Integer, default=1)  # 单元号，如 7；范围按班级 term 校验（A=U1-6，B=U7-12）
+    lesson_type: Mapped[str] = mapped_column(String(8), default="L")  # L / Day；默认由班级系列推导（WW→L，NG→Day）
+    unit_lesson_no: Mapped[int] = mapped_column(Integer, default=1)  # 单元内第几课，如 1
+    has_preview: Mapped[bool] = mapped_column(Boolean, default=False)  # 仅 lesson_type=Day 时有意义
+    preview_unit_no: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 预习单元号
+    preview_half: Mapped[str] = mapped_column(String(1), default="")  # 预习上下册：A / B
     lesson_no: Mapped[int] = mapped_column(Integer)  # 第几次课
     class_time: Mapped[str] = mapped_column(String(32), default="")  # 本次上课时间，如 2026-09-12 14:00
     content: Mapped[str] = mapped_column(String(128), default="")  # 作业内容，如「伴学手册」

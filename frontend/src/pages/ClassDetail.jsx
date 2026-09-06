@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiGet } from "../api";
 import AppHeader from "../components/AppHeader";
-import { classMeta, deadlineText, seriesLabel } from "../meta";
+import AssignmentForm from "../components/AssignmentForm";
+import { classMeta, seriesLabel } from "../meta";
 
 function batchStatus(a) {
   if (a.status === "已完成") return <span className="status-done">已完成</span>;
@@ -14,13 +15,20 @@ export default function ClassDetail() {
   const { id } = useParams();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     apiGet(`/classes/${id}`).then(setData).catch((e) => setError(e.message));
   }, [id]);
 
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
   if (error) return <div className="page-error">加载失败：{error}</div>;
   if (!data) return null;
+
+  const nextLessonNo = Math.max(0, ...data.assignments.map((a) => a.lesson_no)) + 1;
 
   return (
     <>
@@ -35,7 +43,12 @@ export default function ClassDetail() {
         </div>
 
         <section className="block">
-          <div className="sec-title">批次</div>
+          <div className="sec-title sec-title-row">
+            批次
+            <button className="btn" onClick={() => setFormOpen(true)}>
+              + 新建批次
+            </button>
+          </div>
           {data.assignments.map((a) => (
             <Link className="row" key={a.id} to={`/assignments/${a.id}`}>
               <span className="row-name">
@@ -65,6 +78,13 @@ export default function ClassDetail() {
           ))}
         </section>
       </div>
+
+      <AssignmentForm
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        classInfo={{ ...data, next_lesson_no: nextLessonNo }}
+        onSaved={reload}
+      />
     </>
   );
 }
