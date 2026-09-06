@@ -54,3 +54,36 @@ export function deadlineText(classTime) {
 export function fmtScore(score) {
   return score === null || score === undefined ? "—" : Number(score).toFixed(2);
 }
+
+// 分数颜色策略（仅视觉提示无语义）：≥75 绿 / [60,75) 橙 / <60 红
+export function scoreTone(score) {
+  if (score === null || score === undefined) return "";
+  const n = Number(score);
+  if (n >= 75) return "tone-good";
+  if (n >= 60) return "tone-mid";
+  return "tone-bad";
+}
+
+// 等级 F 红色展示（仅视觉）
+export function ratingTone(rating) {
+  return rating === "F" ? "tone-bad" : "";
+}
+
+// 问候语时段（对应 phrases 表「问候语·X」category，参照旧版 build_greeting 划分）
+export function greetingSlot(date = new Date()) {
+  const h = date.getHours();
+  if (h >= 5 && h < 11) return "早上";
+  if (h >= 11 && h < 13) return "中午";
+  if (h >= 13 && h < 18) return "下午";
+  return "晚上";
+}
+
+// Issue 话术占位符：{preview_unit_full}→U7B，{preview_unit}→U7；无预习批次回落本批次单元
+export function fillIssuePlaceholders(text, assignment, classInfo) {
+  const full =
+    assignment.has_preview && assignment.preview_unit_no
+      ? `U${assignment.preview_unit_no}${assignment.preview_half}`
+      : `U${assignment.unit_no}${classInfo?.term || ""}`;
+  const unit = full.replace(/[AB]$/, "");
+  return text.replaceAll("{preview_unit_full}", full).replaceAll("{preview_unit}", unit);
+}

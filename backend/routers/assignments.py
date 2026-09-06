@@ -1,8 +1,13 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from pydantic import BaseModel, Field
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from access import owned_assignment
+from auth.dependencies import get_current_user
+from auth.models import User
 from database import get_db
 from feedback import sync_unit_label, validate_unit_fields
 from models import (
@@ -10,6 +15,7 @@ from models import (
     Class,
     ErrorRecord,
     FeedbackSnapshot,
+    Phrase,
     Question,
     Student,
     Submission,
@@ -17,7 +23,9 @@ from models import (
 from rating import rating_for
 from serializers import (
     GRADED_STATUSES,
+    PROCESSED_STATUSES,
     assignment_brief,
+    assignment_status,
     class_brief,
     question_brief,
     student_brief,
@@ -30,25 +38,28 @@ SUBMISSION_STATUSES = ("待批改", "已批改", "缺作业", "未交")
 QUESTION_MODES = ("verbatim", "ai_expand", "manual")
 
 
-async def _assignment_progress(db: AsyncSession, assignment_id: int) -> dict:
+async def _assignment_progress(db: AsyncSession, a: Assignment) -> dict:
+    """批改进度：已处理 = 已批改/缺作业/未交；无提交记录的学生计入待批改。"""
     question_count = (
-        await db.execute(
-            select(func.count(Question.id)).where(Question.assignment_id == assignment_id)
-        )
+        await db.execute(select(func.count(Question.id)).where(Question.assignment_id == a.id))
+    ).scalar_one()
+    total_students = (
+        await db.execute(select(func.count(Student.id)).where(Student.class_id == a.class_id))
     ).scalar_one()
     rows = (
         await db.execute(
             select(Submission.status, func.count(Submission.id))
-            .where(Submission.assignment_id == assignment_id)
+            .where(Submission.assignment_id == a.id)
             .group_by(Submission.status)
         )
     ).all()
     by_status = {status: count for status, count in rows}
+    unrecorded = total_students - sum(by_status.values())
     return {
         "question_count": question_count,
-        "total_students": sum(by_status.values()),
-        "graded_count": sum(by_status.get(s, 0) for s in GRADED_STATUSES),
-        "pending_count": by_status.get("待批改", 0),
+        "total_students": total_students,
+        "graded_count": sum(by_status.get(s, 0) for s in PROCESSED_STATUSES),
+        "pending_count": by_status.get("待批改", 0) + unrecorded,
         "missing_count": by_status.get("缺作业", 0),
         "absent_count": by_status.get("未交", 0),
     }
@@ -58,10 +69,17 @@ async def _assignment_progress(db: AsyncSession, assignment_id: int) -> dict:
 async def list_assignments(
     limit: int = Query(default=8, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> list[dict]:
-    """最近批次：工作台「最近批次」板块数据源。"""
+    """最近批次：工作台「最近批次」板块数据源（仅本人班级）。"""
     assignments = (
-        await db.execute(select(Assignment).order_by(Assignment.created_at.desc()).limit(limit))
+        await db.execute(
+            select(Assignment)
+            .join(Class, Assignment.class_id == Class.id)
+            .where(Class.owner_uid == user.uid)
+            .order_by(Assignment.created_at.desc())
+            .limit(limit)
+        )
     ).scalars().all()
     result = []
     for a in assignments:
@@ -69,7 +87,8 @@ async def list_assignments(
         result.append(
             {
                 **assignment_brief(a),
-                **await _assignment_progress(db, a.id),
+                "status": await assignment_status(db, a),  # 动态推导，覆盖静态字段
+                **await _assignment_progress(db, a),
                 "class": class_brief(c) if c else None,
             }
         )
@@ -77,10 +96,12 @@ async def list_assignments(
 
 
 @router.get("/{assignment_id}")
-async def get_assignment(assignment_id: int, db: AsyncSession = Depends(get_db)) -> dict:
-    a = await db.get(Assignment, assignment_id)
-    if a is None:
-        raise HTTPException(status_code=404, detail="批次不存在")
+async def get_assignment(
+    assignment_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    a = await owned_assignment(db, assignment_id, user)
     c = await db.get(Class, a.class_id)
 
     questions = (
@@ -106,7 +127,8 @@ async def get_assignment(assignment_id: int, db: AsyncSession = Depends(get_db))
 
     return {
         **assignment_brief(a),
-        **await _assignment_progress(db, a.id),
+        "status": await assignment_status(db, a),  # 动态推导，覆盖静态字段
+        **await _assignment_progress(db, a),
         "class": class_brief(c) if c else None,
         "sections": sections,
         "total_weight": round(sum(q.score_weight for q in questions), 2),
@@ -115,12 +137,12 @@ async def get_assignment(assignment_id: int, db: AsyncSession = Depends(get_db))
 
 @router.get("/{assignment_id}/students")
 async def get_assignment_students(
-    assignment_id: int, db: AsyncSession = Depends(get_db)
+    assignment_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> list[dict]:
     """批改界面左栏数据源：每个学生带提交状态/分数/等级、已勾选错题、历史数据。"""
-    a = await db.get(Assignment, assignment_id)
-    if a is None:
-        raise HTTPException(status_code=404, detail="批次不存在")
+    a = await owned_assignment(db, assignment_id, user)
 
     students = (
         await db.execute(
@@ -209,11 +231,12 @@ class AssignmentPatch(BaseModel):
 
 @router.patch("/{assignment_id}")
 async def update_assignment(
-    assignment_id: int, body: AssignmentPatch, db: AsyncSession = Depends(get_db)
+    assignment_id: int,
+    body: AssignmentPatch,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> dict:
-    a = await db.get(Assignment, assignment_id)
-    if a is None:
-        raise HTTPException(status_code=404, detail="批次不存在")
+    a = await owned_assignment(db, assignment_id, user)
     c = await db.get(Class, a.class_id)
 
     for field in ("unit_no", "lesson_type", "unit_lesson_no", "has_preview",
@@ -236,10 +259,12 @@ async def update_assignment(
 
 
 @router.delete("/{assignment_id}", status_code=204)
-async def delete_assignment(assignment_id: int, db: AsyncSession = Depends(get_db)) -> None:
-    a = await db.get(Assignment, assignment_id)
-    if a is None:
-        raise HTTPException(status_code=404, detail="批次不存在")
+async def delete_assignment(
+    assignment_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    a = await owned_assignment(db, assignment_id, user)
     question_ids = select(Question.id).where(Question.assignment_id == assignment_id)
     await db.execute(delete(ErrorRecord).where(ErrorRecord.question_id.in_(question_ids)))
     await db.execute(delete(Submission).where(Submission.assignment_id == assignment_id))
@@ -251,11 +276,42 @@ async def delete_assignment(assignment_id: int, db: AsyncSession = Depends(get_d
     await db.commit()
 
 
+class SectionRenameIn(BaseModel):
+    from_: str = Field(alias="from")
+    to: str
+
+
+@router.patch("/{assignment_id}/sections")
+async def rename_section(
+    assignment_id: int,
+    body: SectionRenameIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """板块整组改名：板块名会进反馈输出标题，必须事务落库生效。"""
+    await owned_assignment(db, assignment_id, user)
+    src, dst = body.from_.strip(), body.to.strip()
+    if not src or not dst:
+        raise HTTPException(status_code=400, detail="板块名不能为空")
+    if src == dst:
+        raise HTTPException(status_code=400, detail="板块名未变化")
+    result = await db.execute(
+        update(Question)
+        .where(Question.assignment_id == assignment_id, Question.section == src)
+        .values(section=dst)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail=f"板块不存在：{src}")
+    await db.commit()
+    return {"from": src, "to": dst, "updated": result.rowcount}
+
+
 class QuestionIn(BaseModel):
     section: str
     seq: int | None = None  # 缺省时按板块内现有最大题号顺延
     mode: str = "verbatim"
     stem: str = ""
+    options: list[str] = []  # 选项数组，入库时转 JSON 字符串
     standard_answer: str = ""
     explanation: str = ""
     score_weight: float = 5.0
@@ -267,12 +323,13 @@ class QuestionsBatchIn(BaseModel):
 
 @router.post("/{assignment_id}/questions", status_code=201)
 async def create_questions(
-    assignment_id: int, body: QuestionsBatchIn, db: AsyncSession = Depends(get_db)
+    assignment_id: int,
+    body: QuestionsBatchIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> list[dict]:
     """批量录题：人工验收后冻结入库（AI 解析结果也走这里落定）。"""
-    a = await db.get(Assignment, assignment_id)
-    if a is None:
-        raise HTTPException(status_code=404, detail="批次不存在")
+    await owned_assignment(db, assignment_id, user)
     if not body.questions:
         raise HTTPException(status_code=400, detail="题目列表不能为空")
     for item in body.questions:
@@ -302,6 +359,7 @@ async def create_questions(
             mode=item.mode,
             section=section,
             stem=item.stem,
+            options=json.dumps(item.options, ensure_ascii=False),
             standard_answer=item.standard_answer,
             explanation=item.explanation,
             score_weight=item.score_weight,
@@ -318,17 +376,20 @@ class GradingIn(BaseModel):
     rating_override: str = ""
     notes: dict[int, str] = {}  # question_id → 该题定稿内容（manual 人工填充 / ai_expand 定稿）
     final_text: str = ""
+    used_phrase_ids: list[int] = []  # 本次用到的话术（问候/评级/Issue），驱动 use_count 越用越聪明
 
 
 @router.put("/{assignment_id}/students/{student_id}/grading")
 async def save_grading(
-    assignment_id: int, student_id: int, body: GradingIn, db: AsyncSession = Depends(get_db)
+    assignment_id: int,
+    student_id: int,
+    body: GradingIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> dict:
     """批改落库：score/rating 由后端按 score_weight 复算（不信前端），
     error_records 先删后插，feedback_snapshots 存档 final_text。"""
-    a = await db.get(Assignment, assignment_id)
-    if a is None:
-        raise HTTPException(status_code=404, detail="批次不存在")
+    a = await owned_assignment(db, assignment_id, user)
     s = await db.get(Student, student_id)
     if s is None:
         raise HTTPException(status_code=404, detail="学生不存在")
@@ -406,6 +467,14 @@ async def save_grading(
                 snap = FeedbackSnapshot(student_id=student_id, assignment_id=assignment_id)
                 db.add(snap)
             snap.final_text = body.final_text
+
+        # 话术使用计数：同一学生同一批次重复保存不重复计（先按本次全量回滚旧计数再累加新计数）
+        if body.used_phrase_ids:
+            await db.execute(
+                update(Phrase)
+                .where(Phrase.id.in_(body.used_phrase_ids))
+                .values(use_count=Phrase.use_count + 1)
+            )
 
         await db.commit()
     except Exception:

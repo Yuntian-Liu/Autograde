@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { apiGet } from "../api";
+import { App as AntApp, Input, Modal, Popconfirm } from "antd";
+import { apiDelete, apiGet, apiPatch } from "../api";
 import AppHeader from "../components/AppHeader";
 import AssignmentForm from "../components/AssignmentForm";
+import QuestionCard from "../components/QuestionCard";
+import QuestionEditModal from "../components/QuestionEdit";
 import { AiEntryModal, ManualEntryModal } from "../components/QuestionEntry";
-import { STATUS_META, deadlineText, fmtScore, modeLabel, seriesLabel } from "../meta";
+import PageSkeleton from "../components/PageSkeleton";
+import { STATUS_META, deadlineText, fmtScore, modeLabel, ratingTone, scoreTone, seriesLabel } from "../meta";
 
 function StatusDot({ status }) {
   const meta = STATUS_META[status] || STATUS_META["待批改"];
@@ -13,12 +17,19 @@ function StatusDot({ status }) {
 
 export default function AssignmentDetail() {
   const { id } = useParams();
+  const { message } = AntApp.useApp();
   const [assignment, setAssignment] = useState(null);
   const [students, setStudents] = useState([]);
   const [error, setError] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [editingQuestion, setEditingQuestion] = useState(null);
+  const [addSection, setAddSection] = useState(null); // 板块级「加题」预填板块名
+  const [activeSection, setActiveSection] = useState(null); // 题库目录选中板块
+  const [renameFrom, setRenameFrom] = useState(null); // 重命名板块：原名（null=关闭）
+  const [renameTo, setRenameTo] = useState("");
+  const [renaming, setRenaming] = useState(false);
 
   const reload = useCallback(() => {
     Promise.all([apiGet(`/assignments/${id}`), apiGet(`/assignments/${id}/students`)])
@@ -33,15 +44,61 @@ export default function AssignmentDetail() {
     reload();
   }, [reload]);
 
-  if (error) return <div className="page-error">加载失败：{error}</div>;
-  if (!assignment) return null;
+  async function removeQuestion(qid) {
+    try {
+      await apiDelete(`/questions/${qid}`);
+      message.success("题目已删除");
+      reload();
+    } catch (e) {
+      message.error(e.message);
+    }
+  }
+
+  async function renameSection() {
+    const to = renameTo.trim();
+    if (!to) return message.error("板块名不能为空");
+    setRenaming(true);
+    try {
+      await apiPatch(`/assignments/${id}/sections`, { from: renameFrom, to });
+      message.success(`已重命名为「${to}」`);
+      setActiveSection(to);
+      setRenameFrom(null);
+      reload();
+    } catch (e) {
+      message.error(e.message);
+    } finally {
+      setRenaming(false);
+    }
+  }
+
+  if (error)
+    return (
+      <div className="page-enter">
+        <div className="page-error">加载失败：{error}</div>
+      </div>
+    );
+  if (!assignment)
+    return (
+      <div className="page-enter">
+        <PageSkeleton />
+      </div>
+    );
 
   const c = assignment.class;
   const sectionNames = assignment.sections.map((s) => s.section);
+  // 目录选中项：改名/删板块后原名可能失效，回落第一个板块
+  const currentSec =
+    assignment.sections.find((s) => s.section === activeSection) || assignment.sections[0] || null;
 
   return (
-    <>
-      <AppHeader />
+    <div className="page-enter">
+      <AppHeader
+        crumbs={[
+          { label: "工作台", to: "/" },
+          ...(c ? [{ label: `${seriesLabel(c.series)} ${c.name}`, to: `/classes/${c.id}` }] : []),
+          { label: `${assignment.unit_label} ${assignment.content}`.trim() },
+        ]}
+      />
       <div className="wrap">
         <Link className="back" to={c ? `/classes/${c.id}` : "/"}>
           ← {c ? `${seriesLabel(c.series)} ${c.name}` : "返回"}
@@ -80,9 +137,15 @@ export default function AssignmentDetail() {
                 <span className="row-name">{s.name}</span>
                 {status === "缺作业" && <span className="tag-lack">缺项</span>}
                 {status === "未交" && <span className="tag-miss">未交</span>}
-                <span className="mono">
+                <span className={`mono ${sub && sub.score !== null ? scoreTone(sub.score) : ""}`}>
                   {sub && sub.score !== null ? fmtScore(sub.score) : "—"}
-                  {sub && sub.rating ? ` · ${sub.rating_override || sub.rating}` : ""}
+                  {sub && sub.rating ? (
+                    <span className={ratingTone(sub.rating_override || sub.rating)}>
+                      {` · ${sub.rating_override || sub.rating}`}
+                    </span>
+                  ) : (
+                    ""
+                  )}
                 </span>
               </div>
             );
@@ -91,32 +154,72 @@ export default function AssignmentDetail() {
         </section>
 
         <section className="block">
-          <div className="sec-title">题库预览</div>
-          {assignment.sections.map((sec) => (
-            <div key={sec.section} style={{ marginBottom: "var(--s4)" }}>
-              <div className="row" style={{ borderTop: "1px solid var(--line)" }}>
-                <span className="row-name">
-                  {sec.section}
-                  <span>
-                    {sec.question_count} 题 ·{" "}
-                    {[...new Set(sec.questions.map((q) => modeLabel(q.mode)))].join(" / ")}
-                  </span>
-                </span>
-                <span className="mono">权重 {sec.total_weight}</span>
-              </div>
-              {sec.questions.map((q) => (
-                <div className="row" key={q.id} style={{ padding: "var(--s3) var(--s2)" }}>
-                  <span className="mono">{q.seq}.</span>
+          <div className="sec-title">题库</div>
+          {currentSec ? (
+            <div className="qbank-layout">
+              {/* 左：板块目录（sticky） */}
+              <nav className="qbank-toc">
+                {assignment.sections.map((sec) => (
+                  <div
+                    key={sec.section}
+                    className={sec.section === currentSec.section ? "toc-item on" : "toc-item"}
+                    onClick={() => setActiveSection(sec.section)}
+                  >
+                    <span className="toc-name">{sec.section}</span>
+                    <span className="toc-count">{sec.question_count}</span>
+                  </div>
+                ))}
+              </nav>
+              {/* 右：当前板块题目 */}
+              <div className="sec-card qbank-detail">
+                <div className="qbank-sec-head">
                   <span className="row-name">
-                    {q.stem || q.standard_answer}
-                    {q.stem && <span>{q.standard_answer}</span>}
+                    {currentSec.section}
+                    <span>
+                      {currentSec.question_count} 题 ·{" "}
+                      {[...new Set(currentSec.questions.map((q) => modeLabel(q.mode)))].join(" / ")}
+                    </span>
                   </span>
-                  <span className="mono">{modeLabel(q.mode)}</span>
+                  <span className="mono">权重 {currentSec.total_weight}</span>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      setRenameFrom(currentSec.section);
+                      setRenameTo(currentSec.section);
+                    }}
+                  >
+                    重命名
+                  </button>
+                  <button className="btn" onClick={() => setAddSection(currentSec.section)}>
+                    + 加题
+                  </button>
                 </div>
-              ))}
+                {currentSec.questions.map((q) => (
+                  <QuestionCard
+                    key={q.id}
+                    question={q}
+                    actions={
+                      <>
+                        <button className="btn" onClick={() => setEditingQuestion(q)}>
+                          编辑
+                        </button>
+                        <Popconfirm
+                          title="删除该题？"
+                          okText="删除"
+                          cancelText="取消"
+                          onConfirm={() => removeQuestion(q.id)}
+                        >
+                          <button className="btn">删除</button>
+                        </Popconfirm>
+                      </>
+                    }
+                  />
+                ))}
+              </div>
             </div>
-          ))}
-          {assignment.sections.length === 0 && <div className="row">题库待录入</div>}
+          ) : (
+            <div className="row">题库待录入</div>
+          )}
         </section>
       </div>
 
@@ -136,6 +239,14 @@ export default function AssignmentDetail() {
         sections={sectionNames}
         onSaved={reload}
       />
+      <ManualEntryModal
+        open={addSection !== null}
+        onClose={() => setAddSection(null)}
+        assignmentId={id}
+        sections={sectionNames}
+        initialSection={addSection ?? undefined}
+        onSaved={reload}
+      />
       <AiEntryModal
         open={aiOpen}
         onClose={() => setAiOpen(false)}
@@ -143,6 +254,32 @@ export default function AssignmentDetail() {
         sections={sectionNames}
         onSaved={reload}
       />
-    </>
+      <QuestionEditModal
+        question={editingQuestion}
+        sections={sectionNames}
+        open={Boolean(editingQuestion)}
+        onClose={() => setEditingQuestion(null)}
+        onSaved={reload}
+      />
+      <Modal
+        centered
+        open={renameFrom !== null}
+        onCancel={() => setRenameFrom(null)}
+        onOk={renameSection}
+        confirmLoading={renaming}
+        title="重命名板块"
+        okText="保存"
+        cancelText="取消"
+        width={400}
+        destroyOnHidden
+      >
+        <Input
+          value={renameTo}
+          onChange={(e) => setRenameTo(e.target.value)}
+          onPressEnter={renameSection}
+          placeholder="板块名，如 Task 3 · 造句"
+        />
+      </Modal>
+    </div>
   );
 }

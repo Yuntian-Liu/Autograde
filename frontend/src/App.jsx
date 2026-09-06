@@ -1,16 +1,100 @@
-import { Route, Routes } from "react-router-dom";
+import { useEffect } from "react";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
 import ClassDetail from "./pages/ClassDetail";
 import AssignmentDetail from "./pages/AssignmentDetail";
 import Grading from "./pages/Grading";
+import Login from "./pages/Login";
+import Settings from "./pages/Settings";
+import Admin from "./pages/Admin";
+import PageSkeleton from "./components/PageSkeleton";
+import { UNAUTHORIZED_EVENT } from "./api";
+import { useAuth } from "./contexts/AuthContext";
+
+// 路由守卫：登录态初始化中显示骨架屏；未登录跳 /login（记住来源路径）
+// adminOnly：再校验 is_admin（防御深度：非管理员直输 URL 也拦）
+function RequireAuth({ children, adminOnly = false }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+  if (loading)
+    return (
+      <div className="page-enter">
+        <PageSkeleton />
+      </div>
+    );
+  if (!user) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  if (adminOnly && !user.is_admin)
+    return <Navigate to="/" replace />;
+  return children;
+}
 
 export default function App() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  // 401（token 失效/被顶掉）全局跳登录，记住来源页，登录成功原路返回
+  useEffect(() => {
+    const handler = () => {
+      if (location.pathname !== "/login") {
+        navigate("/login", { state: { from: location.pathname }, replace: true });
+      }
+    };
+    window.addEventListener(UNAUTHORIZED_EVENT, handler);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler);
+  }, [navigate, location.pathname]);
+
   return (
     <Routes>
-      <Route path="/" element={<Dashboard />} />
-      <Route path="/classes/:id" element={<ClassDetail />} />
-      <Route path="/assignments/:id" element={<AssignmentDetail />} />
-      <Route path="/grading/:assignmentId" element={<Grading />} />
+      <Route path="/login" element={<Login />} />
+      <Route
+        path="/"
+        element={
+          <RequireAuth>
+            <Dashboard />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/classes/:id"
+        element={
+          <RequireAuth>
+            <ClassDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/assignments/:id"
+        element={
+          <RequireAuth>
+            <AssignmentDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/grading/:assignmentId"
+        element={
+          <RequireAuth>
+            <Grading />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <RequireAuth>
+            <Settings />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <RequireAuth adminOnly>
+            <Admin />
+          </RequireAuth>
+        }
+      />
+      {/* 兜底：未知路径回工作台 */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

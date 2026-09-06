@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiGet } from "../api";
 import AppHeader from "../components/AppHeader";
-import { classMeta, deadlineText, seriesLabel } from "../meta";
+import ClassForm from "../components/ClassForm";
+import PageSkeleton from "../components/PageSkeleton";
+import { classMeta, deadlineText, scoreTone, seriesLabel } from "../meta";
 
 function batchStatus(a) {
   if (a.status === "已完成") return <span className="status-done">已完成</span>;
@@ -18,11 +20,12 @@ function todoText(a) {
 }
 
 export default function Dashboard() {
-  const [classes, setClasses] = useState([]);
+  const [classes, setClasses] = useState(null); // null = 加载中
   const [recent, setRecent] = useState([]);
   const [error, setError] = useState(null);
+  const [classFormOpen, setClassFormOpen] = useState(false);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     Promise.all([apiGet("/classes"), apiGet("/assignments?limit=6")])
       .then(([c, a]) => {
         setClasses(c);
@@ -31,12 +34,27 @@ export default function Dashboard() {
       .catch((e) => setError(e.message));
   }, []);
 
-  if (error) return <div className="page-error">加载失败：{error}</div>;
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  if (error)
+    return (
+      <div className="page-enter">
+        <div className="page-error">加载失败：{error}</div>
+      </div>
+    );
+  if (classes === null)
+    return (
+      <div className="page-enter">
+        <PageSkeleton />
+      </div>
+    );
 
   const todos = recent.filter((a) => a.status !== "已完成");
 
   return (
-    <>
+    <div className="page-enter">
       <AppHeader showDate />
       <div className="wrap">
         <h1>工作台</h1>
@@ -65,7 +83,20 @@ export default function Dashboard() {
         )}
 
         <section className="block">
-          <div className="sec-title">班级</div>
+          <div className="sec-title sec-title-row">
+            班级
+            <button className="btn" onClick={() => setClassFormOpen(true)}>
+              + 新建班级
+            </button>
+          </div>
+          {classes.length === 0 && (
+            <div className="empty-state">
+              <p>还没有班级</p>
+              <button className="btn primary" onClick={() => setClassFormOpen(true)}>
+                新建第一个班级
+              </button>
+            </div>
+          )}
           {classes.map((c) => (
             <Link className="row" key={c.id} to={`/classes/${c.id}`}>
               <span>
@@ -83,7 +114,7 @@ export default function Dashboard() {
                   <div className="num-label">待批改</div>
                 </span>
                 <span>
-                  <div className="num">
+                  <div className={`num ${scoreTone(c.last_avg_score)}`}>
                     {c.last_avg_score === null ? "—" : Number(c.last_avg_score).toFixed(2)}
                   </div>
                   <div className="num-label">上批平均分</div>
@@ -111,6 +142,12 @@ export default function Dashboard() {
           ))}
         </section>
       </div>
-    </>
+
+      <ClassForm
+        open={classFormOpen}
+        onClose={() => setClassFormOpen(false)}
+        onSaved={reload}
+      />
+    </div>
   );
 }

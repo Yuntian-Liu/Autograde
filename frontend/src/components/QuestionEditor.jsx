@@ -39,13 +39,14 @@ export default function QuestionEditor({ question, note, open, onClose, onSave, 
 
   return (
     <Modal
+      centered
       open={open}
       onCancel={onClose}
       title={`${question.section} · 第 ${question.seq} 题 · ${modeLabel(mode)}`}
       width={520}
       destroyOnHidden
       footer={
-        <>
+        <div className="modal-actions">
           <button className="btn" onClick={onUncheck}>
             取消勾选
           </button>
@@ -59,7 +60,7 @@ export default function QuestionEditor({ question, note, open, onClose, onSave, 
               关闭
             </button>
           )}
-        </>
+        </div>
       }
     >
       <div className="qinfo">

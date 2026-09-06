@@ -1,0 +1,11 @@
+node_modules
+backend/.venv
+backend/__pycache__
+backend/.env
+backend/*.db
+backend/autograde.db
+frontend/dist
+*.db
+.DS_Store
+kimi-session-*
+.git

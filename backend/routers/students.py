@@ -5,6 +5,9 @@ from pydantic import BaseModel
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from access import owned_student
+from auth.dependencies import get_current_user
+from auth.models import User
 from database import get_db
 from models import ErrorRecord, FeedbackSnapshot, Student, Submission
 from serializers import student_brief
@@ -19,11 +22,12 @@ class StudentPatch(BaseModel):
 
 @router.patch("/{student_id}")
 async def update_student(
-    student_id: int, body: StudentPatch, db: AsyncSession = Depends(get_db)
+    student_id: int,
+    body: StudentPatch,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> dict:
-    s = await db.get(Student, student_id)
-    if s is None:
-        raise HTTPException(status_code=404, detail="学生不存在")
+    s = await owned_student(db, student_id, user)
     if body.name is not None:
         name = body.name.strip()
         if not name:
@@ -36,10 +40,10 @@ async def update_student(
 
 
 @router.delete("/{student_id}", status_code=204)
-async def delete_student(student_id: int, db: AsyncSession = Depends(get_db)) -> None:
-    s = await db.get(Student, student_id)
-    if s is None:
-        raise HTTPException(status_code=404, detail="学生不存在")
+async def delete_student(
+    student_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> None:
+    s = await owned_student(db, student_id, user)
     # 连同该学生的批改数据一起清理，避免孤儿行
     await db.execute(delete(ErrorRecord).where(ErrorRecord.student_id == student_id))
     await db.execute(delete(Submission).where(Submission.student_id == student_id))

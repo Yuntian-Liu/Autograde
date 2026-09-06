@@ -7,10 +7,12 @@ from dotenv import load_dotenv
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from models import Base  # noqa: F401  # 再导出：auth 等子包统一从 database 取 Base
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
-DATABASE_PATH = os.getenv("DATABASE_PATH", str(BASE_DIR / "autograde.db"))
+DATABASE_PATH = os.getenv("DATABASE_PATH", "").strip() or str(BASE_DIR / "autograde.db")
 
 engine = create_async_engine(f"sqlite+aiosqlite:///{DATABASE_PATH}", echo=False)
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -22,12 +24,15 @@ async def get_db():
 
 
 async def init_db() -> None:
-    """启动自愈：先 create_all 建缺失的表，再逐表补齐缺失的列。"""
+    """启动自愈：先 create_all 建缺失的表，再逐表补齐缺失的列，最后补种内置评级话术。"""
     from models import Base
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_columns)
+    from builtin_phrases import ensure_builtin_rating_phrases
+
+    await ensure_builtin_rating_phrases()
 
 
 def _ensure_columns(conn) -> None:

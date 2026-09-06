@@ -15,18 +15,20 @@ from sqlalchemy import func, select
 
 from database import DATABASE_PATH, SessionLocal, init_db
 from feedback import sync_unit_label
+from auth.utils import hash_password
 from models import (
     Assignment,
     Class,
     ErrorRecord,
     FeedbackSnapshot,
-    Phrase,
     Question,
     Setting,
     Student,
     Submission,
+    User,
 )
 from rating import DEFAULT_THRESHOLDS, SETTINGS_KEY, rating_for
+
 
 # 班级 schedule 里的星期 → date.weekday()
 WEEKDAY = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
@@ -62,9 +64,26 @@ async def seed() -> None:
             print("数据库已有数据，跳过 seed（如需重建：python seed.py --fresh）")
             return
 
+        # ---------- 演示账号（dev@autograde.local，多租户下演示数据归属它） ----------
+        # 本地开发：IS_PROD=false 时给它发验证码会打印在日志里，用验证码登录即可
+        demo_user = User(
+            uid=100000,
+            email="dev@autograde.local",
+            nickname="演示教师",
+            avatar_seed="autograde-demo",
+            password_hash=hash_password("Dev1234!"),
+            is_admin=True,
+        )
+        db.add(demo_user)
+        await db.flush()
+
         # ---------- 班级与学生 ----------
-        ww5a = Class(name="WW5A", series="WW", level=5, term="A", schedule="周六 14:00")
-        ng3b = Class(name="NG3B", series="NG", level=3, term="B", schedule="周四 18:30")
+        ww5a = Class(
+            name="WW5A", series="WW", level=5, term="A", schedule="周六 14:00", owner_uid=100000
+        )
+        ng3b = Class(
+            name="NG3B", series="NG", level=3, term="B", schedule="周四 18:30", owner_uid=100000
+        )
         db.add_all([ww5a, ng3b])
         await db.flush()
 
@@ -102,6 +121,7 @@ async def seed() -> None:
                         mode=item.get("mode", "verbatim"),
                         section=section,
                         stem=item.get("stem", ""),
+                        options=json.dumps(item.get("options", []), ensure_ascii=False),
                         standard_answer=item["answer"],
                         explanation=item.get("explanation", ""),
                         score_weight=item.get("weight", 5.0),
@@ -165,7 +185,7 @@ async def seed() -> None:
                 {"stem": "写出 tomato 的复数形式", "answer": "tomatoes", "explanation": "以 o 结尾的有生命名词加 es，如 tomatoes、potatoes~"},
                 {"stem": "写出 library 的复数形式", "answer": "libraries", "explanation": "辅音字母+y 结尾，变 y 为 i 再加 es~"},
                 {"stem": "用 a / an 填空：___ umbrella", "answer": "an", "explanation": "umbrella 以元音音素开头，用 an~"},
-                {"stem": "选择：There ___ some milk in the glass.", "answer": "is", "explanation": "milk 是不可数名词，be 动词用 is~"},
+                {"stem": "There ___ some milk in the glass.", "answer": "A", "options": ["A. is", "B. are", "C. be", "D. am"], "explanation": "milk 是不可数名词，be 动词用 is~"},
                 {"stem": "写出 photo 的复数形式", "answer": "photos", "explanation": "photo 是无生命名词，以 o 结尾直接加 s~"},
             ],
         )
@@ -176,7 +196,7 @@ async def seed() -> None:
                 {"stem": "She ___ (go) to school by bus every day.", "answer": "goes", "explanation": "一般现在时，主语 she 是第三人称单数，动词加 es~"},
                 {"stem": "I ___ (not like) onions.", "answer": "don't like", "explanation": "第一人称否定借助助动词 don't~"},
                 {"stem": "My father ___ (watch) TV every night.", "answer": "watches", "explanation": "三单，watch 以 ch 结尾要加 es~"},
-                {"stem": "___ they play football on Sundays?", "answer": "Do", "explanation": "主语 they 是复数，疑问句用 Do 开头~"},
+                {"stem": "___ they play football on Sundays?", "answer": "A", "options": ["A. Do", "B. Does", "C. Are", "D. Is"], "explanation": "主语 they 是复数，疑问句用 Do 开头~"},
                 {"stem": "He ___ (have) breakfast at seven.", "answer": "has", "explanation": "have 的三单形式是 has，特殊变化要记牢~"},
             ],
         )
@@ -277,28 +297,24 @@ async def seed() -> None:
             [
                 {"stem": "Where does the story happen?", "answer": "In a small town.", "explanation": "细节题，答案在第一段第二行~"},
                 {"stem": "What does \"delighted\" mean?", "answer": "Very happy.", "explanation": "词义猜测题，联系下文 smiles 可知是开心~"},
-                {"stem": "Choose the best title.", "answer": "A Helpful Neighbor", "explanation": "主旨题，全文围绕邻居的帮助展开~"},
-                {"stem": "True or False: Lily moved away at last.", "answer": "False", "explanation": "判断题，结尾 Lily 仍然住在小镇~"},
+                {"stem": "Choose the best title.", "answer": "A", "options": ["A. A Helpful Neighbor", "B. A Trip to the City", "C. Lily's New Home", "D. The Small Town"], "explanation": "主旨题，全文围绕邻居的帮助展开~"},
+                {"stem": "Lily moved away at last.", "answer": "F", "options": ["T", "F"], "explanation": "判断题，结尾 Lily 仍然住在小镇~"},
             ],
         )
         ng_scores = {"David": 92, "Emma": 90, "Frank": 86, "Grace": 88, "Henry": 84, "Ivy": 92}
         for name, score in ng_scores.items():
             db.add(sub(ng[name], ng_u7, "已批改", float(score)))
 
-        # ---------- 话术库 / 全局配置 ----------
-        db.add_all(
-            [
-                Phrase(category="问候语", content="下午好[太阳]这是孩子本次的练习反馈，辛苦查收[玫瑰]", scope="内置"),
-                Phrase(category="问候语", content="收到宝贝的作业喽~咱们这次作业完成很棒！正确率很高。一起来看看吧：", scope="内置"),
-                Phrase(category="催交", content="这次还没有收到宝贝的作业哦，方便的话请尽快补交，批改后第一时间反馈给您~", scope="内置"),
-                Setting(
-                    key=SETTINGS_KEY,
-                    value=json.dumps(
-                        [{"rating": r, "min": m} for r, m in DEFAULT_THRESHOLDS],
-                        ensure_ascii=False,
-                    ),
+        # ---------- 全局配置 ----------
+        # 内置话术（问候/Issue/催交/评级）由 init_db → builtin_phrases 补种，此处不重复插
+        db.add(
+            Setting(
+                key=SETTINGS_KEY,
+                value=json.dumps(
+                    [{"rating": r, "min": m} for r, m in DEFAULT_THRESHOLDS],
+                    ensure_ascii=False,
                 ),
-            ]
+            )
         )
 
         await db.commit()

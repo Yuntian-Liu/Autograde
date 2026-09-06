@@ -85,6 +85,7 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
 
   return (
     <Modal
+      centered
       open={open}
       onCancel={onClose}
       onOk={submit}

@@ -3,10 +3,20 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from access import owned_class
+from auth.dependencies import get_current_user
+from auth.models import User
 from database import get_db
 from feedback import SERIES_DEFAULT_LESSON_TYPE, sync_unit_label, validate_unit_fields
 from models import Assignment, Class, Question, Student, Submission
-from serializers import GRADED_STATUSES, assignment_brief, class_brief, student_brief
+from serializers import (
+    GRADED_STATUSES,
+    PROCESSED_STATUSES,
+    assignment_brief,
+    assignment_status,
+    class_brief,
+    student_brief,
+)
 
 router = APIRouter(prefix="/api/classes", tags=["classes"])
 
@@ -14,6 +24,34 @@ router = APIRouter(prefix="/api/classes", tags=["classes"])
 class StudentCreate(BaseModel):
     name: str
     note: str = ""
+
+
+class StudentsBatchIn(BaseModel):
+    names: list[str]  # 前端负责按行 split，这里收数组
+
+
+class ClassCreate(BaseModel):
+    name: str
+    series: str  # WW / NG
+    level: int
+    term: str  # A / B
+    schedule: str = ""
+
+
+class ClassPatch(BaseModel):
+    name: str | None = None
+    series: str | None = None
+    level: int | None = None
+    term: str | None = None
+    schedule: str | None = None
+
+
+def _validate_class_fields(series: str, term: str) -> str | None:
+    if series not in ("WW", "NG"):
+        return "班级系列仅支持 WW（厚少）/ NG（厚中）"
+    if term not in ("A", "B"):
+        return "册别仅支持 A（上册）/ B（下册）"
+    return None
 
 
 class AssignmentCreate(BaseModel):
@@ -74,8 +112,12 @@ async def _class_stats(db: AsyncSession, class_id: int) -> dict:
 
 
 @router.get("")
-async def list_classes(db: AsyncSession = Depends(get_db)) -> list[dict]:
-    classes = (await db.execute(select(Class).order_by(Class.id))).scalars().all()
+async def list_classes(
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> list[dict]:
+    classes = (
+        await db.execute(select(Class).where(Class.owner_uid == user.uid).order_by(Class.id))
+    ).scalars().all()
     result = []
     for c in classes:
         result.append({**class_brief(c), **await _class_stats(db, c.id)})
@@ -83,10 +125,12 @@ async def list_classes(db: AsyncSession = Depends(get_db)) -> list[dict]:
 
 
 @router.get("/{class_id}")
-async def get_class(class_id: int, db: AsyncSession = Depends(get_db)) -> dict:
-    c = await db.get(Class, class_id)
-    if c is None:
-        raise HTTPException(status_code=404, detail="班级不存在")
+async def get_class(
+    class_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    c = await owned_class(db, class_id, user)
 
     students = (
         await db.execute(select(Student).where(Student.class_id == class_id).order_by(Student.id))
@@ -107,28 +151,24 @@ async def get_class(class_id: int, db: AsyncSession = Depends(get_db)) -> dict:
                 select(func.count(Question.id)).where(Question.assignment_id == a.id)
             )
         ).scalar_one()
-        graded_count = (
+        # 已处理 = 已批改/缺作业/未交；无提交记录的学生计入待批改
+        rows = (
             await db.execute(
-                select(func.count(Submission.id)).where(
-                    Submission.assignment_id == a.id,
-                    Submission.status.in_(GRADED_STATUSES),
-                )
+                select(Submission.status, func.count(Submission.id))
+                .where(Submission.assignment_id == a.id)
+                .group_by(Submission.status)
             )
-        ).scalar_one()
-        pending_count = (
-            await db.execute(
-                select(func.count(Submission.id)).where(
-                    Submission.assignment_id == a.id, Submission.status == "待批改"
-                )
-            )
-        ).scalar_one()
+        ).all()
+        by_status = {status: count for status, count in rows}
+        unrecorded = len(students) - sum(by_status.values())
         assignment_items.append(
             {
                 **assignment_brief(a),
+                "status": await assignment_status(db, a),  # 动态推导，覆盖静态字段
                 "question_count": question_count,
                 "total_students": len(students),
-                "graded_count": graded_count,
-                "pending_count": pending_count,
+                "graded_count": sum(by_status.get(s, 0) for s in PROCESSED_STATUSES),
+                "pending_count": by_status.get("待批改", 0) + unrecorded,
             }
         )
 
@@ -140,13 +180,137 @@ async def get_class(class_id: int, db: AsyncSession = Depends(get_db)) -> dict:
     }
 
 
+@router.post("", status_code=201)
+async def create_class(
+    body: ClassCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict:
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="班级名不能为空")
+    error = _validate_class_fields(body.series, body.term)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    # 同名校验按 owner 维度（多租户下两位老师可各有一个 WW5A）
+    exists = (
+        await db.execute(
+            select(func.count(Class.id)).where(Class.name == name, Class.owner_uid == user.uid)
+        )
+    ).scalar_one()
+    if exists:
+        raise HTTPException(status_code=400, detail=f"班级名已存在：{name}")
+    c = Class(
+        name=name,
+        series=body.series,
+        level=body.level,
+        term=body.term,
+        schedule=body.schedule.strip(),
+        owner_uid=user.uid,
+    )
+    db.add(c)
+    await db.commit()
+    return class_brief(c)
+
+
+@router.patch("/{class_id}")
+async def update_class(
+    class_id: int,
+    body: ClassPatch,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    c = await owned_class(db, class_id, user)
+    series = body.series if body.series is not None else c.series
+    term = body.term if body.term is not None else c.term
+    error = _validate_class_fields(series, term)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="班级名不能为空")
+        dup = (
+            await db.execute(
+                select(func.count(Class.id)).where(
+                    Class.name == name,
+                    Class.owner_uid == user.uid,
+                    Class.id != class_id,
+                )
+            )
+        ).scalar_one()
+        if dup:
+            raise HTTPException(status_code=400, detail=f"班级名已存在：{name}")
+        c.name = name
+    c.series = series
+    c.term = term
+    if body.level is not None:
+        c.level = body.level
+    if body.schedule is not None:
+        c.schedule = body.schedule.strip()
+    await db.commit()
+    return class_brief(c)
+
+
+@router.delete("/{class_id}", status_code=204)
+async def delete_class(
+    class_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> None:
+    """拒绝非空班级：名下还有学生或批次时不删，返回中文提示。"""
+    c = await owned_class(db, class_id, user)
+    student_count = (
+        await db.execute(select(func.count(Student.id)).where(Student.class_id == class_id))
+    ).scalar_one()
+    assignment_count = (
+        await db.execute(select(func.count(Assignment.id)).where(Assignment.class_id == class_id))
+    ).scalar_one()
+    if student_count or assignment_count:
+        raise HTTPException(
+            status_code=400,
+            detail=f"班级下还有 {student_count} 名学生、{assignment_count} 个批次，请先清理后再删除",
+        )
+    await db.delete(c)
+    await db.commit()
+
+
+@router.post("/{class_id}/students/batch", status_code=201)
+async def import_students(
+    class_id: int,
+    body: StudentsBatchIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """名单一键导入：逐行 trim、去空、输入内去重、与现有学生重名跳过。"""
+    await owned_class(db, class_id, user)
+    existing = set(
+        (
+            await db.execute(select(Student.name).where(Student.class_id == class_id))
+        ).scalars().all()
+    )
+    added = []
+    skipped = []
+    seen = set()
+    for raw in body.names:
+        name = raw.strip()
+        if not name:
+            continue
+        if name in seen or name in existing:
+            skipped.append(name)
+            continue
+        seen.add(name)
+        s = Student(name=name, class_id=class_id)
+        db.add(s)
+        added.append(s)
+    await db.commit()
+    return {"added": len(added), "skipped": skipped, "students": [student_brief(s) for s in added]}
+
+
 @router.post("/{class_id}/students", status_code=201)
 async def create_student(
-    class_id: int, body: StudentCreate, db: AsyncSession = Depends(get_db)
+    class_id: int,
+    body: StudentCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> dict:
-    c = await db.get(Class, class_id)
-    if c is None:
-        raise HTTPException(status_code=404, detail="班级不存在")
+    await owned_class(db, class_id, user)
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="学生姓名不能为空")
@@ -158,11 +322,12 @@ async def create_student(
 
 @router.post("/{class_id}/assignments", status_code=201)
 async def create_assignment(
-    class_id: int, body: AssignmentCreate, db: AsyncSession = Depends(get_db)
+    class_id: int,
+    body: AssignmentCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> dict:
-    c = await db.get(Class, class_id)
-    if c is None:
-        raise HTTPException(status_code=404, detail="班级不存在")
+    c = await owned_class(db, class_id, user)
     lesson_type = body.lesson_type or SERIES_DEFAULT_LESSON_TYPE.get(c.series, "L")
     error = validate_unit_fields(
         c, body.unit_no, lesson_type, body.has_preview, body.preview_unit_no, body.preview_half

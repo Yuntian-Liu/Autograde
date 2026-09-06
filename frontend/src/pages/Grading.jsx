@@ -1,15 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { App as AntApp, Select } from "antd";
-import { apiGet, apiPut } from "../api";
+import { App as AntApp, Input, Modal, Select } from "antd";
+import { apiGet, apiPatch, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
 import QuestionEditor from "../components/QuestionEditor";
-import { STATUS_META, deadlineText, fmtScore, modeLabel, seriesLabel } from "../meta";
+import {
+  STATUS_META,
+  deadlineText,
+  fillIssuePlaceholders,
+  fmtScore,
+  greetingSlot,
+  modeLabel,
+  ratingTone,
+  scoreTone,
+  seriesLabel,
+} from "../meta";
 import { RATINGS, ratingFor } from "../rating";
 import "../grading.css";
 
-const GRADED_STATUSES = new Set(["已批改", "缺作业"]);
+const PROCESSED_STATUSES = new Set(["已批改", "缺作业", "未交"]); // 唯一未处理状态是「待批改」
 const STATUS_OPTIONS = ["已批改", "缺作业", "未交", "待批改"].map((s) => ({ value: s, label: s }));
+const GREETING_SLOTS = ["早上", "中午", "下午", "晚上"];
+// 「预习有错题」支持选错题数量（1-5），替换话术里的「错了1个小题」（对齐旧版 previewErrorCount）
+const PREVIEW_ERROR_PHRASE = "预习有错题";
+const PREVIEW_ERROR_COUNTS = [1, 2, 3, 4, 5];
+// 十二档 → 评级话术分组（库内 8 组）：A- 并 A，B+/B/B- 并 B，C+/C/C- 并 C；「全对」组由分数=100 触发
+const RATING_GROUP_ALIAS = { "A-": "A", "B+": "B", "B": "B", "B-": "B", "C+": "C", "C": "C", "C-": "C" };
 
 export default function Grading() {
   const { assignmentId } = useParams();
@@ -26,15 +42,34 @@ export default function Grading() {
   const [statusDrafts, setStatusDrafts] = useState({});
   const [editingQid, setEditingQid] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [phrases, setPhrases] = useState([]);
+  const [greetingId, setGreetingId] = useState(null);
+  const [slot, setSlot] = useState(() => greetingSlot()); // 问候语时段：默认当前时段，可手选
+  const [issuesMap, setIssuesMap] = useState({}); // studentId -> 已勾选 Issue 话术 id 列表
+  const [issueParams, setIssueParams] = useState({}); // studentId -> { phraseId: 错题数量 }
+  const [ratingPickId, setRatingPickId] = useState(null); // 抽中的评级话术 id（换学生/换分组重抽）
+  const [lostSectionsMap, setLostSectionsMap] = useState({}); // studentId -> 失分板块手动改写（空 = 用自动值）
+  const [lostOpen, setLostOpen] = useState(false); // 失分板块改写弹窗
+  const [lostText, setLostText] = useState("");
+  const [noteStudent, setNoteStudent] = useState(null); // 学生备注编辑目标
+  const [noteText, setNoteText] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [retroOpen, setRetroOpen] = useState(false); // 补录弹窗（线下已批，回填数据）
+  const [retroText, setRetroText] = useState("");
 
   useEffect(() => {
     Promise.all([
       apiGet(`/assignments/${assignmentId}`),
       apiGet(`/assignments/${assignmentId}/students`),
+      apiGet("/phrases").catch(() => []), // 话术失败不拖垮整页，Issue/问候语区退化为空
     ])
-      .then(([a, s]) => {
+      .then(([a, s, p]) => {
         setAssignment(a);
         setStudents(s);
+        setPhrases(p);
+        // 问候语按当前时段随机取一条，存 state 保持稳定（换一条才变）
+        const list = p.filter((x) => x.category === `问候语·${greetingSlot()}`);
+        if (list.length) setGreetingId(list[Math.floor(Math.random() * list.length)].id);
         const checked = {};
         const notes = {};
         for (const stu of s) {
@@ -83,8 +118,55 @@ export default function Grading() {
         : "已批改")
     : "已批改";
 
-  const gradedCount = students.filter(
-    (s) => s.submission && GRADED_STATUSES.has(s.submission.status)
+  const issuePhrases = useMemo(() => phrases.filter((p) => p.category === "Issue 模板"), [phrases]);
+  const ratingPhrases = useMemo(() => phrases.filter((p) => p.category === "评级话术"), [phrases]);
+
+  // 评级话术实时跟随：未交无话术；预览分 100 = 全对（优先于等级，手动覆盖等级不改变全对事实）；
+  // 否则按生效等级（含手动覆盖）并档映射。100 分 ⇔ 未勾任何错题（权重恒正），预览分不含预习扣分
+  const isPerfect = Number(score) === 100;
+  const ratingGroup =
+    statusDraft === "未交" ? null : isPerfect ? "全对" : RATING_GROUP_ALIAS[rating] || rating;
+
+  // 失分板块自动值：勾选错题所在板块 → 剥「Task N · / Task N 」前缀 → 去重 → 按扣分权重降序
+  const autoLostSections = useMemo(() => {
+    if (!assignment) return "";
+    const weightByName = new Map();
+    for (const sec of assignment.sections) {
+      let w = 0;
+      for (const q of sec.questions) if (checkedSet.has(q.id)) w += q.score_weight;
+      if (w <= 0) continue;
+      const name =
+        sec.section.replace(/^Task\s*\d+\s*[·•\-—.]?\s*/i, "").trim() || sec.section;
+      weightByName.set(name, (weightByName.get(name) || 0) + w);
+    }
+    return [...weightByName.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n).join("、");
+  }, [assignment, checkedSet]);
+
+  // 生效失分板块：手动改写优先（勾选变化不清除——定性归纳），空则回落自动值
+  const manualLostSections = current ? lostSectionsMap[current.id] || "" : "";
+  const lostSections = manualLostSections.trim() || autoLostSections;
+
+  const ratingPhrase = useMemo(() => {
+    const list = ratingPhrases.filter((p) => p.name === ratingGroup);
+    const picked = list.find((p) => p.id === ratingPickId) || list[0];
+    if (!picked) return "";
+    return picked.content.replaceAll("{lost_sections}", lostSections || "部分题目");
+  }, [ratingPhrases, ratingGroup, ratingPickId, lostSections]);
+
+  // 分组或学生切换时从该组随机抽一条（与问候语 greetingId 同模式，避免 render 中随机的跳变）
+  useEffect(() => {
+    if (!ratingGroup) return;
+    const list = ratingPhrases.filter((p) => p.name === ratingGroup);
+    if (list.length) setRatingPickId(list[Math.floor(Math.random() * list.length)].id);
+  }, [ratingGroup, currentId, ratingPhrases]);
+  const urging = phrases.find((p) => p.category === "催交")?.content || "";
+  const greetingList = phrases.filter((p) => p.category === `问候语·${slot}`);
+  const greeting =
+    greetingList.find((p) => p.id === greetingId)?.content || greetingList[0]?.content || "";
+  const hasGreetings = phrases.some((p) => p.category.startsWith("问候语·"));
+
+  const processedCount = students.filter(
+    (s) => s.submission && PROCESSED_STATUSES.has(s.submission.status)
   ).length;
 
   function setCheckedFor(studentId, updater) {
@@ -136,6 +218,45 @@ export default function Grading() {
     setEditingQid(null);
   }
 
+  function toggleIssue(phraseId) {
+    if (!current) return;
+    const ids = issuesMap[current.id] || [];
+    const unchecking = ids.includes(phraseId);
+    setIssuesMap((prev) => ({
+      ...prev,
+      [current.id]: unchecking ? ids.filter((x) => x !== phraseId) : [...ids, phraseId],
+    }));
+    if (unchecking) {
+      // 取消勾选时清掉该话术的参数
+      setIssueParams((prev) => {
+        const mine = { ...(prev[current.id] || {}) };
+        delete mine[phraseId];
+        return { ...prev, [current.id]: mine };
+      });
+    }
+  }
+
+  function setIssueCount(phraseId, n) {
+    if (!current) return;
+    setIssueParams((prev) => ({
+      ...prev,
+      [current.id]: { ...(prev[current.id] || {}), [phraseId]: n },
+    }));
+  }
+
+  function rerollGreeting() {
+    if (greetingList.length < 2) return;
+    const rest = greetingList.filter((p) => p.id !== greetingId);
+    setGreetingId(rest[Math.floor(Math.random() * rest.length)].id);
+  }
+
+  function pickSlot(next) {
+    setSlot(next);
+    // 切换时段取该池第一条
+    const list = phrases.filter((p) => p.category === `问候语·${next}`);
+    setGreetingId(list[0]?.id ?? null);
+  }
+
   // 反馈标题规则由后端定义（feedback.py），此处按返回字段拼装：
   // 厚少 {学生} U{n}L{m} 练习反馈；厚中 {学生} U{n}Day{m}[&U{n}B Preview] 伴学手册反馈
   function feedbackTitle() {
@@ -169,37 +290,109 @@ export default function Grading() {
     return blocks;
   }, [assignment, current, checkedSet, currentNotes]);
 
+  // 勾选的 Issue 话术 + 未交自动催交，追加到预览尾部（跟随保存进 final_text）
+  const issueLines = useMemo(() => {
+    if (!current || !assignment) return [];
+    const ids = issuesMap[current.id] || [];
+    const params = issueParams[current.id] || {};
+    const lines = issuePhrases
+      .filter((p) => ids.includes(p.id))
+      .map((p) => {
+        let text = fillIssuePlaceholders(p.content, assignment, assignment.class);
+        // 仅对选了数量的「预习有错题」替换计数，不误伤其他话术
+        const n = params[p.id];
+        if (n && p.name === PREVIEW_ERROR_PHRASE) {
+          text = text.replace("错了1个小题", `错了${n}个小题`);
+        }
+        return text;
+      });
+    if (statusDraft === "未交" && urging) lines.push(urging);
+    return lines;
+  }, [current, assignment, issuesMap, issueParams, issuePhrases, statusDraft, urging]);
+
   function buildPlainText() {
     if (!current || !assignment) return "";
     const lines = [feedbackTitle(), ""];
+    if (ratingPhrase) lines.push(ratingPhrase, "");
     for (const block of previewBlocks) {
       lines.push(`【${block.section} 部分】`);
       for (const item of block.items) lines.push(item.text ?? item.blank);
       lines.push("");
     }
+    for (const text of issueLines) lines.push(text, "");
     return lines.join("\n").trim();
   }
 
   async function copyAll() {
     try {
-      await navigator.clipboard.writeText(buildPlainText());
+      const body = buildPlainText();
+      await navigator.clipboard.writeText(greeting ? `${greeting}\n${body}` : body);
       message.success("已复制全部反馈");
     } catch {
       message.error("复制失败，请检查浏览器剪贴板权限");
     }
   }
 
+  async function copyGreeting() {
+    try {
+      await navigator.clipboard.writeText(greeting);
+      message.success("已复制问候语");
+    } catch {
+      message.error("复制失败，请检查浏览器剪贴板权限");
+    }
+  }
+
+  // 学生备注（仅自己可见）：批改页内直接编辑，成功后更新本地名单
+  async function saveStudentNote() {
+    if (!noteStudent) return;
+    setNoteSaving(true);
+    try {
+      await apiPatch(`/students/${noteStudent.id}`, { note: noteText.trim() });
+      setStudents((prev) =>
+        prev.map((s) => (s.id === noteStudent.id ? { ...s, note: noteText.trim() } : s))
+      );
+      message.success("备注已保存");
+      setNoteStudent(null);
+    } catch (e) {
+      message.error(e.message);
+    } finally {
+      setNoteSaving(false);
+    }
+  }
+
+  // 失分板块手动改写：空串 = 回自动值（勾选变化不清除手动值，与等级覆盖的清除行为有意不同）
+  function saveLostSections() {
+    if (!current) return;
+    setLostSectionsMap((prev) => ({ ...prev, [current.id]: lostText.trim() }));
+    setLostOpen(false);
+  }
+
   // 批改落库：分数/等级由后端按 score_weight 复算，成功后学生状态灯与分数改由后端数据驱动
-  async function saveGrading() {
+  // finalOverride：补录模式粘贴的已有反馈全文（白名单——预览区始终只读，编辑只发生在表单弹窗）
+  async function saveGrading(finalOverride = null) {
     if (!current || saving) return;
     setSaving(true);
     try {
+      const body = buildPlainText();
+      const finalText =
+        finalOverride !== null
+          ? finalOverride
+          : greeting
+            ? `${greeting}\n${body}`
+            : body;
+      // 本次用到的话术（问候/评级/Issue），驱动 use_count 越用越聪明；补录不计数
+      const usedIds = finalOverride !== null ? [] : [
+        ...(greetingId ? [greetingId] : greetingList[0]?.id ? [greetingList[0].id] : []),
+        ...(ratingGroup && ratingPickId ? [ratingPickId] : []),
+        ...(issuesMap[current.id] || []),
+      ].filter(Boolean);
       await apiPut(`/assignments/${assignment.id}/students/${current.id}/grading`, {
         status: statusDraft,
         checked_question_ids: checkedIds,
         rating_override: ratingOverrides[current.id] || "",
         notes: currentNotes,
-        final_text: buildPlainText(),
+        final_text: finalText,
+        used_phrase_ids: usedIds,
       });
       const fresh = await apiGet(`/assignments/${assignmentId}/students`);
       setStudents(fresh);
@@ -217,24 +410,51 @@ export default function Grading() {
     }
   }
 
-  if (error) return <div className="page-error">加载失败：{error}</div>;
-  if (!assignment) return null;
+  if (error)
+    return (
+      <div className="page-enter">
+        <div className="page-error">加载失败：{error}</div>
+      </div>
+    );
+  if (!assignment) {
+    // 三栏骨架：数据未就绪时先占位，消灭白屏闪；与内容态同根节点，骨架→内容是内层替换不二次播放
+    return (
+      <div className="page-enter">
+        <AppHeader compact />
+        <main className="grading-main">
+          {[0, 1, 2].map((i) => (
+            <section className="panel" key={i}>
+              <div className="panel-head">
+                <div className="skel skel-line" />
+              </div>
+              <div style={{ padding: "var(--s4)" }}>
+                <div className="skel skel-block" />
+                <div className="skel skel-block" style={{ marginTop: "var(--s3)" }} />
+              </div>
+            </section>
+          ))}
+        </main>
+      </div>
+    );
+  }
 
   const c = assignment.class;
   const editingQuestion = editingQid ? questionById[editingQid] : null;
 
   return (
-    <>
-      <AppHeader compact>
-        <Link className="back" to={`/assignments/${assignment.id}`}>
-          ← {assignment.unit_label}
-        </Link>
-        <span className="crumb">
-          <b>{c ? `${seriesLabel(c.series)} ${c.name}` : ""}</b>
-          <span className="sep">/</span>
-          {assignment.unit_label} {assignment.content}
-          <span className="sep">/</span>第 {assignment.lesson_no} 次课
-        </span>
+    <div className="page-enter">
+      <AppHeader
+        compact
+        crumbs={[
+          { label: "工作台", to: "/" },
+          ...(c ? [{ label: `${seriesLabel(c.series)} ${c.name}`, to: `/classes/${c.id}` }] : []),
+          {
+            label: `${assignment.unit_label} ${assignment.content}`.trim(),
+            to: `/assignments/${assignment.id}`,
+          },
+          { label: "批改" },
+        ]}
+      >
         {deadlineText(assignment.class_time) && (
           <span className="deadline">{deadlineText(assignment.class_time)}</span>
         )}
@@ -243,16 +463,21 @@ export default function Grading() {
       <main className="grading-main">
         {/* 左栏：学生名单 */}
         <section className="panel">
+          <div className="panel-back">
+            <Link className="back" to={`/assignments/${assignment.id}`}>
+              ← 返回批次
+            </Link>
+          </div>
           <div className="panel-head">
             学生名单
             <div className="progress-track">
               <div
                 className="progress-fill"
-                style={{ width: students.length ? `${(gradedCount / students.length) * 100}%` : 0 }}
+                style={{ width: students.length ? `${(processedCount / students.length) * 100}%` : 0 }}
               />
             </div>
             <div className="progress-num">
-              已批改 {gradedCount} / {students.length}
+              已处理 {processedCount} / {students.length}
             </div>
           </div>
           {students.map((s) => {
@@ -269,9 +494,21 @@ export default function Grading() {
                 <span className="name">{s.name}</span>
                 {status === "缺作业" && <span className="tag-lack">缺项</span>}
                 {status === "未交" && <span className="tag-miss">未交</span>}
-                <span className="score">
+                <span
+                  className={`score ${
+                    s.id === currentId
+                      ? statusDraft === "未交"
+                        ? ""
+                        : scoreTone(score)
+                      : sub && sub.score !== null
+                        ? scoreTone(sub.score)
+                        : ""
+                  }`}
+                >
                   {s.id === currentId
-                    ? score
+                    ? statusDraft === "未交"
+                      ? "—"
+                      : score
                     : sub && sub.score !== null
                       ? fmtScore(sub.score)
                       : "—"}
@@ -315,36 +552,68 @@ export default function Grading() {
                       ))}
                     </div>
                   )}
-                  <span className="stu-note">{current.note || "+ 添加备注（仅自己可见）"}</span>
+                  <span
+                    className="stu-note clickable"
+                    onClick={() => {
+                      setNoteStudent(current);
+                      setNoteText(current.note || "");
+                    }}
+                  >
+                    {current.note || "+ 添加备注（仅自己可见）"}
+                  </span>
                 </div>
                 <div className="score-hero">
                   <div className="lab">当前分数 · 预览</div>
-                  <div className="num">{score}</div>
+                  <div className={`num ${statusDraft === "未交" ? "" : scoreTone(score)}`}>
+                    {statusDraft === "未交" ? "—" : score}
+                  </div>
                   <div className="of">
-                    已勾选 {checkedIds.length} / {totalQuestions} 题
+                    {statusDraft === "未交"
+                      ? "未交 · 不计分"
+                      : `已勾选 ${checkedIds.length} / ${totalQuestions} 题`}
                   </div>
                 </div>
               </div>
 
-              <div className="rating-row">
-                <span className="lab">等级</span>
-                <div className="grade-pick">
-                  {RATINGS.map((r) => (
-                    <button
-                      key={r}
-                      className={r === rating ? "on" : ""}
-                      onClick={() => pickRating(r)}
-                    >
-                      {r}
-                    </button>
-                  ))}
+              {statusDraft !== "未交" && (
+                <div className="rating-row">
+                  <span className="lab">等级</span>
+                  <div className="grade-pick">
+                    {RATINGS.map((r) => (
+                      <button
+                        key={r}
+                        className={r === rating ? `on ${ratingTone(r)}`.trim() : ""}
+                        onClick={() => pickRating(r)}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="auto-tag">
+                    {ratingOverrides[current.id]
+                      ? `已手动覆盖为 ${rating} · 自动预选 ${autoRating}`
+                      : `已按 ${score} 自动预选 ${autoRating} · 可手动调整`}
+                  </span>
                 </div>
-                <span className="auto-tag">
-                  {ratingOverrides[current.id]
-                    ? `已手动覆盖为 ${rating} · 自动预选 ${autoRating}`
-                    : `已按 ${score} 自动预选 ${autoRating} · 可手动调整`}
-                </span>
-              </div>
+              )}
+
+              {statusDraft !== "未交" && !isPerfect && (
+                <div className="lost-row">
+                  <span className="lab">失分板块</span>
+                  <button
+                    className="lost-value"
+                    onClick={() => {
+                      setLostText(manualLostSections.trim() || autoLostSections);
+                      setLostOpen(true);
+                    }}
+                  >
+                    {lostSections}
+                  </button>
+                  <span className="auto-tag">
+                    {manualLostSections.trim() ? "手动 · 清空恢复自动" : "自动 · 点击改写"}
+                  </span>
+                </div>
+              )}
 
               <div className="save-row">
                 <span className="lab">提交状态</span>
@@ -354,10 +623,58 @@ export default function Grading() {
                   options={STATUS_OPTIONS}
                   style={{ width: 110 }}
                 />
-                <button className="btn primary" onClick={saveGrading} disabled={saving}>
+                <button className="btn primary" onClick={() => saveGrading()} disabled={saving}>
                   {saving ? "保存中…" : "保存批改"}
                 </button>
+                <button
+                  className="btn"
+                  disabled={saving}
+                  title="线下已批改：勾选错题只为算分存档，反馈粘贴已发送的原文"
+                  onClick={() => {
+                    setRetroText("");
+                    setRetroOpen(true);
+                  }}
+                >
+                  补录保存
+                </button>
               </div>
+
+              {issuePhrases.length > 0 && (
+                <div className="group">
+                  <div className="group-head">
+                    <span className="gname">情况</span>
+                  </div>
+                  <div className="chips">
+                    {issuePhrases.map((p) => {
+                      const on = (issuesMap[current.id] || []).includes(p.id);
+                      const count = (issueParams[current.id] || {})[p.id] ?? 1;
+                      return (
+                        <span className="issue-item" key={p.id}>
+                          <span
+                            className={on ? "chip text on" : "chip text"}
+                            onClick={() => toggleIssue(p.id)}
+                          >
+                            {p.name}
+                          </span>
+                          {on && p.name === PREVIEW_ERROR_PHRASE && (
+                            <span className="slot-pick">
+                              {PREVIEW_ERROR_COUNTS.map((n) => (
+                                <span
+                                  key={n}
+                                  className={n === count ? "chip on" : "chip"}
+                                  onClick={() => setIssueCount(p.id, n)}
+                                >
+                                  {n}
+                                </span>
+                              ))}
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {assignment.sections.map((sec) => {
                 const ids = sec.questions.map((q) => q.id);
@@ -395,16 +712,41 @@ export default function Grading() {
 
         {/* 右栏：只读预览 */}
         <section className="panel">
-          <div className="panel-head">
+          <div className="panel-head pv-head">
             反馈预览
-            <div className="pv-actions">
-              <button className="btn primary" onClick={copyAll}>
-                复制全部
-              </button>
-            </div>
+            <button className="btn primary" onClick={copyAll}>
+              复制全部
+            </button>
           </div>
+          {hasGreetings && (
+            <div className="greeting-box">
+              <div className="greeting-bar">
+                <span className="slot-pick">
+                  {GREETING_SLOTS.map((s) => (
+                    <span
+                      key={s}
+                      className={s === slot ? "chip text on" : "chip text"}
+                      onClick={() => pickSlot(s)}
+                    >
+                      {s}
+                    </span>
+                  ))}
+                </span>
+                <span className="btn-row">
+                  <button className="btn" onClick={rerollGreeting}>
+                    换一条
+                  </button>
+                  <button className="btn primary" onClick={copyGreeting}>
+                    复制问候语
+                  </button>
+                </span>
+              </div>
+              {greeting && <div className="greeting-text">{greeting}</div>}
+            </div>
+          )}
           <div className="preview">
             {current && <h3>{feedbackTitle()}</h3>}
+            {ratingPhrase && <p className="rating-line">{ratingPhrase}</p>}
             {previewBlocks.map((block) => (
               <div key={block.section}>
                 <h3>
@@ -421,6 +763,19 @@ export default function Grading() {
                 )}
               </div>
             ))}
+            {/* Issue 话术：多行块首行即标题，预览加粗；复制的纯文本不受影响 */}
+            {issueLines.map((text, i) => {
+              const [head, ...rest] = text.split("\n");
+              return rest.length > 0 ? (
+                <p key={i}>
+                  <strong>{head}</strong>
+                  {"\n"}
+                  {rest.join("\n")}
+                </p>
+              ) : (
+                <p key={i}>{text}</p>
+              );
+            })}
           </div>
         </section>
       </main>
@@ -433,6 +788,73 @@ export default function Grading() {
         onSave={(note) => saveNote(editingQid, note)}
         onUncheck={() => uncheckFromEditor(editingQid)}
       />
-    </>
+
+      <Modal
+        centered
+        open={lostOpen}
+        onCancel={() => setLostOpen(false)}
+        onOk={saveLostSections}
+        title="失分板块"
+        okText="保存"
+        cancelText="取消"
+        width={400}
+        destroyOnHidden
+      >
+        <Input
+          value={lostText}
+          onChange={(e) => setLostText(e.target.value)}
+          onPressEnter={saveLostSections}
+          placeholder="如 造句和语法"
+        />
+      </Modal>
+
+      <Modal
+        centered
+        open={retroOpen}
+        onCancel={() => setRetroOpen(false)}
+        onOk={() => {
+          setRetroOpen(false);
+          saveGrading(retroText.trim());
+        }}
+        confirmLoading={saving}
+        title={`补录保存 · ${current?.name}`}
+        okText="补录落库"
+        cancelText="取消"
+        width={560}
+        destroyOnHidden
+      >
+        <Input.TextArea
+          value={retroText}
+          onChange={(e) => setRetroText(e.target.value)}
+          rows={10}
+          placeholder={
+            "粘贴已发送给家长的反馈全文（存档用）\n留空则只保存分数、等级与错题记录"
+          }
+        />
+        <p className="login-hint">
+          分数/等级仍按勾选错题自动复算；粘贴的原文原样存入反馈快照。
+        </p>
+      </Modal>
+
+      <Modal
+        centered
+        open={noteStudent !== null}
+        onCancel={() => setNoteStudent(null)}
+        onOk={saveStudentNote}
+        confirmLoading={noteSaving}
+        title={noteStudent ? `${noteStudent.name} 的备注` : "备注"}
+        okText="保存"
+        cancelText="取消"
+        width={400}
+        destroyOnHidden
+      >
+        <Input.TextArea
+          value={noteText}
+          onChange={(e) => setNoteText(e.target.value)}
+          rows={4}
+          placeholder="仅自己可见"
+        />
+      </Modal>
+    </div>
   );
 }

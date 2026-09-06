@@ -24,7 +24,10 @@ class Class(Base):
     __tablename__ = "classes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(32), unique=True)  # 如 WW5A / NG3B
+    # 多租户唯一锚点：所有业务数据经此归属到用户；默认 100000 = 首个注册用户（旧库自愈回填值）
+    owner_uid: Mapped[int] = mapped_column(Integer, default=100000)
+    # 同名校验按 owner 维度在应用层做（多租户下两位老师可各有一个 WW5A）
+    name: Mapped[str] = mapped_column(String(32))  # 如 WW5A / NG3B
     series: Mapped[str] = mapped_column(String(8))  # WW / NG
     level: Mapped[int] = mapped_column(Integer)
     term: Mapped[str] = mapped_column(String(1))  # A / B
@@ -85,6 +88,7 @@ class Question(Base):
     mode: Mapped[str] = mapped_column(String(16), default="verbatim")  # verbatim / ai_expand / manual
     section: Mapped[str] = mapped_column(String(64))  # 板块标签，如「Task 1 · Vocabulary」
     stem: Mapped[str] = mapped_column(Text, default="")  # 题干（v0.0.1 可选）
+    options: Mapped[str] = mapped_column(Text, default="")  # 选项，JSON 数组字符串，如 ["A. forest","B. river"]；无选项存空串
     standard_answer: Mapped[str] = mapped_column(Text, default="")
     explanation: Mapped[str] = mapped_column(Text, default="")  # 冻结解析原文
     score_weight: Mapped[float] = mapped_column(Float, default=5.0)
@@ -138,7 +142,8 @@ class Phrase(Base):
     __tablename__ = "phrases"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    category: Mapped[str] = mapped_column(String(32))  # 问候语/评级话术/Issue 模板……
+    category: Mapped[str] = mapped_column(String(32))  # 问候语·早上/Issue 模板/催交……
+    name: Mapped[str] = mapped_column(String(64), default="")  # 条目名（Issue 模板用，如「未交预习」）
     content: Mapped[str] = mapped_column(Text)
     scope: Mapped[str] = mapped_column(String(16), default="内置")  # 内置/自定义
     use_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -153,3 +158,25 @@ class Setting(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     key: Mapped[str] = mapped_column(String(64), unique=True)
     value: Mapped[str] = mapped_column(Text, default="")
+
+
+class LlmCallEvent(Base):
+    """AI 调用流水：每次录题拆分/讲解起草一行（含失败），成本按当时单价算好写入（发票原则）。
+
+    assignment_id 支撑「按批次看成本」；埋点失败绝不阻断主流程。
+    """
+
+    __tablename__ = "llm_call_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    uid: Mapped[int] = mapped_column(Integer, default=0)  # 调用者业务 uid
+    feature: Mapped[str] = mapped_column(String(32))  # parse_questions / draft_explanation
+    assignment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 批次维度
+    model: Mapped[str] = mapped_column(String(64), default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_yuan: Mapped[float] = mapped_column(Float, default=0.0)  # 按当时单价结算，改价不改历史
+    price_tier: Mapped[str] = mapped_column(String(8), default="")  # peak / offpeak；空 = 峰谷引入前的旧行
+    finish_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)  # None=调用异常
+    is_empty: Mapped[bool] = mapped_column(Boolean, default=False)  # 正文 0 字符
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)

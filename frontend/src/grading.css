@@ -66,8 +66,10 @@
   color: var(--ink-3);
   border-bottom: 1px dashed var(--line-strong);
   padding-bottom: 1px;
-  cursor: text;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
+.stu-note:hover { color: var(--accent); border-bottom-color: var(--accent); }
 .score-hero {
   margin-left: auto;
   text-align: right;
@@ -108,8 +110,31 @@
   transition: all var(--dur) var(--ease);
 }
 .grade-pick button:hover { border-color: var(--accent); color: var(--accent); }
-.grade-pick button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.grade-pick button.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
 .auto-tag { font-size: var(--t-caption); color: var(--accent); }
+
+/* 失分板块行：评级话术 {lost_sections} 的编辑入口（自动预填 + 点击改写） */
+.lost-row {
+  padding: var(--s4) var(--s6);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+.lost-row .lab { font-weight: 600; font-size: var(--t-strong); }
+.lost-value {
+  border: none;
+  background: none;
+  padding: 0 0 1px;
+  font: inherit;
+  font-size: var(--t-body);
+  color: var(--ink);
+  border-bottom: 1px dashed var(--line-strong);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.lost-value:hover { color: var(--accent); border-bottom-color: var(--accent); }
 
 .group { padding: var(--s4) var(--s6) 0; }
 .group-head { display: flex; align-items: baseline; gap: var(--s3); margin-bottom: var(--s3); }
@@ -134,15 +159,15 @@
   transition: all var(--dur) var(--ease);
 }
 .chip:hover { border-color: var(--accent); color: var(--accent); }
-.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
 .pad-bottom { height: var(--s6); }
 
 /* 右栏：只读预览 */
-.pv-actions { display: flex; gap: var(--s2); margin-top: var(--s3); }
+.pv-head { display: flex; align-items: center; justify-content: space-between; }
 .preview { padding: var(--s5); line-height: 1.85; }
 .preview h3 { font-size: var(--t-strong); margin: var(--s4) 0 var(--s1); }
 .preview h3:first-child { margin-top: 0; }
-.preview p { margin-bottom: var(--s2); }
+.preview p { margin-bottom: var(--s2); white-space: pre-line; }
 .preview .blank {
   color: var(--ink-3);
   background: var(--bg-soft);
@@ -152,7 +177,7 @@
   font-size: var(--t-caption);
 }
 
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
 /* 保存行：提交状态 + 保存批改 */
 .save-row {
@@ -163,3 +188,27 @@
   gap: var(--s3);
 }
 .save-row .lab { font-weight: 600; font-size: var(--t-strong); }
+
+/* 情况勾选芯片（文本型）：不折字、不被 flex 挤压 */
+.chip.text { min-width: 0; padding: 0 var(--s3); font-family: var(--font-body); white-space: nowrap; flex: none; }
+.issue-item { display: inline-flex; align-items: center; gap: var(--s2); }
+
+/* 问候语小块：时段芯片均分撑满整行，按钮第二行左对齐（消除 zigzag） */
+.greeting-box { padding: var(--s3) var(--s5); border-bottom: 1px solid var(--line); }
+.greeting-bar { display: flex; flex-direction: column; align-items: stretch; gap: var(--s2); }
+.slot-pick { display: flex; gap: var(--s1); }
+.slot-pick .chip.text { flex: 1; }
+.greeting-text { font-size: var(--t-body); line-height: 1.85; margin-top: var(--s2); }
+
+/* 分数颜色策略在高分场景下的特化（盖过 .score-hero/.stu 的默认色与 accent） */
+.score-hero .num.tone-good { color: var(--success); }
+.score-hero .num.tone-mid { color: var(--warning); }
+.score-hero .num.tone-bad { color: var(--danger); }
+.stu .score.tone-good { color: var(--success); }
+.stu .score.tone-mid { color: var(--warning); }
+.stu .score.tone-bad { color: var(--danger); }
+/* 等级 F 选中态红色 */
+.grade-pick button.on.tone-bad { background: var(--danger); border-color: var(--danger); }
+
+/* 返回批次入口：内容区（左栏）左上角 */
+.panel-back { padding: var(--s3) var(--s4) 0; }
