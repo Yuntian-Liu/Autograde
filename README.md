@@ -4,7 +4,7 @@ A personal grading workbench for English teaching assistants — classes → ass
 
 英语作业批改工作台：客观题零 AI 自动拼装，批改过程自动沉淀数据资产。
 
-![version](https://img.shields.io/badge/version-0.4.0-0d9aa7)
+![version](https://img.shields.io/badge/version-0.4.1-0d9aa7)
 ![license](https://img.shields.io/badge/license-Apache--2.0%20%2B%20Commons%20Clause-c05a45)
 ![python](https://img.shields.io/badge/python-3.13%2B-3d9a72)
 ![react](https://img.shields.io/badge/react-18-0d9aa7)

@@ -16,6 +16,14 @@ import {
   seriesLabel,
 } from "../meta";
 import { RATINGS, ratingFor } from "../rating";
+import {
+  buildFeedbackDoc,
+  collapseBlankLines,
+  docToHtml,
+  docToText,
+  sectionTitle,
+  snapshotMatchesDoc,
+} from "../utils/feedback";
 import "../grading.css";
 
 const PROCESSED_STATUSES = new Set(["已批改", "缺作业", "未交"]); // 唯一未处理状态是「待批改」
@@ -305,45 +313,9 @@ export default function Grading() {
     return `${current.name} ${assignment.unit_progress} ${assignment.class?.feedback_type || "反馈"}`;
   }
 
-  // 只读预览：按板块分组拼装；verbatim 题走「题号+答案行 / 解析行」最简格式，
-  // manual/ai_expand 用已定稿 note；两处（预览渲染 / buildPlainText 复制落库）共用此数据源
-  const previewBlocks = useMemo(() => {
-    if (!assignment || !current) return [];
-    const blocks = [];
-    for (const sec of assignment.sections) {
-      const picked = sec.questions.filter((q) => checkedSet.has(q.id));
-      if (picked.length === 0) continue;
-      blocks.push({
-        section: sec.section,
-        items: picked.map((q) => {
-          if (q.mode === "verbatim" && q.explanation) {
-            // 最简形态：题号+答案一行，解析原文另起行照抄（不加任何标签骨架）
-            return {
-              id: q.id,
-              kind: "answer",
-              seq: q.seq,
-              answer: q.standard_answer,
-              explanation: q.explanation,
-            };
-          }
-          if (q.mode === "verbatim") {
-            return { id: q.id, kind: "text", text: null, blank: `${sec.section} · 第 ${q.seq} 题 · 待填充` };
-          }
-          const note = currentNotes[q.id];
-          return {
-            id: q.id,
-            kind: "text",
-            text: note ? `${q.seq}. ${note}` : null,
-            blank: `${sec.section} · 第 ${q.seq} 题 · 待填充`,
-          };
-        }),
-      });
-    }
-    return blocks;
-  }, [assignment, current, checkedSet, currentNotes]);
-
-  // 勾选的 Issue 话术 + 未交自动催交，追加到预览尾部（跟随保存进 final_text）
-  const issueLines = useMemo(() => {
+  // 反馈装配单一数据源（utils/feedback.js）：doc → 预览 / 纯文本 / HTML 三形态
+  // 勾选的 Issue 话术 + 未交自动催交，追加到正文尾部（跟随保存进 final_text）
+  const issueTexts = useMemo(() => {
     if (!current || !assignment) return [];
     const ids = issuesMap[current.id] || [];
     const params = issueParams[current.id] || {};
@@ -362,36 +334,56 @@ export default function Grading() {
     return lines;
   }, [current, assignment, issuesMap, issueParams, issuePhrases, statusDraft, urging]);
 
+  const doc = useMemo(
+    () =>
+      buildFeedbackDoc({
+        title: feedbackTitle(),
+        ratingPhrase,
+        sections: assignment?.sections,
+        checkedSet,
+        notes: currentNotes,
+        issueTexts,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [assignment, current, checkedSet, currentNotes, ratingPhrase, issueTexts]
+  );
+
+  // 快照判定：一致（正常保存）→ 结构化重渲染；不一致（补录/历史）→ 回退纯文本
+  const snapshotMatches = showSnapshot && snapshotMatchesDoc(snapshot, doc);
+  const snapshotDisplay = snapshot ? collapseBlankLines(snapshot) : null;
+
   function buildPlainText() {
     if (!current || !assignment) return "";
-    const lines = [feedbackTitle(), ""];
-    if (ratingPhrase) lines.push(ratingPhrase, "");
-    for (const block of previewBlocks) {
-      lines.push(`【${block.section} 部分】`);
-      for (const item of block.items) {
-        if (item.kind === "answer") {
-          // verbatim：{seq}. {答案} 一行，解析另起行；答案为空只留题号行
-          lines.push(item.answer ? `${item.seq}. ${item.answer}` : `${item.seq}.`);
-          lines.push(item.explanation, "");
-        } else {
-          lines.push(item.text ?? item.blank);
-        }
-      }
-      lines.push("");
-    }
-    for (const text of issueLines) lines.push(text, "");
-    return lines.join("\n").trim();
+    return docToText(doc);
   }
 
   async function copyAll() {
     try {
-      // 「复制反馈」= 只复制正文（标题+评级话术+题目+Issue），不含问候语；
-      // 快照视图复制剥离问候语后的快照正文
-      const body = showSnapshot ? snapshot : buildPlainText();
-      await navigator.clipboard.writeText(body);
+      // 「复制反馈」双格式：text/html 保留加粗（微信笔记），text/plain 兜底；
+      // 快照视图复制存档原文（剥离问候语后），结构一致时 HTML 走当前装配
+      const text = showSnapshot ? snapshot : docToText(doc);
+      const html =
+        showSnapshot && !snapshotMatches
+          ? snapshot
+              .split("\n")
+              .map((l) => l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"))
+              .join("<br>")
+          : docToHtml(doc);
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([text], { type: "text/plain" }),
+          "text/html": new Blob([html], { type: "text/html" }),
+        }),
+      ]);
       message.success("已复制反馈正文");
     } catch {
-      message.error("复制失败，请检查浏览器剪贴板权限");
+      // 老浏览器/权限问题回落纯文本
+      try {
+        await navigator.clipboard.writeText(showSnapshot ? snapshot : docToText(doc));
+        message.success("已复制反馈正文");
+      } catch {
+        message.error("复制失败，请检查浏览器剪贴板权限");
+      }
     }
   }
 
@@ -850,27 +842,37 @@ export default function Grading() {
             </div>
           )}
           <div className="preview">
-            {showSnapshot ? (
+            {showSnapshot && !snapshotMatches ? (
+              // 补录/历史快照：回退纯文本（剥问候语 + 折叠连续空行，存档原文不动）
               <>
                 <div>
                   <span className="snapshot-tag">已存档快照</span>
                 </div>
-                <p>{snapshot}</p>
+                <p>{snapshotDisplay}</p>
               </>
             ) : (
               <>
-                {current && <h3>{feedbackTitle()}</h3>}
-                {ratingPhrase && <p className="rating-line">{ratingPhrase}</p>}
-                {previewBlocks.map((block) => (
+                {showSnapshot && (
+                  <div>
+                    <span className="snapshot-tag">已存档快照</span>
+                  </div>
+                )}
+                {current && (
+                  <h3>
+                    <strong>{doc.title}</strong>
+                  </h3>
+                )}
+                {doc.ratingPhrase && <p className="rating-line">{doc.ratingPhrase}</p>}
+                {doc.blocks.map((block) => (
                   <div key={block.section}>
                     <h3>
-                      <strong>{block.section} 部分</strong>
+                      <strong>{sectionTitle(block.section)}</strong>
                     </h3>
                     {block.items.map((item) =>
                       item.kind === "answer" ? (
                         <div className="qitem" key={item.id}>
                           <div className="qitem-answer">
-                            {item.seq}. {item.answer}
+                            {item.seq}. <b>{item.answer}</b>
                           </div>
                           <div className="qitem-expl">{item.explanation}</div>
                         </div>
@@ -884,19 +886,10 @@ export default function Grading() {
                     )}
                   </div>
                 ))}
-                {/* Issue 话术：多行块首行即标题，预览加粗；复制的纯文本不受影响 */}
-                {issueLines.map((text, i) => {
-                  const [head, ...rest] = text.split("\n");
-                  return rest.length > 0 ? (
-                    <p key={i}>
-                      <strong>{head}</strong>
-                      {"\n"}
-                      {rest.join("\n")}
-                    </p>
-                  ) : (
-                    <p key={i}>{text}</p>
-                  );
-                })}
+                {/* Issue 话术不加粗（加粗规格：仅标题/板块/答案） */}
+                {doc.issues.map((text, i) => (
+                  <p key={i}>{text}</p>
+                ))}
               </>
             )}
           </div>

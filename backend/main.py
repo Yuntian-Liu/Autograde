@@ -42,7 +42,27 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Autograde", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="Autograde", version="0.4.1", lifespan=lifespan)
+
+# GZip：JS/CSS/JSON 压缩传输（1.8MB bundle → 约 450KB）
+from fastapi.middleware.gzip import GZipMiddleware
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+# 静态资源缓存头（照 Gradify 旧版策略）：
+# /assets/* 与 favicon 文件名带哈希 → immutable 永久缓存（发新版=新文件名，不会拿错）；
+# 其余非 /api 路径（首页 + 所有 SPA 路由都回落 index.html）→ 一律 no-cache，保证发版即更新
+@app.middleware("http")
+async def cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/assets/") or path == "/favicon.svg":
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif not path.startswith("/api"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 
 # Vite 开发端口（生产同源部署不走 CORS）
 app.add_middleware(
