@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { App as AntApp, Input, Modal, Select } from "antd";
 import { apiGet, apiPatch, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
@@ -29,7 +29,8 @@ const RATING_GROUP_ALIAS = { "A-": "A", "B+": "B", "B": "B", "B-": "B", "C+": "C
 
 export default function Grading() {
   const { assignmentId } = useParams();
-  const { message } = AntApp.useApp();
+  const [searchParams] = useSearchParams();
+  const { message, modal } = AntApp.useApp();
 
   const [assignment, setAssignment] = useState(null);
   const [students, setStudents] = useState([]);
@@ -56,6 +57,7 @@ export default function Grading() {
   const [noteSaving, setNoteSaving] = useState(false);
   const [retroOpen, setRetroOpen] = useState(false); // 补录弹窗（线下已批，回填数据）
   const [retroText, setRetroText] = useState("");
+  const [clearOpen, setClearOpen] = useState(false); // 清空勾选二次确认
   const [snapshotMap, setSnapshotMap] = useState({}); // studentId -> 最新反馈快照原文（落库真值）
   const [dirtyMap, setDirtyMap] = useState({}); // studentId -> 有未保存的表单编辑（脏标记）
 
@@ -85,7 +87,10 @@ export default function Grading() {
         setSnapshotMap(snapshots);
         setDirtyMap({}); // 重新加载 = 与库内一致，全部干净
         const firstTodo = s.find((stu) => !stu.submission || stu.submission.status === "待批改");
-        setCurrentId((firstTodo || s[0] || {}).id ?? null);
+        // 支持 ?student= 定位（题库答错名单跳来）；无参数或找不到回退原逻辑
+        const want = Number(searchParams.get("student"));
+        const target = want ? s.find((stu) => stu.id === want) : null;
+        setCurrentId((target || firstTodo || s[0] || {}).id ?? null);
       })
       .catch((e) => setError(e.message));
   }, [assignmentId]);
@@ -105,8 +110,22 @@ export default function Grading() {
   const checkedIds = current ? checkedMap[current.id] || [] : [];
   const checkedSet = useMemo(() => new Set(checkedIds), [checkedIds]);
   const currentNotes = current ? notesMap[current.id] || {} : {};
+
+  // 存量快照剥离旧问候语：首行与任一「问候语·*」话术逐字匹配才剥（连同其后空行），
+  // 误伤面为零；问候语不再进快照（见 saveGrading），此逻辑只为兼容 V0.2.0 前的存量
+  function stripSnapshotGreeting(text) {
+    if (!text) return text;
+    const pool = phrases
+      .filter((p) => p.category.startsWith("问候语·"))
+      .map((p) => p.content.trim());
+    const firstLine = text.split("\n", 1)[0].trim();
+    if (!pool.includes(firstLine)) return text;
+    return text.slice(text.indexOf("\n") + 1).replace(/^\n+/, "");
+  }
+
   // 预览三态：有存档快照且未 dirty → 快照原文；无快照或表单已改 → 实时拼装
-  const snapshot = current ? snapshotMap[current.id] || null : null;
+  const snapshotRaw = current ? snapshotMap[current.id] || null : null;
+  const snapshot = snapshotRaw ? stripSnapshotGreeting(snapshotRaw) : null;
   const showSnapshot = Boolean(snapshot) && !dirtyMap[current?.id];
 
   const checkedWeight = checkedIds.reduce(
@@ -286,7 +305,8 @@ export default function Grading() {
     return `${current.name} ${assignment.unit_progress} ${assignment.class?.feedback_type || "反馈"}`;
   }
 
-  // 只读预览：按板块分组拼装，verbatim 直出冻结解析，manual/ai_expand 用已定稿 note
+  // 只读预览：按板块分组拼装；verbatim 题走「题号+答案行 / 解析行」最简格式，
+  // manual/ai_expand 用已定稿 note；两处（预览渲染 / buildPlainText 复制落库）共用此数据源
   const previewBlocks = useMemo(() => {
     if (!assignment || !current) return [];
     const blocks = [];
@@ -296,16 +316,26 @@ export default function Grading() {
       blocks.push({
         section: sec.section,
         items: picked.map((q) => {
+          if (q.mode === "verbatim" && q.explanation) {
+            // 最简形态：题号+答案一行，解析原文另起行照抄（不加任何标签骨架）
+            return {
+              id: q.id,
+              kind: "answer",
+              seq: q.seq,
+              answer: q.standard_answer,
+              explanation: q.explanation,
+            };
+          }
+          if (q.mode === "verbatim") {
+            return { id: q.id, kind: "text", text: null, blank: `${sec.section} · 第 ${q.seq} 题 · 待填充` };
+          }
           const note = currentNotes[q.id];
-          const text =
-            q.mode === "verbatim"
-              ? q.explanation
-                ? `${q.seq}. ${q.explanation}`
-                : null
-              : note
-                ? `${q.seq}. ${note}`
-                : null;
-          return { id: q.id, text, blank: `${sec.section} · 第 ${q.seq} 题 · 待填充` };
+          return {
+            id: q.id,
+            kind: "text",
+            text: note ? `${q.seq}. ${note}` : null,
+            blank: `${sec.section} · 第 ${q.seq} 题 · 待填充`,
+          };
         }),
       });
     }
@@ -338,7 +368,15 @@ export default function Grading() {
     if (ratingPhrase) lines.push(ratingPhrase, "");
     for (const block of previewBlocks) {
       lines.push(`【${block.section} 部分】`);
-      for (const item of block.items) lines.push(item.text ?? item.blank);
+      for (const item of block.items) {
+        if (item.kind === "answer") {
+          // verbatim：{seq}. {答案} 一行，解析另起行；答案为空只留题号行
+          lines.push(item.answer ? `${item.seq}. ${item.answer}` : `${item.seq}.`);
+          lines.push(item.explanation, "");
+        } else {
+          lines.push(item.text ?? item.blank);
+        }
+      }
       lines.push("");
     }
     for (const text of issueLines) lines.push(text, "");
@@ -347,11 +385,11 @@ export default function Grading() {
 
   async function copyAll() {
     try {
-      // 快照视图下复制存档原文（那才是真正发出去的内容）；否则复制实时拼装
+      // 「复制反馈」= 只复制正文（标题+评级话术+题目+Issue），不含问候语；
+      // 快照视图复制剥离问候语后的快照正文
       const body = showSnapshot ? snapshot : buildPlainText();
-      const text = showSnapshot ? body : greeting ? `${greeting}\n${body}` : body;
-      await navigator.clipboard.writeText(text);
-      message.success("已复制全部反馈");
+      await navigator.clipboard.writeText(body);
+      message.success("已复制反馈正文");
     } catch {
       message.error("复制失败，请检查浏览器剪贴板权限");
     }
@@ -392,19 +430,48 @@ export default function Grading() {
     markDirty();
   }
 
+  // 清空当前学生勾选与已定稿内容（只动当前学生；标 dirty，保存时才落库）
+  function clearCurrent() {
+    if (!current) return;
+    setCheckedMap((prev) => ({ ...prev, [current.id]: [] }));
+    setNotesMap((prev) => ({ ...prev, [current.id]: {} }));
+    markDirty();
+    setClearOpen(false);
+  }
+
   // 批改落库：分数/等级由后端按 score_weight 复算，成功后学生状态灯与分数改由后端数据驱动
   // finalOverride：补录模式粘贴的已有反馈全文（白名单——预览区始终只读，编辑只发生在表单弹窗）
   async function saveGrading(finalOverride = null) {
     if (!current || saving) return;
+    // 改回「待批改」= 完整复位（清除错题/分数/快照），保存时二次确认防呆
+    if (
+      finalOverride === null &&
+      statusDraft === "待批改" &&
+      current.submission &&
+      current.submission.status !== "待批改"
+    ) {
+      modal.confirm({
+        title: "保存为待批改",
+        content: "将清除该学生本次的批改记录（错题、分数、反馈快照），确认继续？",
+        okText: "确认复位",
+        cancelText: "取消",
+        centered: true,
+        okButtonProps: { danger: true },
+        onOk: () => doSaveGrading(null),
+      });
+      return;
+    }
+    await doSaveGrading(finalOverride);
+  }
+
+  async function doSaveGrading(finalOverride = null) {
+    if (!current || saving) return;
     setSaving(true);
     try {
       const body = buildPlainText();
-      const finalText =
-        finalOverride !== null
-          ? finalOverride
-          : greeting
-            ? `${greeting}\n${body}`
-            : body;
+      // 问候语不进快照：final_text 只存正文（标题+评级话术+题目+Issue）；
+      // 补录模式（finalOverride）不变——老师粘什么存什么
+      const finalText = finalOverride !== null ? finalOverride : body;
       // 本次用到的话术（问候/评级/Issue），驱动 use_count 越用越聪明；补录不计数
       const usedIds = finalOverride !== null ? [] : [
         ...(greetingId ? [greetingId] : greetingList[0]?.id ? [greetingList[0].id] : []),
@@ -668,6 +735,13 @@ export default function Grading() {
                 >
                   补录保存
                 </button>
+                <button
+                  className="btn danger"
+                  style={{ marginLeft: "auto" }}
+                  onClick={() => setClearOpen(true)}
+                >
+                  清空勾选
+                </button>
               </div>
 
               {issuePhrases.length > 0 && (
@@ -746,7 +820,7 @@ export default function Grading() {
           <div className="panel-head pv-head">
             反馈预览
             <button className="btn primary" onClick={copyAll}>
-              复制全部
+              复制反馈
             </button>
           </div>
           {hasGreetings && (
@@ -793,7 +867,14 @@ export default function Grading() {
                       <strong>{block.section} 部分</strong>
                     </h3>
                     {block.items.map((item) =>
-                      item.text ? (
+                      item.kind === "answer" ? (
+                        <div className="qitem" key={item.id}>
+                          <div className="qitem-answer">
+                            {item.seq}. {item.answer}
+                          </div>
+                          <div className="qitem-expl">{item.explanation}</div>
+                        </div>
+                      ) : item.text ? (
                         <p key={item.id}>{item.text}</p>
                       ) : (
                         <p key={item.id}>
@@ -875,6 +956,23 @@ export default function Grading() {
         />
         <p className="login-hint">
           分数/等级仍按勾选错题自动复算；粘贴的原文原样存入反馈快照。
+        </p>
+      </Modal>
+
+      <Modal
+        centered
+        open={clearOpen}
+        onCancel={() => setClearOpen(false)}
+        onOk={clearCurrent}
+        okButtonProps={{ danger: true }}
+        title="清空勾选"
+        okText="确认清空"
+        cancelText="取消"
+        width={400}
+        destroyOnHidden
+      >
+        <p className="danger-text">
+          将清空当前学生（{current?.name}）的全部勾选与已定稿内容。
         </p>
       </Modal>
 

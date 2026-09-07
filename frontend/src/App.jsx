@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
 import ClassDetail from "./pages/ClassDetail";
+import ClassStats from "./pages/ClassStats";
+import StudentDetail from "./pages/StudentDetail";
 import AssignmentDetail from "./pages/AssignmentDetail";
 import Grading from "./pages/Grading";
 import QuickGrade from "./pages/QuickGrade";
@@ -10,6 +12,7 @@ import Settings from "./pages/Settings";
 import Admin from "./pages/Admin";
 import PageSkeleton from "./components/PageSkeleton";
 import { UNAUTHORIZED_EVENT } from "./api";
+import { clientLog } from "./utils/clientLog";
 import { useAuth } from "./contexts/AuthContext";
 
 // 路由守卫：登录态初始化中显示骨架屏；未登录跳 /login（记住来源路径）
@@ -43,6 +46,11 @@ export default function App() {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler);
   }, [navigate, location.pathname]);
 
+  // 页面浏览留痕：诊断包能还原「用户点了哪些页面」（配合 api.js 的接口日志形成完整操作路径）
+  useEffect(() => {
+    clientLog.add("page", `${location.pathname}${location.search}`);
+  }, [location.pathname, location.search]);
+
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
@@ -59,6 +67,22 @@ export default function App() {
         element={
           <RequireAuth>
             <ClassDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/classes/:id/stats"
+        element={
+          <RequireAuth>
+            <ClassStats />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/classes/:classId/students/:studentId"
+        element={
+          <RequireAuth>
+            <StudentDetail />
           </RequireAuth>
         }
       />

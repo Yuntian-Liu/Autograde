@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { App as AntApp, Input, Modal, Popconfirm } from "antd";
+import { App as AntApp, Input, Modal, Popconfirm, Popover } from "antd";
 import { apiDelete, apiGet, apiPatch } from "../api";
 import AppHeader from "../components/AppHeader";
 import AssignmentForm from "../components/AssignmentForm";
@@ -9,10 +9,49 @@ import QuestionEditModal from "../components/QuestionEdit";
 import { AiEntryModal, ManualEntryModal } from "../components/QuestionEntry";
 import PageSkeleton from "../components/PageSkeleton";
 import { STATUS_META, deadlineText, fmtScore, modeLabel, ratingTone, scoreTone, seriesLabel } from "../meta";
+import { clientLog } from "../utils/clientLog";
 
 function StatusDot({ status }) {
   const meta = STATUS_META[status] || STATUS_META["待批改"];
   return <span className={`state ${meta.state}`} />;
+}
+
+// 逐题正确率（已批改学生口径）：「正确率」小字标签 + 收紧的数字胶囊；点击弹答错名单，可点进常规批改页并选中该生
+function RateCapsule({ q, assignmentId }) {
+  const empty = q.correct_rate === null || q.correct_rate === undefined;
+  const tone = empty ? "" : q.correct_rate >= 75 ? "tone-good" : q.correct_rate >= 60 ? "tone-mid" : "tone-bad";
+  const label = empty ? "—" : `${Number(q.correct_rate).toFixed(2)}%`;
+  const cap =
+    !empty && q.wrong_students.length > 0 ? (
+      <Popover
+        trigger="click"
+        title="答错名单"
+        onOpenChange={(open) => {
+          if (open) clientLog.add("ui", `查看正确率答错名单：批次${assignmentId} 题目${q.id}`);
+        }}
+        content={
+          <div className="rate-pop">
+            {q.wrong_students.map((s) => (
+              <Link key={s.id} className="rate-pop-link" to={`/grading/${assignmentId}?student=${s.id}`}>
+                {s.name}
+              </Link>
+            ))}
+          </div>
+        }
+      >
+        <button type="button" className={`rate-cap click ${tone}`}>
+          {label}
+        </button>
+      </Popover>
+    ) : (
+      <span className={`rate-cap ${tone}`}>{label}</span>
+    );
+  return (
+    <span className="rate-wrap">
+      <span className="rate-lab">正确率</span>
+      {cap}
+    </span>
+  );
 }
 
 export default function AssignmentDetail() {
@@ -199,6 +238,7 @@ export default function AssignmentDetail() {
                     question={q}
                     actions={
                       <>
+                        <RateCapsule q={q} assignmentId={id} />
                         <button className="btn" onClick={() => setEditingQuestion(q)}>
                           编辑
                         </button>

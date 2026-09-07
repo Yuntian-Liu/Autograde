@@ -224,3 +224,11 @@
   padding: 2px 10px;
   margin-bottom: var(--s3);
 }
+
+/* 危险操作说明文字 */
+.danger-text { color: var(--danger); font-size: var(--t-body); line-height: 1.8; }
+
+/* 反馈正文：verbatim 题「题号+答案 / 解析」两层 */
+.qitem { margin-bottom: var(--s3); }
+.qitem-answer { color: var(--accent); font-weight: 600; }
+.qitem-expl { white-space: pre-line; margin-top: 1px; }

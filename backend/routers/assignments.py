@@ -112,6 +112,31 @@ async def get_assignment(
         )
     ).scalars().all()
 
+    # 逐题正确率：分母 = 已批改（已批改/缺作业）学生数；答错名单随题输出（量小）
+    graded_sids = set(
+        (
+            await db.execute(
+                select(Submission.student_id).where(
+                    Submission.assignment_id == assignment_id,
+                    Submission.status.in_(GRADED_STATUSES),
+                )
+            )
+        ).scalars().all()
+    )
+    wrong_rows = (
+        await db.execute(
+            select(ErrorRecord.question_id, ErrorRecord.student_id, Student.name)
+            .join(Student, ErrorRecord.student_id == Student.id)
+            .join(Question, ErrorRecord.question_id == Question.id)
+            .where(Question.assignment_id == assignment_id)
+        )
+    ).all()
+    wrong_by_q: dict[int, list[tuple[int, str]]] = {}
+    for qid, sid, name in wrong_rows:
+        if sid in graded_sids:  # 未批改/未交学生不进统计
+            wrong_by_q.setdefault(qid, []).append((sid, name))
+    base = len(graded_sids)
+
     # 按板块分组，保持出现顺序
     sections: list[dict] = []
     index: dict[str, dict] = {}
@@ -119,7 +144,11 @@ async def get_assignment(
         if q.section not in index:
             index[q.section] = {"section": q.section, "questions": []}
             sections.append(index[q.section])
-        index[q.section]["questions"].append(question_brief(q))
+        item = question_brief(q)
+        wrong = wrong_by_q.get(q.id, [])
+        item["correct_rate"] = round(100 * (base - len(wrong)) / base, 2) if base > 0 else None
+        item["wrong_students"] = [{"id": sid, "name": name} for sid, name in wrong]
+        index[q.section]["questions"].append(item)
     for section in sections:
         qs = section["questions"]
         section["question_count"] = len(qs)
@@ -410,6 +439,45 @@ async def save_grading(
         raise HTTPException(status_code=400, detail="学生不属于该批次的班级")
     if body.status not in SUBMISSION_STATUSES:
         raise HTTPException(status_code=400, detail="未知提交状态")
+
+    # 复位分支：改回「待批改」= 清除该生该批次全部批改记录（登记错学生时用）
+    # 错题记录 + 分数/等级 + 反馈快照一并删除，事务包裹；正常保存分支不受影响
+    if body.status == "待批改":
+        try:
+            await db.execute(
+                delete(ErrorRecord).where(
+                    ErrorRecord.student_id == student_id,
+                    ErrorRecord.question_id.in_(
+                        select(Question.id).where(Question.assignment_id == assignment_id)
+                    ),
+                )
+            )
+            sub = (
+                await db.execute(
+                    select(Submission).where(
+                        Submission.student_id == student_id,
+                        Submission.assignment_id == assignment_id,
+                    )
+                )
+            ).scalars().first()
+            if sub is None:
+                sub = Submission(student_id=student_id, assignment_id=assignment_id)
+                db.add(sub)
+            sub.status = "待批改"
+            sub.score = None
+            sub.rating = ""
+            sub.rating_override = ""
+            await db.execute(
+                delete(FeedbackSnapshot).where(
+                    FeedbackSnapshot.student_id == student_id,
+                    FeedbackSnapshot.assignment_id == assignment_id,
+                )
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+        return {"submission": submission_brief(sub), "error_question_ids": []}
 
     questions = (
         await db.execute(select(Question).where(Question.assignment_id == assignment_id))

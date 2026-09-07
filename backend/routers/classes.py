@@ -8,7 +8,7 @@ from auth.dependencies import get_current_user
 from auth.models import User
 from database import get_db
 from feedback import SERIES_DEFAULT_LESSON_TYPE, sync_unit_label, validate_unit_fields
-from models import Assignment, Class, Question, Student, Submission
+from models import Assignment, Class, ErrorRecord, Question, Student, Submission
 from serializers import (
     GRADED_STATUSES,
     PROCESSED_STATUSES,
@@ -351,3 +351,90 @@ async def create_assignment(
     db.add(a)
     await db.commit()
     return assignment_brief(a)
+
+
+@router.get("/{class_id}/stats")
+async def class_stats(
+    class_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict:
+    """班级统计页数据源。口径：平均分只算有分数的提交（已批改/缺作业）；未交/待批改不进平均。"""
+    c = await owned_class(db, class_id, user)
+
+    total_students = (
+        await db.execute(select(func.count(Student.id)).where(Student.class_id == class_id))
+    ).scalar_one()
+
+    assignments = (
+        await db.execute(
+            select(Assignment)
+            .where(Assignment.class_id == class_id)
+            .order_by(Assignment.lesson_no.asc())
+        )
+    ).scalars().all()
+
+    # 各批次各状态计数 + 有分数提交的平均分（各一次聚合查询）
+    status_rows = (
+        await db.execute(
+            select(Submission.assignment_id, Submission.status, func.count(Submission.id))
+            .join(Assignment, Submission.assignment_id == Assignment.id)
+            .where(Assignment.class_id == class_id)
+            .group_by(Submission.assignment_id, Submission.status)
+        )
+    ).all()
+    status_by_assignment: dict[int, dict[str, int]] = {}
+    for aid, status, n in status_rows:
+        status_by_assignment.setdefault(aid, {})[status] = n
+
+    avg_rows = (
+        await db.execute(
+            select(Submission.assignment_id, func.avg(Submission.score))
+            .join(Assignment, Submission.assignment_id == Assignment.id)
+            .where(
+                Assignment.class_id == class_id,
+                Submission.status.in_(GRADED_STATUSES),
+                Submission.score.is_not(None),
+            )
+            .group_by(Submission.assignment_id)
+        )
+    ).all()
+    avg_by_assignment = {aid: round(float(v), 2) for aid, v in avg_rows}
+
+    items = []
+    for a in assignments:
+        by_status = status_by_assignment.get(a.id, {})
+        submitted = sum(by_status.get(s, 0) for s in GRADED_STATUSES)  # 已交（含缺作业）
+        items.append(
+            {
+                "assignment_id": a.id,
+                "unit_label": a.unit_label,
+                "lesson_no": a.lesson_no,
+                "class_time": a.class_time,
+                "avg_score": avg_by_assignment.get(a.id),
+                "submitted": submitted,
+                "absent": by_status.get("未交", 0),
+                "pending": by_status.get("待批改", 0) + (total_students - sum(by_status.values())),
+                "total_students": total_students,
+            }
+        )
+
+    # 每题错误排行（全班，按次数降序；带板块与题号）
+    top_rows = (
+        await db.execute(
+            select(Question.id, Question.section, Question.seq, func.count(ErrorRecord.id))
+            .join(ErrorRecord, ErrorRecord.question_id == Question.id)
+            .join(Assignment, Question.assignment_id == Assignment.id)
+            .where(Assignment.class_id == class_id)
+            .group_by(Question.id)
+            .order_by(func.count(ErrorRecord.id).desc())
+            .limit(20)
+        )
+    ).all()
+
+    return {
+        "class": class_brief(c),
+        "assignments": items,
+        "top_errors": [
+            {"question_id": qid, "section": sec, "seq": seq, "count": n}
+            for qid, sec, seq, n in top_rows
+        ],
+    }

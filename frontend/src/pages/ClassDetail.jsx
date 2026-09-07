@@ -131,6 +131,9 @@ export default function ClassDetail() {
           {seriesLabel(data.series)} · {classMeta(data)} · {data.student_count} 名学生
         </div>
         <div className="btn-row" style={{ marginTop: "var(--s3)" }}>
+          <Link className="btn" to={`/classes/${id}/stats`}>
+            班级统计
+          </Link>
           <button className="btn" onClick={() => setClassFormOpen(true)}>
             编辑班级
           </button>
@@ -178,10 +181,10 @@ export default function ClassDetail() {
           </div>
           {data.students.map((s) => (
             <div className="row" key={s.id}>
-              <span className="row-name">
+              <Link className="row-name row-link" to={`/classes/${id}/students/${s.id}`}>
                 {s.name}
                 {s.note && <span>{s.note}</span>}
-              </span>
+              </Link>
               <button
                 className="btn"
                 onClick={() => {

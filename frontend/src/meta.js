@@ -69,6 +69,15 @@ export function ratingTone(rating) {
   return rating === "F" ? "tone-bad" : "";
 }
 
+// 分数/正确率 → tokens 色值变量（recharts 等需要真实色值的场景）
+export function scoreColorVar(score) {
+  const t = scoreTone(score);
+  if (t === "tone-good") return "var(--success)";
+  if (t === "tone-mid") return "var(--warning)";
+  if (t === "tone-bad") return "var(--danger)";
+  return "var(--ink-3)";
+}
+
 // 问候语时段（对应 phrases 表「问候语·X」category，参照旧版 build_greeting 划分）
 export function greetingSlot(date = new Date()) {
   const h = date.getHours();

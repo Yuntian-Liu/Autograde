@@ -5,6 +5,7 @@ import { apiGet, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
 import PageSkeleton from "../components/PageSkeleton";
 import { STATUS_META, scoreTone, seriesLabel } from "../meta";
+import { clientLog } from "../utils/clientLog";
 import "../grading.css";
 
 // 快捷批改：上半区答案速查（纯答案紧凑总览），下半区 学生×题目 标错矩阵
@@ -92,6 +93,7 @@ export default function QuickGrade() {
     setSavingIds((prev) => new Set(prev).add(sid));
     try {
       await saveRow(sid);
+      clientLog.add("ui", `快捷批改保存：${name}`);
       message.success(`已保存：${name}`);
     } catch (e) {
       message.error(e.message);

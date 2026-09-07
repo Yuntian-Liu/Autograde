@@ -61,6 +61,23 @@ function SectionsEditor({ rows, setRows, sections }) {
     message.success(`已为 ${count} 题补上「解析：」前缀`);
   }
 
+  // 「解析：」独立成行：前缀单独一行、内容换行跟下；已分行/无前缀/空前缀不动（幂等）
+  function splitExplanationPrefix() {
+    let count = 0;
+    const next = rows.map((r) => {
+      const text = r.explanation || "";
+      const m = /^解析[:：][ \t]*/.exec(text);
+      if (!m) return r;
+      const rest = text.slice(m[0].length);
+      if (!rest.trim() || rest.startsWith("\n")) return r;
+      count += 1;
+      return { ...r, explanation: `解析：\n${rest}` };
+    });
+    if (count === 0) return message.success("解析前缀已全部独立成行");
+    setRows(next);
+    message.success(`已将 ${count} 题的「解析：」独立成行`);
+  }
+
   function patchRow(idx, field, value) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
   }
@@ -85,6 +102,9 @@ function SectionsEditor({ rows, setRows, sections }) {
       <div className="editor-toolbar">
         <button type="button" className="btn" onClick={fillExplanationPrefix}>
           统一补「解析：」前缀
+        </button>
+        <button type="button" className="btn" onClick={splitExplanationPrefix}>
+          「解析：」独立成行
         </button>
       </div>
       {groups.map((g) => {

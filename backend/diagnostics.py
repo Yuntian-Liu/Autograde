@@ -24,9 +24,19 @@ from auth.models import InviteCode, User
 from auth.utils import get_login_blocked_count
 from database import DATABASE_PATH
 from llm_events_store import get_prices
-from models import Assignment, Class, LlmCallEvent, Phrase, Student, Submission
+from models import (
+    Assignment,
+    Class,
+    ErrorRecord,
+    FeedbackSnapshot,
+    LlmCallEvent,
+    Phrase,
+    Question,
+    Student,
+    Submission,
+)
 
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"
 _STARTED_AT = datetime.now(timezone.utc)
 
 MAX_LOG_ENTRIES = 500
@@ -158,6 +168,31 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                     select(func.count(Submission.id))
                     .join(Assignment, Submission.assignment_id == Assignment.id)
                     .join(Class, Assignment.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid)
+                )
+            ).scalar_one(),
+            # 题库/错题/快照同样按归属过滤（经 assignment 或 student 链路）
+            "questions": (
+                await db.execute(
+                    select(func.count(Question.id))
+                    .join(Assignment, Question.assignment_id == Assignment.id)
+                    .join(Class, Assignment.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid)
+                )
+            ).scalar_one(),
+            "error_records": (
+                await db.execute(
+                    select(func.count(ErrorRecord.id))
+                    .join(Student, ErrorRecord.student_id == Student.id)
+                    .join(Class, Student.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid)
+                )
+            ).scalar_one(),
+            "feedback_snapshots": (
+                await db.execute(
+                    select(func.count(FeedbackSnapshot.id))
+                    .join(Student, FeedbackSnapshot.student_id == Student.id)
+                    .join(Class, Student.class_id == Class.id)
                     .where(Class.owner_uid == user.uid)
                 )
             ).scalar_one(),

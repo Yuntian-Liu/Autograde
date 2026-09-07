@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Autograde", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Autograde", version="0.4.0", lifespan=lifespan)
 
 # Vite 开发端口（生产同源部署不走 CORS）
 app.add_middleware(
