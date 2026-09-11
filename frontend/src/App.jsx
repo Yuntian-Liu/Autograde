@@ -6,11 +6,13 @@ import ClassStats from "./pages/ClassStats";
 import StudentDetail from "./pages/StudentDetail";
 import AssignmentDetail from "./pages/AssignmentDetail";
 import Grading from "./pages/Grading";
+import QuestionBatchEdit from "./pages/QuestionBatchEdit";
 import QuickGrade from "./pages/QuickGrade";
 import Login from "./pages/Login";
 import Settings from "./pages/Settings";
 import Admin from "./pages/Admin";
 import PageSkeleton from "./components/PageSkeleton";
+import UpdateModals from "./components/UpdateModals";
 import { UNAUTHORIZED_EVENT } from "./api";
 import { clientLog } from "./utils/clientLog";
 import { useAuth } from "./contexts/AuthContext";
@@ -35,6 +37,7 @@ function RequireAuth({ children, adminOnly = false }) {
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   // 401（token 失效/被顶掉）全局跳登录，记住来源页，登录成功原路返回
   useEffect(() => {
     const handler = () => {
@@ -52,7 +55,10 @@ export default function App() {
   }, [location.pathname, location.search]);
 
   return (
-    <Routes>
+    <>
+      {/* 登录后更新提醒：版本更新 + 协议变更（未登录不弹，注册时已同意） */}
+      {user && <UpdateModals />}
+      <Routes>
       <Route path="/login" element={<Login />} />
       <Route
         path="/"
@@ -95,6 +101,14 @@ export default function App() {
         }
       />
       <Route
+        path="/assignments/:id/edit"
+        element={
+          <RequireAuth>
+            <QuestionBatchEdit />
+          </RequireAuth>
+        }
+      />
+      <Route
         path="/assignments/:id/quick"
         element={
           <RequireAuth>
@@ -128,6 +142,7 @@ export default function App() {
       />
       {/* 兜底：未知路径回工作台 */}
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </>
   );
 }

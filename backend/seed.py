@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 
 from database import DATABASE_PATH, SessionLocal, init_db
 from feedback import sync_unit_label
+from auth.models import User
 from auth.utils import hash_password
 from models import (
     Assignment,
@@ -25,7 +26,6 @@ from models import (
     Setting,
     Student,
     Submission,
-    User,
 )
 from rating import DEFAULT_THRESHOLDS, SETTINGS_KEY, rating_for
 

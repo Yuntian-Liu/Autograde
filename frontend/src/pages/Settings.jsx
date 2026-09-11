@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { App as AntApp, Avatar, Input, Modal } from "antd";
 import { apiGet, apiPut, getToken } from "../api";
 import AppHeader from "../components/AppHeader";
 import AgreementModal from "../components/AgreementModal";
 import { ChangelogModal, OpenSourceModal } from "../components/AboutModals";
+import { APP_VERSION } from "../legal/changelog";
 import {
   IconAvatar,
   IconChart,
@@ -49,6 +50,7 @@ export default function Settings() {
   const { user, logout, refresh } = useAuth();
   const { message } = AntApp.useApp();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [stats, setStats] = useState(null); // {classes, students}
   const [nickOpen, setNickOpen] = useState(false);
@@ -64,6 +66,15 @@ export default function Settings() {
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [openSourceOpen, setOpenSourceOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // 协议变更提醒的「查看协议」跳转入口（App UpdateModals 经 location.state 传入）
+  useEffect(() => {
+    if (location.state?.openLegal) {
+      setLegalOpen(true);
+      navigate(location.pathname, { replace: true, state: null }); // 清 state，防刷新重复弹
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     apiGet("/classes")
@@ -238,9 +249,9 @@ export default function Settings() {
 
         <SectionCard title="关于">
           <RowItem icon={<IconDoc />} tint="var(--danger)" label="用户协议与隐私政策" onClick={() => setLegalOpen(true)} />
-          <RowItem icon={<IconHistory />} tint="var(--accent)" label="版本日志" value="V0.4.1" onClick={() => setChangelogOpen(true)} />
+          <RowItem icon={<IconHistory />} tint="var(--accent)" label="版本日志" value={APP_VERSION} onClick={() => setChangelogOpen(true)} />
           <RowItem icon={<IconCode />} tint="var(--success)" label="开源声明" onClick={() => setOpenSourceOpen(true)} />
-          <RowItem icon={<IconInfo />} tint="var(--ink-2)" label="版本" value="V0.4.1" arrow={false} onClick={null} />
+          <RowItem icon={<IconInfo />} tint="var(--ink-2)" label="版本" value={APP_VERSION} arrow={false} onClick={null} />
         </SectionCard>
 
         <SectionCard>

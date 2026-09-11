@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { App as AntApp, Input, Modal, Popconfirm, Popover } from "antd";
-import { apiDelete, apiGet, apiPatch } from "../api";
+import { apiDelete, apiGet, apiPatch, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
 import AssignmentForm from "../components/AssignmentForm";
 import QuestionCard from "../components/QuestionCard";
@@ -9,6 +9,7 @@ import QuestionEditModal from "../components/QuestionEdit";
 import { AiEntryModal, ManualEntryModal } from "../components/QuestionEntry";
 import PageSkeleton from "../components/PageSkeleton";
 import { STATUS_META, deadlineText, fmtScore, modeLabel, ratingTone, scoreTone, seriesLabel } from "../meta";
+import { IconGrip } from "../components/icons";
 import { clientLog } from "../utils/clientLog";
 
 function StatusDot({ status }) {
@@ -69,6 +70,12 @@ export default function AssignmentDetail() {
   const [renameFrom, setRenameFrom] = useState(null); // 重命名板块：原名（null=关闭）
   const [renameTo, setRenameTo] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [clearStep, setClearStep] = useState(0); // 清空题库双重确认：0=关 1=警示 2=输「清空」
+  const [clearInput, setClearInput] = useState("");
+  const [clearing, setClearing] = useState(false);
+  // 板块拖拽排序：dragIdx = 拖起项；dropTarget = { idx, pos: before/after } 落点指示
+  const [dragIdx, setDragIdx] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
 
   const reload = useCallback(() => {
     Promise.all([apiGet(`/assignments/${id}`), apiGet(`/assignments/${id}/students`)])
@@ -107,6 +114,55 @@ export default function AssignmentDetail() {
       message.error(e.message);
     } finally {
       setRenaming(false);
+    }
+  }
+
+  // 板块拖拽排序：把 dragIdx 项移动到 dropTarget 位置后整表提交
+  async function reorderSections(from, to, pos) {
+    const names = assignment.sections.map((s) => s.section);
+    if (from === null || to === null || from === to) return;
+    const [moved] = names.splice(from, 1);
+    let insertAt = to > from ? to : to; // 移除后 to 指向同一逻辑位
+    if (pos === "after" && to > from) insertAt = to; // 已前移一位，after 即原 to
+    else if (pos === "after") insertAt = to + 1;
+    names.splice(insertAt, 0, moved);
+    try {
+      await apiPut(`/assignments/${id}/sections-order`, { order: names });
+      reload();
+    } catch (e) {
+      message.error(e.message);
+    }
+  }
+
+  function endDrag(e) {
+    e.currentTarget.closest(".toc-item")?.removeAttribute("draggable");
+    setDragIdx(null);
+    setDropTarget(null);
+  }
+
+  async function clearQuestionBank() {
+    if (clearInput.trim() !== "清空") return;
+    setClearing(true);
+    try {
+      await apiDelete(`/assignments/${id}/questions`);
+      message.success("题库已清空，可重新录入");
+      setClearStep(0);
+      setClearInput("");
+      reload();
+    } catch (e) {
+      message.error(e.message);
+      setClearStep(0);
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  async function copyId(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      message.success(`已复制 ${text}`);
+    } catch {
+      message.error("复制失败，请检查浏览器剪贴板权限");
     }
   }
 
@@ -149,6 +205,14 @@ export default function AssignmentDetail() {
           第 {assignment.lesson_no} 次课
           {assignment.class_time ? ` · ${assignment.class_time}` : ""} · {assignment.status}
           {deadlineText(assignment.class_time) ? ` · ${deadlineText(assignment.class_time)}` : ""}
+          {" · "}
+          <span
+            className="mono id-chip"
+            title="点击复制批次 ID"
+            onClick={() => copyId(String(assignment.id))}
+          >
+            #{assignment.id}
+          </span>
         </div>
         <div className="btn-row" style={{ marginTop: "var(--s4)" }}>
           <Link className="btn primary" to={`/grading/${assignment.id}`}>
@@ -163,9 +227,26 @@ export default function AssignmentDetail() {
           <button className="btn" onClick={() => setManualOpen(true)}>
             录题
           </button>
+          {assignment.question_count > 0 && (
+            <Link className="btn" to={`/assignments/${assignment.id}/edit`}>
+              整批编辑
+            </Link>
+          )}
           <button className="btn" onClick={() => setEditOpen(true)}>
             编辑批次
           </button>
+          {assignment.question_count > 0 && (
+            <button
+              className="btn danger"
+              style={{ marginLeft: "auto" }}
+              onClick={() => {
+                setClearInput("");
+                setClearStep(1);
+              }}
+            >
+              清空题库
+            </button>
+          )}
         </div>
 
         <section className="block">
@@ -195,14 +276,40 @@ export default function AssignmentDetail() {
           <div className="sec-title">题库</div>
           {currentSec ? (
             <div className="qbank-layout">
-              {/* 左：板块目录（sticky） */}
+              {/* 左：板块目录（sticky，拖住 ≡ 手柄上下拖动排序） */}
               <nav className="qbank-toc">
-                {assignment.sections.map((sec) => (
+                {assignment.sections.map((sec, i) => (
                   <div
                     key={sec.section}
-                    className={sec.section === currentSec.section ? "toc-item on" : "toc-item"}
+                    className={`toc-item ${sec.section === currentSec.section ? "on" : ""} ${
+                      dragIdx === i ? "dragging" : ""
+                    } ${dropTarget?.idx === i && dragIdx !== i ? `drop-${dropTarget.pos}` : ""}`}
                     onClick={() => setActiveSection(sec.section)}
+                    onDragStart={(e) => {
+                      setDragIdx(i);
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", String(i));
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      const r = e.currentTarget.getBoundingClientRect();
+                      setDropTarget({ idx: i, pos: e.clientY < r.top + r.height / 2 ? "before" : "after" });
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const from = Number(e.dataTransfer.getData("text/plain"));
+                      reorderSections(from, i, dropTarget?.pos || "before");
+                    }}
+                    onDragEnd={endDrag}
                   >
+                    <button
+                      type="button"
+                      className="toc-grip"
+                      title="拖动排序"
+                      onMouseDown={(e) => e.currentTarget.closest(".toc-item").setAttribute("draggable", "true")}
+                    >
+                      <IconGrip width={14} height={14} />
+                    </button>
                     <span className="toc-name">{sec.section}</span>
                     <span className="toc-count">{sec.question_count}</span>
                   </div>
@@ -276,6 +383,7 @@ export default function AssignmentDetail() {
         onClose={() => setManualOpen(false)}
         assignmentId={id}
         sections={sectionNames}
+        existingCount={assignment.question_count}
         onSaved={reload}
       />
       <ManualEntryModal
@@ -284,6 +392,7 @@ export default function AssignmentDetail() {
         assignmentId={id}
         sections={sectionNames}
         initialSection={addSection ?? undefined}
+        existingCount={assignment.question_count}
         onSaved={reload}
       />
       <AiEntryModal
@@ -291,6 +400,7 @@ export default function AssignmentDetail() {
         onClose={() => setAiOpen(false)}
         assignmentId={id}
         sections={sectionNames}
+        existingCount={assignment.question_count}
         onSaved={reload}
       />
       <QuestionEditModal
@@ -318,6 +428,72 @@ export default function AssignmentDetail() {
           onPressEnter={renameSection}
           placeholder="板块名，如 Task 3 · 造句"
         />
+      </Modal>
+
+      {/* 清空题库 · 第一重：红色警示列明后果 */}
+      <Modal
+        centered
+        open={clearStep === 1}
+        onCancel={() => setClearStep(0)}
+        title={<span className="danger-title">清空本题库？</span>}
+        width={440}
+        destroyOnHidden
+        footer={
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setClearStep(0)}>
+              取消
+            </button>
+            <button className="btn danger-solid" onClick={() => setClearStep(2)}>
+              继续
+            </button>
+          </div>
+        }
+      >
+        <p>此操作不可恢复，将永久删除本批次的：</p>
+        <ul className="danger-list">
+          <li>全部 {assignment.question_count} 道题目</li>
+          <li>
+            全部错题记录（含已批学生的勾选与定稿内容，共{" "}
+            {assignment.graded_count > 0 ? `${students.filter((s) => s.submission).length} 名学生` : "0"} 名学生的批改数据）
+          </li>
+          <li>全部提交记录（分数 / 等级 / 提交状态）</li>
+          <li>全部反馈快照</li>
+        </ul>
+        <p>批次本身保留，清空后可重新录题。若只想改题，请用「整批编辑」。</p>
+      </Modal>
+
+      {/* 清空题库 · 第二重：输入「清空」二字才可执行 */}
+      <Modal
+        centered
+        open={clearStep === 2}
+        onCancel={() => setClearStep(0)}
+        title={<span className="danger-title">确认永久清空</span>}
+        width={440}
+        destroyOnHidden
+        footer={
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setClearStep(0)}>
+              取消
+            </button>
+            <button
+              className="btn danger-solid"
+              disabled={clearInput.trim() !== "清空"}
+              onClick={clearQuestionBank}
+            >
+              {clearing ? "清空中…" : "永久清空"}
+            </button>
+          </div>
+        }
+      >
+        <div className="form-grid">
+          <span className="flab">输入「清空」二字</span>
+          <Input
+            value={clearInput}
+            onChange={(e) => setClearInput(e.target.value)}
+            onPressEnter={clearQuestionBank}
+            placeholder="清空"
+          />
+        </div>
       </Modal>
     </div>
   );

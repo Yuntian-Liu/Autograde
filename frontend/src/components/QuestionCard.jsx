@@ -7,7 +7,9 @@ export default function QuestionCard({ question, actions }) {
   return (
     <div className="qcard">
       <div className="qcard-head">
-        <span className="qcard-seq">{q.seq}</span>
+        <span className="qcard-seq" title={`题目 #${q.id}`}>
+          {q.seq}
+        </span>
         <span className="qcard-meta">
           {modeLabel(q.mode)} · {q.score_weight} 分
         </span>

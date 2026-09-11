@@ -614,7 +614,7 @@ export default function Grading() {
                   <h1>{current.name}</h1>
                   <div className="stu-meta">
                     {c ? `${seriesLabel(c.series)} ${c.name}` : ""} · {assignment.unit_label}{" "}
-                    {assignment.content} · 第 {assignment.lesson_no} 次课
+                    {assignment.content} · 第 {assignment.lesson_no} 次课 · #{assignment.id}
                   </div>
                   <div className="stu-stats">
                     <div className="stat">

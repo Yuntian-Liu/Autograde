@@ -36,7 +36,7 @@ from models import (
     Submission,
 )
 
-APP_VERSION = "0.4.1"
+APP_VERSION = "0.5.0"
 _STARTED_AT = datetime.now(timezone.utc)
 
 MAX_LOG_ENTRIES = 500

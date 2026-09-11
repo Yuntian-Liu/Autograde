@@ -61,7 +61,7 @@ async def overview(
         "graded": graded,
         "db_size_mb": round(db_size / 1024 / 1024, 2),
         "ai_cost_today_yuan": round(float(today_cost), 6),
-        "version": "0.4.1",
+        "version": "0.5.0",
     }
 
 

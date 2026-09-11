@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { App as AntApp } from "antd";
 import { apiGet, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
 import PageSkeleton from "../components/PageSkeleton";
 import { STATUS_META, scoreTone, seriesLabel } from "../meta";
+import { ratingFor } from "../rating";
 import { clientLog } from "../utils/clientLog";
 import "../grading.css";
 
@@ -50,6 +51,17 @@ export default function QuickGrade() {
     [flatQuestions]
   );
   const totalWeight = assignment?.total_weight || 0;
+
+  // 十字准线：悬停格子的行（学生）/列（题目）高亮轨道，防止行多时看错列
+  const [hover, setHover] = useState({ row: null, col: null });
+  const colInSection = useMemo(() => {
+    // 题目 id → 所属板块名（板块行 th 高亮用）
+    const m = new Map();
+    for (const sec of assignment?.sections || []) {
+      for (const q of sec.questions) m.set(q.id, sec.section);
+    }
+    return m;
+  }, [assignment]);
 
   function scoreFor(sid) {
     const wrong = wrongMap[sid] || new Set();
@@ -198,25 +210,44 @@ export default function QuickGrade() {
                 {savingAll ? "保存中…" : `全部保存${dirtyCount ? `（${dirtyCount} 人有改动）` : ""}`}
               </button>
             </div>
-            <div className="qg-scroll">
+            <div className="qg-scroll" onMouseLeave={() => setHover({ row: null, col: null })}>
               <table className="qg-table">
                 <thead>
                   <tr>
                     <th className="qg-stucol" />
-                    {assignment.sections.map((sec) => (
-                      <th className="qg-seclab" key={sec.section} colSpan={sec.questions.length}>
-                        {sec.section}
-                      </th>
+                    {assignment.sections.map((sec, si) => (
+                      <Fragment key={sec.section}>
+                        {si > 0 && <th className="qg-gap" />}
+                        <th
+                          className={
+                            hover.col !== null && colInSection.get(hover.col) === sec.section
+                              ? "qg-seclab qg-colhead"
+                              : "qg-seclab"
+                          }
+                          colSpan={sec.questions.length}
+                        >
+                          {sec.section}
+                        </th>
+                      </Fragment>
                     ))}
                     <th className="qg-right qg-scorecol">分数</th>
+                    <th className="qg-right qg-ratingcol">等级</th>
                     <th className="qg-right qg-savecol" />
                   </tr>
                   <tr>
                     <th className="qg-stucol" />
-                    {flatQuestions.map((q) => (
-                      <th key={q.id}>{q.seq}</th>
+                    {assignment.sections.map((sec, si) => (
+                      <Fragment key={sec.section}>
+                        {si > 0 && <th className="qg-gap" />}
+                        {sec.questions.map((q) => (
+                          <th key={q.id} className={hover.col === q.id ? "qg-colhead" : undefined}>
+                            {q.seq}
+                          </th>
+                        ))}
+                      </Fragment>
                     ))}
                     <th className="qg-right qg-scorecol" />
+                    <th className="qg-right qg-ratingcol" />
                     <th className="qg-right qg-savecol" />
                   </tr>
                 </thead>
@@ -226,25 +257,45 @@ export default function QuickGrade() {
                     const status = sub ? sub.status : "待批改";
                     const state = (STATUS_META[status] || STATUS_META["待批改"]).state;
                     const score = scoreFor(s.id);
+                    const rowHot = hover.row === s.id;
                     return (
                       <tr key={s.id} className={dirtyMap[s.id] ? "qg-dirty" : ""}>
-                        <td className="qg-stucol">
+                        <td className={rowHot ? "qg-stucol qg-rowhead" : "qg-stucol"}>
                           <span className="qg-stu">
                             <span className={`state ${state}`} />
-                            <span className="qg-name">{s.name}</span>
+                            <Link className="qg-name" to={`/grading/${id}?student=${s.id}`} title="进入标准批改（定位该生）">{s.name}</Link>
                           </span>
                         </td>
-                        {flatQuestions.map((q) => (
-                          <td key={q.id}>
-                            <button
-                              type="button"
-                              className={(wrongMap[s.id] || new Set()).has(q.id) ? "qg-cell on" : "qg-cell"}
-                              onClick={() => toggleCell(s.id, q.id)}
-                            />
-                          </td>
+                        {assignment.sections.map((sec, si) => (
+                          <Fragment key={sec.section}>
+                            {si > 0 && <td className="qg-gap" />}
+                            {sec.questions.map((q) => {
+                              const colHot = hover.col === q.id;
+                              const cellCls = colHot && rowHot ? "qg-cross" : colHot ? "qg-colcell" : rowHot ? "qg-rowcell" : "";
+                              return (
+                                <td key={q.id} className={cellCls || undefined}>
+                                  <button
+                                    type="button"
+                                    className={(wrongMap[s.id] || new Set()).has(q.id) ? "qg-cell on" : "qg-cell"}
+                                    onClick={() => toggleCell(s.id, q.id)}
+                                    onMouseEnter={() => setHover({ row: s.id, col: q.id })}
+                                  />
+                                </td>
+                              );
+                            })}
+                          </Fragment>
                         ))}
-                        <td className={`qg-right qg-scorecol qg-score ${scoreTone(score)}`}>{score}</td>
-                        <td className="qg-right qg-savecol">
+                        <td
+                          className={`qg-right qg-scorecol qg-score ${scoreTone(score)} ${rowHot ? "qg-rowhead" : ""}`}
+                        >
+                          {score}
+                        </td>
+                        <td className={`qg-right qg-ratingcol ${rowHot ? "qg-rowhead" : ""}`}>
+                          <span className={`qg-ratecap ${scoreTone(score)}`}>
+                            {ratingFor(Number(score))}
+                          </span>
+                        </td>
+                        <td className={rowHot ? "qg-right qg-savecol qg-rowhead" : "qg-right qg-savecol"}>
                           <button
                             className="btn"
                             disabled={savingIds.has(s.id) || savingAll}

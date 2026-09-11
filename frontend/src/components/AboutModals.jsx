@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import { Modal } from "antd";
 import { CHANGELOG } from "../legal/changelog";
+import { IconChevron } from "./icons";
 
 // 设置页「关于」弹窗组：版本日志 + 开源声明（纯色无渐变、无 emoji，tokens 约束）
 const GITHUB_REPO = "https://github.com/Yuntian-Liu/Autograde";
@@ -18,23 +20,55 @@ const ACKNOWLEDGMENTS = [
   ["PyJWT / bcrypt", "认证"],
 ];
 
+// 版本日志弹窗：折叠卡片（自 Stellaris 移植，最新版默认展开，其余折叠收起）
 export function ChangelogModal({ open, onClose }) {
+  const [expanded, setExpanded] = useState(0);
+  useEffect(() => {
+    if (open) setExpanded(0);
+  }, [open]);
+
   return (
     <Modal centered open={open} onCancel={onClose} footer={null} title="版本日志" width={480}>
-      <div className="os-scroll">
-        {CHANGELOG.map((release, i) => (
-          <div className="os-block" key={release.version}>
-            <div className="os-version-row">
-              <span className={`os-version ${i === 0 ? "latest" : ""}`}>{release.version}</span>
-              <span className="os-date">{release.date}</span>
+      <div className="cl-scroll">
+        {CHANGELOG.map((v, idx) => {
+          const isOpen = expanded === idx;
+          return (
+            <div className={`cl-card ${isOpen ? "open" : ""}`} key={v.version}>
+              <div className="cl-head" onClick={() => setExpanded(isOpen ? -1 : idx)}>
+                <span className={`cl-version ${idx === 0 ? "latest" : ""}`}>{v.version}</span>
+                <span className="cl-date">{v.date}</span>
+                <IconChevron className={`cl-chevron ${isOpen ? "up" : ""}`} />
+              </div>
+              {isOpen && (
+                <div className="cl-body">
+                  <ul className="cl-items">
+                    {v.items.map((item, j) => (
+                      <li key={j}>{item}</li>
+                    ))}
+                  </ul>
+                  {v.patches?.length > 0 && (
+                    <div className="cl-patches">
+                      <div className="cl-patches-title">补丁更新</div>
+                      {v.patches.map((p, pi) => (
+                        <div className={`cl-patch ${idx === 0 && pi === 0 ? "latest" : ""}`} key={p.version}>
+                          <div className="cl-patch-head">
+                            <span className="cl-patch-version">{p.version}</span>
+                            <span className="cl-patch-date">{p.date}</span>
+                          </div>
+                          <ul className="cl-patch-items">
+                            {p.items.map((item, j) => (
+                              <li key={j}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-            <ul className="os-list">
-              {release.items.map((item, j) => (
-                <li key={j}>{item}</li>
-              ))}
-            </ul>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </Modal>
   );

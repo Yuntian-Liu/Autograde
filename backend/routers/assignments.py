@@ -137,22 +137,35 @@ async def get_assignment(
             wrong_by_q.setdefault(qid, []).append((sid, name))
     base = len(graded_sids)
 
-    # 按板块分组，保持出现顺序
-    sections: list[dict] = []
-    index: dict[str, dict] = {}
+    # 按板块分组（组内保持 seq 序），组间顺序：手动 section_order 优先，缺省按录入顺序（组首题 id）
+    groups: dict[str, list] = {}
     for q in questions:
-        if q.section not in index:
-            index[q.section] = {"section": q.section, "questions": []}
-            sections.append(index[q.section])
-        item = question_brief(q)
-        wrong = wrong_by_q.get(q.id, [])
-        item["correct_rate"] = round(100 * (base - len(wrong)) / base, 2) if base > 0 else None
-        item["wrong_students"] = [{"id": sid, "name": name} for sid, name in wrong]
-        index[q.section]["questions"].append(item)
-    for section in sections:
-        qs = section["questions"]
-        section["question_count"] = len(qs)
-        section["total_weight"] = round(sum(q["score_weight"] for q in qs), 2)
+        groups.setdefault(q.section, []).append(q)
+    try:
+        custom_order = json.loads(a.section_order) if a.section_order else []
+    except ValueError:
+        custom_order = []
+    if custom_order:
+        ordered = [n for n in custom_order if n in groups]  # 列表内有效板块按序
+        ordered += sorted(
+            (n for n in groups if n not in custom_order),
+            key=lambda n: min(q.id for q in groups[n]),
+        )  # 后录的新板块 append 兜底
+    else:
+        ordered = sorted(groups, key=lambda n: min(q.id for q in groups[n]))
+
+    sections: list[dict] = []
+    for name in ordered:
+        sec = {"section": name, "questions": []}
+        for q in groups[name]:
+            item = question_brief(q)
+            wrong = wrong_by_q.get(q.id, [])
+            item["correct_rate"] = round(100 * (base - len(wrong)) / base, 2) if base > 0 else None
+            item["wrong_students"] = [{"id": sid, "name": name_} for sid, name_ in wrong]
+            sec["questions"].append(item)
+        sec["question_count"] = len(sec["questions"])
+        sec["total_weight"] = round(sum(q["score_weight"] for q in sec["questions"]), 2)
+        sections.append(sec)
 
     return {
         **assignment_brief(a),
@@ -330,8 +343,8 @@ async def rename_section(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """板块整组改名：板块名会进反馈输出标题，必须事务落库生效。"""
-    await owned_assignment(db, assignment_id, user)
+    """板块整组改名：板块名会进反馈输出标题，必须事务落库生效；section_order 联动换名。"""
+    a = await owned_assignment(db, assignment_id, user)
     src, dst = body.from_.strip(), body.to.strip()
     if not src or not dst:
         raise HTTPException(status_code=400, detail="板块名不能为空")
@@ -344,8 +357,49 @@ async def rename_section(
     )
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail=f"板块不存在：{src}")
+    # 手动顺序里的旧名同步替换，保持板块排序不因改名错位
+    try:
+        order = json.loads(a.section_order) if a.section_order else []
+    except ValueError:
+        order = []
+    if src in order:
+        order = [dst if n == src else n for n in order]
+        a.section_order = json.dumps(order, ensure_ascii=False)
     await db.commit()
     return {"from": src, "to": dst, "updated": result.rowcount}
+
+
+class SectionOrderIn(BaseModel):
+    order: list[str]
+
+
+@router.put("/{assignment_id}/sections-order")
+async def update_section_order(
+    assignment_id: int,
+    body: SectionOrderIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """板块手动排序：order 必须与库内板块集合完全一致（多/缺均 400）。"""
+    a = await owned_assignment(db, assignment_id, user)
+    current = set(
+        (
+            await db.execute(
+                select(Question.section).where(Question.assignment_id == assignment_id).distinct()
+            )
+        ).scalars().all()
+    )
+    incoming = [n.strip() for n in body.order if n.strip()]
+    if len(incoming) != len(set(incoming)):
+        raise HTTPException(status_code=400, detail="板块顺序存在重复")
+    if set(incoming) != current:
+        raise HTTPException(
+            status_code=400,
+            detail=f"板块列表与题库不一致（题库共 {len(current)} 个板块）",
+        )
+    a.section_order = json.dumps(incoming, ensure_ascii=False)
+    await db.commit()
+    return {"order": incoming}
 
 
 class QuestionIn(BaseModel):
@@ -410,6 +464,124 @@ async def create_questions(
         created.append(q)
     await db.commit()
     return [question_brief(q) for q in created]
+
+
+class QuestionPutIn(BaseModel):
+    id: int | None = None  # 有 id = 更新（保批改引用）；无 id = 新增
+    section: str
+    seq: int | None = None  # 缺省时按请求内同板块最大题号顺延
+    mode: str = "verbatim"
+    stem: str = ""
+    options: list[str] = []
+    standard_answer: str = ""
+    explanation: str = ""
+    score_weight: float = 5.0
+
+
+class QuestionsPutIn(BaseModel):
+    questions: list[QuestionPutIn]
+    section_order: list[str] | None = None  # 整批编辑的板块顺序（编辑器内上下移的结果）
+
+
+@router.put("/{assignment_id}/questions")
+async def replace_questions(
+    assignment_id: int,
+    body: QuestionsPutIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """整批编辑（diff 替换）：带 id 的行 UPDATE（id 不变，错题/提交/快照引用全保），
+    无 id 的行 INSERT，库内有而请求没有的行 DELETE（级联删该题错题记录）。
+    事务内一次落定；section_order 一并写入（板块卡上下移的编辑结果）。"""
+    a = await owned_assignment(db, assignment_id, user)
+    if not body.questions:
+        raise HTTPException(status_code=400, detail="题目列表不能为空")
+    for item in body.questions:
+        if item.mode not in QUESTION_MODES:
+            raise HTTPException(status_code=400, detail=f"未知题目模式：{item.mode}")
+        if not item.section.strip():
+            raise HTTPException(status_code=400, detail="板块名不能为空")
+        if not item.standard_answer.strip():
+            raise HTTPException(status_code=400, detail=f"题目缺少标准答案（seq={item.seq or '新'}）")
+
+    existing = (
+        await db.execute(select(Question).where(Question.assignment_id == assignment_id))
+    ).scalars().all()
+    by_id = {q.id: q for q in existing}
+    keep_ids = {item.id for item in body.questions if item.id is not None}
+    # 请求里的 id 必须属于本批次（防跨批次串改）
+    foreign = [i for i in keep_ids if i not in by_id]
+    if foreign:
+        raise HTTPException(status_code=400, detail=f"题目不属于本批次：{foreign[:5]}")
+
+    try:
+        updated = inserted = 0
+        # seq 缺省顺延：请求内同板块已出现的最大题号 +1
+        next_seq: dict[str, int] = {}
+        for item in body.questions:
+            section = item.section.strip()
+            base = next_seq.get(section, 0)
+            if item.seq is not None:
+                next_seq[section] = max(base, item.seq)
+        for item in body.questions:
+            section = item.section.strip()
+            seq = item.seq if item.seq is not None else next_seq.get(section, 0) + 1
+            next_seq[section] = max(next_seq.get(section, 0), seq)
+            payload = dict(
+                section=section,
+                seq=seq,
+                mode=item.mode,
+                stem=item.stem,
+                options=json.dumps(item.options, ensure_ascii=False),
+                standard_answer=item.standard_answer,
+                explanation=item.explanation,
+                score_weight=item.score_weight,
+            )
+            if item.id is not None:
+                q = by_id[item.id]
+                for field, value in payload.items():
+                    setattr(q, field, value)
+                updated += 1
+            else:
+                db.add(Question(assignment_id=assignment_id, **payload))
+                inserted += 1
+        # 消失的题：级联删错题记录后删除
+        removed_ids = [q.id for q in existing if q.id not in keep_ids]
+        if removed_ids:
+            await db.execute(delete(ErrorRecord).where(ErrorRecord.question_id.in_(removed_ids)))
+            await db.execute(delete(Question).where(Question.id.in_(removed_ids)))
+        # 板块顺序（编辑器上下移结果）
+        if body.section_order is not None:
+            a.section_order = json.dumps(
+                [n.strip() for n in body.section_order if n.strip()], ensure_ascii=False
+            )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return {
+        "updated": updated,
+        "inserted": inserted,
+        "removed": len(removed_ids),
+        "total": len(body.questions),
+    }
+
+
+@router.delete("/{assignment_id}/questions", status_code=204)
+async def clear_questions(
+    assignment_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    """一键清空题库：题目 + 错题记录 + 提交记录 + 反馈快照全清，批次保留（回到刚建状态）。"""
+    a = await owned_assignment(db, assignment_id, user)
+    question_ids = select(Question.id).where(Question.assignment_id == assignment_id)
+    await db.execute(delete(ErrorRecord).where(ErrorRecord.question_id.in_(question_ids)))
+    await db.execute(delete(Submission).where(Submission.assignment_id == assignment_id))
+    await db.execute(delete(FeedbackSnapshot).where(FeedbackSnapshot.assignment_id == assignment_id))
+    await db.execute(delete(Question).where(Question.assignment_id == assignment_id))
+    a.section_order = ""  # 板块顺序随之失效
+    await db.commit()
 
 
 class GradingIn(BaseModel):

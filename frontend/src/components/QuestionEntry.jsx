@@ -18,7 +18,7 @@ function emptyRow(section, weight = 5) {
   };
 }
 
-function optionsFromText(text) {
+export function optionsFromText(text) {
   return (text || "")
     .split("\n")
     .map((s) => s.trim())
@@ -26,7 +26,7 @@ function optionsFromText(text) {
 }
 
 // 按板块分组（保持首次出现顺序），返回 [{ section, indices }]
-function groupRows(rows) {
+export function groupRows(rows) {
   const groups = [];
   const byName = new Map();
   rows.forEach((row, idx) => {
@@ -41,8 +41,19 @@ function groupRows(rows) {
   return groups;
 }
 
-// 验收区：一个板块一张卡片，卡片头可编辑板块名 + 整组统一分值
-function SectionsEditor({ rows, setRows, sections }) {
+// 板块整组上移/下移：把该板块的所有行搬到相邻板块之前/之后（编辑模式排序用）
+function moveGroup(rows, section, dir) {
+  const groups = groupRows(rows);
+  const gi = groups.findIndex((g) => g.section === section);
+  const ti = gi + dir;
+  if (ti < 0 || ti >= groups.length) return rows;
+  const ordered = [...groups];
+  [ordered[gi], ordered[ti]] = [ordered[ti], ordered[gi]];
+  return ordered.flatMap((g) => g.indices.map((i) => rows[i]));
+}
+
+// 验收区：一个板块一张卡片，卡片头可编辑板块名 + 整组统一分值；movable 时带上移/下移（板块排序）
+export function SectionsEditor({ rows, setRows, sections, movable = false }) {
   const { message } = AntApp.useApp();
   const sectionOptions = sections.map((s) => ({ value: s }));
   const groups = groupRows(rows);
@@ -107,7 +118,7 @@ function SectionsEditor({ rows, setRows, sections }) {
           「解析：」独立成行
         </button>
       </div>
-      {groups.map((g) => {
+      {groups.map((g, gi) => {
         const first = rows[g.indices[0]];
         // key 用首行索引而非板块名：板块名一改就 remount 会导致输入框每敲一个字丢焦点
         return (
@@ -120,6 +131,28 @@ function SectionsEditor({ rows, setRows, sections }) {
                 onChange={(v) => patchGroup(g.indices, { section: v })}
                 placeholder="板块名，如 Task 1 · Vocabulary"
               />
+              {movable && (
+                <span className="sec-move">
+                  <button
+                    type="button"
+                    className="btn"
+                    title="上移板块"
+                    disabled={gi === 0}
+                    onClick={() => setRows(moveGroup(rows, g.section, -1))}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    title="下移板块"
+                    disabled={gi === groups.length - 1}
+                    onClick={() => setRows(moveGroup(rows, g.section, 1))}
+                  >
+                    ↓
+                  </button>
+                </span>
+              )}
               <InputNumber
                 min={0.5}
                 step={0.5}
@@ -207,7 +240,7 @@ async function freezeQuestions(assignmentId, rows) {
   return apiPost(`/assignments/${assignmentId}/questions`, { questions: payload });
 }
 
-function validateRows(rows) {
+export function validateRows(rows) {
   if (rows.length === 0) return "题目列表不能为空";
   for (const [i, r] of rows.entries()) {
     if (!r.section.trim()) return `第 ${i + 1} 题缺少板块名`;
@@ -216,7 +249,7 @@ function validateRows(rows) {
   return null;
 }
 
-export function ManualEntryModal({ open, onClose, assignmentId, sections, initialSection, onSaved }) {
+export function ManualEntryModal({ open, onClose, assignmentId, sections, initialSection, onSaved, existingCount = 0 }) {
   const { message } = AntApp.useApp();
   const [rows, setRows] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -254,6 +287,9 @@ export function ManualEntryModal({ open, onClose, assignmentId, sections, initia
       width={720}
       destroyOnHidden
     >
+      {existingCount > 0 && (
+        <p className="append-hint">本题库已有 {existingCount} 题，本次录入将<strong>追加</strong>（不覆盖、不去重）。</p>
+      )}
       <SectionsEditor rows={rows} setRows={setRows} sections={sections} />
     </Modal>
   );
@@ -274,7 +310,7 @@ function flattenDraft(draft) {
   );
 }
 
-export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved }) {
+export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, existingCount = 0 }) {
   const { message } = AntApp.useApp();
   const [rawText, setRawText] = useState("");
   const [rows, setRows] = useState(null); // null = 还在粘贴阶段
@@ -423,6 +459,9 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved })
     >
       {rows === null ? (
         <>
+          {existingCount > 0 && (
+            <p className="append-hint">本题库已有 {existingCount} 题，本次录入将<strong>追加</strong>（不覆盖、不去重）——录废了请用题库页「清空题库」重来。</p>
+          )}
           <Input.TextArea
             value={rawText}
             onChange={(e) => setRawText(e.target.value)}

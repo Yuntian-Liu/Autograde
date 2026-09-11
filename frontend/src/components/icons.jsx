@@ -82,3 +82,17 @@ export const IconCode = (p) => (
     <path d="M16 6l5 6-5 6" />
   </svg>
 );
+
+// 拖拽手柄（三横线，列表排序用）
+export const IconGrip = (p) => (
+  <svg {...base} {...p}>
+    <path d="M4 7h16M4 12h16M4 17h16" />
+  </svg>
+);
+
+// 下折箭头（折叠卡片展开态随 .up 旋转 180°）
+export const IconChevron = (p) => (
+  <svg {...base} {...p}>
+    <path d="M6 9l6 6 6-6" />
+  </svg>
+);

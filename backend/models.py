@@ -71,6 +71,8 @@ class Assignment(Base):
     class_time: Mapped[str] = mapped_column(String(32), default="")  # 本次上课时间，如 2026-09-12 14:00
     content: Mapped[str] = mapped_column(String(128), default="")  # 作业内容，如「伴学手册」
     status: Mapped[str] = mapped_column(String(16), default="未开始")  # 未开始/批改中/已完成
+    # 板块手动顺序（JSON 板块名数组，空 = 未自定义，回落录入顺序）；_ensure_columns 自动补列
+    section_order: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     class_: Mapped[Class] = relationship(back_populates="assignments")
