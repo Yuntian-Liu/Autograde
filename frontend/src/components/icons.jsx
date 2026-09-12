@@ -96,3 +96,16 @@ export const IconChevron = (p) => (
     <path d="M6 9l6 6 6-6" />
   </svg>
 );
+
+// 右向 / 左向小尖角（行项与返回链接的可点击暗示，替代字符箭头 → ←）
+export const IconChevronRight = (p) => (
+  <svg {...base} {...p}>
+    <path d="M9 6l6 6-6 6" />
+  </svg>
+);
+
+export const IconChevronLeft = (p) => (
+  <svg {...base} {...p}>
+    <path d="M15 6l-6 6 6 6" />
+  </svg>
+);

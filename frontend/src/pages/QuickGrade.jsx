@@ -1,3 +1,4 @@
+import { IconChevronLeft } from "../components/icons";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { App as AntApp } from "antd";
@@ -162,14 +163,14 @@ export default function QuickGrade() {
           ...(c ? [{ label: `${seriesLabel(c.series)} ${c.name}`, to: `/classes/${c.id}` }] : []),
           {
             label: `${assignment.unit_label} ${assignment.content}`.trim(),
-            to: `/assignments/${assignment.id}`,
+            to: `/assignments/${assignment.slug || assignment.id}`,
           },
           { label: "快捷批改" },
         ]}
       />
       <div className="wrap wrap-wide">
-        <Link className="back" to={`/assignments/${assignment.id}`}>
-          ← 返回批次
+        <Link className="back" to={`/assignments/${assignment.slug || assignment.id}`}>
+          <IconChevronLeft />返回批次
         </Link>
         <h1 style={{ marginTop: "var(--s3)" }}>快捷批改 · {assignment.unit_label}</h1>
 

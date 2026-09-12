@@ -62,6 +62,7 @@ def class_brief(c: Class) -> dict:
 def assignment_brief(a: Assignment) -> dict:
     return {
         "id": a.id,
+        "slug": a.slug,
         "class_id": a.class_id,
         "unit_label": a.unit_label,
         "unit_no": a.unit_no,

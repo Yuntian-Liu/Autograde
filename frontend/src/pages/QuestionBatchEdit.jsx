@@ -1,3 +1,4 @@
+import { IconChevronLeft } from "../components/icons";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { App as AntApp } from "antd";
@@ -104,13 +105,13 @@ export default function QuestionBatchEdit() {
         crumbs={[
           { label: "工作台", to: "/" },
           ...(c ? [{ label: `${seriesLabel(c.series)} ${c.name}`, to: `/classes/${c.id}` }] : []),
-          { label: `${assignment.unit_label} ${assignment.content}`.trim(), to: `/assignments/${assignment.id}` },
+          { label: `${assignment.unit_label} ${assignment.content}`.trim(), to: `/assignments/${assignment.slug || assignment.id}` },
           { label: "整批编辑" },
         ]}
       />
       <div className="wrap">
         <Link className="back" to={`/assignments/${id}`}>
-          ← 返回批次
+          <IconChevronLeft />返回批次
         </Link>
         <h1 style={{ marginTop: "var(--s3)" }}>整批编辑</h1>
         <div className="page-meta">

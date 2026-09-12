@@ -1,3 +1,4 @@
+import { IconChevronLeft } from "../components/icons";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
@@ -84,7 +85,7 @@ export default function StudentDetail() {
       />
       <div className="wrap">
         <Link className="back" to={`/classes/${classInfo.id}`}>
-          ← 返回班级
+          <IconChevronLeft />返回班级
         </Link>
 
         {/* 学生信息头 */}
@@ -184,7 +185,7 @@ export default function StudentDetail() {
           <div className="sec-title">历次作业</div>
           {stats.history.length === 0 && <div className="row">暂无数据</div>}
           {[...stats.history].reverse().map((h) => (
-            <Link className="row" key={h.assignment_id} to={`/assignments/${h.assignment_id}`}>
+            <Link className="row" key={h.assignment_id} to={`/assignments/${h.assignment_slug || h.assignment_id}`}>
               <span className="row-name">
                 {h.unit_label}
                 <span>第 {h.lesson_no} 次课{h.class_time ? ` · ${h.class_time}` : ""}</span>

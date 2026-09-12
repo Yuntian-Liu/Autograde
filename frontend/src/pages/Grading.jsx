@@ -1,3 +1,4 @@
+import { IconChevronLeft } from "../components/icons";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { App as AntApp, Input, Modal, Select } from "antd";
@@ -537,7 +538,7 @@ export default function Grading() {
           ...(c ? [{ label: `${seriesLabel(c.series)} ${c.name}`, to: `/classes/${c.id}` }] : []),
           {
             label: `${assignment.unit_label} ${assignment.content}`.trim(),
-            to: `/assignments/${assignment.id}`,
+            to: `/assignments/${assignment.slug || assignment.id}`,
           },
           { label: "批改" },
         ]}
@@ -551,8 +552,8 @@ export default function Grading() {
         {/* 左栏：学生名单 */}
         <section className="panel">
           <div className="panel-back">
-            <Link className="back" to={`/assignments/${assignment.id}`}>
-              ← 返回批次
+            <Link className="back" to={`/assignments/${assignment.slug || assignment.id}`}>
+              <IconChevronLeft />返回批次
             </Link>
           </div>
           <div className="panel-head">

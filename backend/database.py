@@ -1,5 +1,6 @@
 """数据库连接与启动自愈（_ensure_columns：启动时建表/补列，零手动迁移）。"""
 
+import logging
 import os
 from pathlib import Path
 
@@ -10,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from models import Base  # noqa: F401  # 再导出：auth 等子包统一从 database 取 Base
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATABASE_PATH = os.getenv("DATABASE_PATH", "").strip() or str(BASE_DIR / "autograde.db")
@@ -24,15 +27,20 @@ async def get_db():
 
 
 async def init_db() -> None:
-    """启动自愈：先 create_all 建缺失的表，再逐表补齐缺失的列，最后补种内置评级话术。"""
+    """启动自愈：先 create_all 建缺失的表，再逐表补齐缺失的列，最后补种内置话术与回填批次短码。"""
     from models import Base
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_columns)
     from builtin_phrases import ensure_builtin_rating_phrases
+    from slug_ids import backfill_slugs
 
     await ensure_builtin_rating_phrases()
+    async with SessionLocal() as session:
+        n = await backfill_slugs(session)
+        if n:
+            logger.info("批次短码回填：%d 条", n)
 
 
 def _ensure_columns(conn) -> None:

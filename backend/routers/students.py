@@ -83,6 +83,7 @@ async def student_stats(
     history = [
         {
             "assignment_id": a.id,
+            "assignment_slug": a.slug,
             "unit_label": a.unit_label,
             "lesson_no": a.lesson_no,
             "class_time": a.class_time,

@@ -9,7 +9,7 @@ import QuestionEditModal from "../components/QuestionEdit";
 import { AiEntryModal, ManualEntryModal } from "../components/QuestionEntry";
 import PageSkeleton from "../components/PageSkeleton";
 import { STATUS_META, deadlineText, fmtScore, modeLabel, ratingTone, scoreTone, seriesLabel } from "../meta";
-import { IconGrip } from "../components/icons";
+import { IconChevronLeft, IconGrip } from "../components/icons";
 import { clientLog } from "../utils/clientLog";
 
 function StatusDot({ status }) {
@@ -196,7 +196,7 @@ export default function AssignmentDetail() {
       />
       <div className="wrap">
         <Link className="back" to={c ? `/classes/${c.id}` : "/"}>
-          ← {c ? `${seriesLabel(c.series)} ${c.name}` : "返回"}
+          <IconChevronLeft />{c ? `${seriesLabel(c.series)} ${c.name}` : "返回"}
         </Link>
         <h1 style={{ marginTop: "var(--s3)" }}>
           {assignment.unit_label} {assignment.content}
@@ -215,10 +215,10 @@ export default function AssignmentDetail() {
           </span>
         </div>
         <div className="btn-row" style={{ marginTop: "var(--s4)" }}>
-          <Link className="btn primary" to={`/grading/${assignment.id}`}>
+          <Link className="btn primary" to={`/grading/${assignment.slug || assignment.id}`}>
             进入批改
           </Link>
-          <Link className="btn" to={`/assignments/${assignment.id}/quick`}>
+          <Link className="btn" to={`/assignments/${assignment.slug || assignment.id}/quick`}>
             快捷批改
           </Link>
           <button className="btn" onClick={() => setAiOpen(true)}>
@@ -228,7 +228,7 @@ export default function AssignmentDetail() {
             录题
           </button>
           {assignment.question_count > 0 && (
-            <Link className="btn" to={`/assignments/${assignment.id}/edit`}>
+            <Link className="btn" to={`/assignments/${assignment.slug || assignment.id}/edit`}>
               整批编辑
             </Link>
           )}

@@ -5,6 +5,7 @@ feedback_snapshots 经 assignment 链路归属班级。越权访问一律 404（
 """
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.models import User
@@ -18,8 +19,14 @@ async def owned_class(db: AsyncSession, class_id: int, user: User) -> Class:
     return c
 
 
-async def owned_assignment(db: AsyncSession, assignment_id: int, user: User) -> Assignment:
-    a = await db.get(Assignment, assignment_id)
+async def owned_assignment(db: AsyncSession, assignment_id: int | str, user: User) -> Assignment:
+    """id-or-slug 双入口：纯数字按主键（存量链接兼容），否则按对外短码；越权一律 404。"""
+    if isinstance(assignment_id, str) and not assignment_id.isdigit():
+        a = (
+            await db.execute(select(Assignment).where(Assignment.slug == assignment_id.lower()))
+        ).scalar_one_or_none()
+    else:
+        a = await db.get(Assignment, int(assignment_id))
     if a is not None:
         c = await db.get(Class, a.class_id)
         if c is not None and c.owner_uid == user.uid:

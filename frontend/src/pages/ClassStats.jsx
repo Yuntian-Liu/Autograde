@@ -1,3 +1,4 @@
+import { IconChevronLeft } from "../components/icons";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
@@ -71,7 +72,7 @@ export default function ClassStats() {
       />
       <div className="wrap">
         <Link className="back" to={`/classes/${c.id}`}>
-          ← 返回班级
+          <IconChevronLeft />返回班级
         </Link>
         <h1 style={{ marginTop: "var(--s3)" }}>{c.name} · 班级统计</h1>
 

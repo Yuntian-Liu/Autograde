@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from access import owned_class
+from slug_ids import unique_slug
 from auth.dependencies import get_current_user
 from auth.models import User
 from database import get_db
@@ -346,6 +347,7 @@ async def create_assignment(
         class_time=body.class_time,
         content=body.content,
         status=body.status,
+        slug=await unique_slug(db),
     )
     sync_unit_label(a)
     db.add(a)

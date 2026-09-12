@@ -34,7 +34,8 @@ body {
   font-size: var(--t-caption);
   color: var(--ink-2);
 }
-.back { color: var(--accent); text-decoration: none; font-size: var(--t-caption); }
+.back { display: inline-flex; align-items: center; gap: var(--s1); color: var(--accent); text-decoration: none; font-size: var(--t-caption); }
+.back svg { width: 13px; height: 13px; stroke-width: 2; }
 .deadline {
   margin-left: auto;
   font-family: var(--font-mono);
@@ -592,7 +593,8 @@ a.row:hover { background: var(--bg-soft); }
 }
 .set-row .set-label { flex: 1; }
 .set-row .set-value { color: var(--ink-2); font-size: var(--t-caption); }
-.set-row .set-arrow { color: var(--ink-3); font-size: var(--t-caption); }
+.set-row .set-arrow { display: inline-flex; color: var(--ink-3); }
+.set-row .set-arrow svg { width: 13px; height: 13px; stroke-width: 2; }
 .set-row.danger .set-label { color: var(--danger); }
 .set-row.danger:hover { background: var(--bg-soft); }
 
@@ -658,6 +660,10 @@ a.row:hover { background: var(--bg-soft); }
   text-decoration: none;
   margin-bottom: var(--s3);
 }
+/* 锁死 hover 前景（AntD 全局 a:hover 会把文字染成主题绿，落在绿底上看不清） */
+.os-repo:hover, .os-repo:hover .os-repo-link, .os-repo:hover .os-repo-name, .os-repo:hover .os-repo-sub {
+  color: var(--surface);
+}
 .os-repo-main { flex: 1; }
 .os-repo-name { font-weight: 600; font-size: var(--t-title); font-family: var(--font-display); }
 .os-repo-sub { font-size: var(--t-caption); margin-top: var(--s1); }
@@ -668,6 +674,7 @@ a.row:hover { background: var(--bg-soft); }
   padding: var(--s1) var(--s3);
   flex: none;
 }
+a:hover .os-repo-link, .os-repo:hover .os-repo-link { text-decoration: underline; text-underline-offset: 3px; }
 
 .os-dev {
   display: flex;
@@ -688,6 +695,7 @@ a.row:hover { background: var(--bg-soft); }
 .os-dev-name { font-weight: 600; font-size: var(--t-strong); }
 .os-dev-sub { font-size: var(--t-caption); color: var(--ink-2); margin-top: var(--s1); }
 .os-dev-link { font-size: var(--t-caption); color: var(--accent); flex: none; }
+.os-dev-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 .os-license {
   padding: var(--s3) var(--s4);

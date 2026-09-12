@@ -1,3 +1,4 @@
+import { IconChevronLeft } from "../components/icons";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { App as AntApp, Input, InputNumber, Modal, Popconfirm, Segmented, Select, Table, Tabs } from "antd";
@@ -43,7 +44,7 @@ export default function Admin() {
     <div className="page-enter">
       <AppHeader crumbs={[{ label: "工作台", to: "/" }, { label: "管理后台" }]} />
       <div className="wrap">
-        <Link className="back" to="/">← 工作台</Link>
+        <Link className="back" to="/"><IconChevronLeft />工作台</Link>
         <h1 style={{ marginTop: "var(--s3)" }}>管理后台</h1>
         <Tabs
           defaultActiveKey="overview"

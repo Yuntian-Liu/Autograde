@@ -1,10 +1,10 @@
 // 版本日志数据源（设置页「版本日志」弹窗 + 登录后更新提醒弹窗；发版时与 CHANGELOG.md 同步）
 // 结构：minor 为主条目，patch 嵌套在 patches 数组里（主界面只呈现 minor，展开后见 patch）
 // ⚠️ 公开文件：不得出现私人信息
-export const APP_VERSION = "V0.5.0";
+export const APP_VERSION = "V0.5.1";
 
 /** 协议版本（用户协议/隐私政策最后更新日期，改协议时同步递增；触发登录后协议变更提醒） */
-export const AGREEMENT_VERSION = "2026-09-06";
+export const AGREEMENT_VERSION = "2026-09-13";
 
 /** 取全站最新更新条目（最新 minor 有 patch 取最新 patch，否则取最新 minor） */
 export function getLatestUpdate() {
@@ -30,6 +30,17 @@ export const CHANGELOG = [
       "修复：答案速查长答案撑破页面；矩阵表头竖向钉顶，长试卷竖滚时题号常驻可见",
       "批次与题卡显示内部编号 #id（点击复制），沟通排障有锚点",
       "版本日志改版：设置页折叠卡片（最新版默认展开）；登录后自动弹更新提醒；协议与政策变更自动提醒",
+    ],
+    patches: [
+      {
+        version: "V0.5.1",
+        date: "2026-09-13",
+        items: [
+          "批次对外短码：URL 使用不可枚举的 8 位短码，数字编号入口保留兼容",
+          "用户协议与隐私政策全文重写：覆盖账号、AI、第三方服务、学生信息保护等 26 章",
+          "诊断日志补充提交状态分布与 AI 调用分类计数",
+        ],
+      },
     ],
   },
   {

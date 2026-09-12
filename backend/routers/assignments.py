@@ -97,11 +97,12 @@ async def list_assignments(
 
 @router.get("/{assignment_id}")
 async def get_assignment(
-    assignment_id: int,
+    assignment_id: str,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
     a = await owned_assignment(db, assignment_id, user)
+    assignment_id = a.id  # slug 入口归一化为主键，正文查询不受影响
     c = await db.get(Class, a.class_id)
 
     questions = (
@@ -179,12 +180,13 @@ async def get_assignment(
 
 @router.get("/{assignment_id}/students")
 async def get_assignment_students(
-    assignment_id: int,
+    assignment_id: str,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
     """批改界面左栏数据源：每个学生带提交状态/分数/等级、已勾选错题、历史数据。"""
     a = await owned_assignment(db, assignment_id, user)
+    assignment_id = a.id  # slug 入口归一化为主键，正文查询不受影响
 
     students = (
         await db.execute(
@@ -286,12 +288,13 @@ class AssignmentPatch(BaseModel):
 
 @router.patch("/{assignment_id}")
 async def update_assignment(
-    assignment_id: int,
+    assignment_id: str,
     body: AssignmentPatch,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
     a = await owned_assignment(db, assignment_id, user)
+    assignment_id = a.id  # slug 入口归一化为主键，正文查询不受影响
     c = await db.get(Class, a.class_id)
 
     for field in ("unit_no", "lesson_type", "unit_lesson_no", "has_preview",
@@ -315,11 +318,12 @@ async def update_assignment(
 
 @router.delete("/{assignment_id}", status_code=204)
 async def delete_assignment(
-    assignment_id: int,
+    assignment_id: str,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> None:
     a = await owned_assignment(db, assignment_id, user)
+    assignment_id = a.id  # slug 入口归一化为主键，正文查询不受影响
     question_ids = select(Question.id).where(Question.assignment_id == assignment_id)
     await db.execute(delete(ErrorRecord).where(ErrorRecord.question_id.in_(question_ids)))
     await db.execute(delete(Submission).where(Submission.assignment_id == assignment_id))
@@ -338,13 +342,14 @@ class SectionRenameIn(BaseModel):
 
 @router.patch("/{assignment_id}/sections")
 async def rename_section(
-    assignment_id: int,
+    assignment_id: str,
     body: SectionRenameIn,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
     """板块整组改名：板块名会进反馈输出标题，必须事务落库生效；section_order 联动换名。"""
     a = await owned_assignment(db, assignment_id, user)
+    assignment_id = a.id  # slug 入口归一化为主键，正文查询不受影响
     src, dst = body.from_.strip(), body.to.strip()
     if not src or not dst:
         raise HTTPException(status_code=400, detail="板块名不能为空")
@@ -375,13 +380,14 @@ class SectionOrderIn(BaseModel):
 
 @router.put("/{assignment_id}/sections-order")
 async def update_section_order(
-    assignment_id: int,
+    assignment_id: str,
     body: SectionOrderIn,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
     """板块手动排序：order 必须与库内板块集合完全一致（多/缺均 400）。"""
     a = await owned_assignment(db, assignment_id, user)
+    assignment_id = a.id  # slug 入口归一化为主键，正文查询不受影响
     current = set(
         (
             await db.execute(
@@ -419,13 +425,14 @@ class QuestionsBatchIn(BaseModel):
 
 @router.post("/{assignment_id}/questions", status_code=201)
 async def create_questions(
-    assignment_id: int,
+    assignment_id: str,
     body: QuestionsBatchIn,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
     """批量录题：人工验收后冻结入库（AI 解析结果也走这里落定）。"""
-    await owned_assignment(db, assignment_id, user)
+    a = await owned_assignment(db, assignment_id, user)
+    assignment_id = a.id  # slug 入口归一化为主键，正文查询不受影响
     if not body.questions:
         raise HTTPException(status_code=400, detail="题目列表不能为空")
     for item in body.questions:
@@ -485,7 +492,7 @@ class QuestionsPutIn(BaseModel):
 
 @router.put("/{assignment_id}/questions")
 async def replace_questions(
-    assignment_id: int,
+    assignment_id: str,
     body: QuestionsPutIn,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -494,6 +501,7 @@ async def replace_questions(
     无 id 的行 INSERT，库内有而请求没有的行 DELETE（级联删该题错题记录）。
     事务内一次落定；section_order 一并写入（板块卡上下移的编辑结果）。"""
     a = await owned_assignment(db, assignment_id, user)
+    assignment_id = a.id  # slug 入口归一化为主键，正文查询不受影响
     if not body.questions:
         raise HTTPException(status_code=400, detail="题目列表不能为空")
     for item in body.questions:
@@ -569,12 +577,13 @@ async def replace_questions(
 
 @router.delete("/{assignment_id}/questions", status_code=204)
 async def clear_questions(
-    assignment_id: int,
+    assignment_id: str,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> None:
     """一键清空题库：题目 + 错题记录 + 提交记录 + 反馈快照全清，批次保留（回到刚建状态）。"""
     a = await owned_assignment(db, assignment_id, user)
+    assignment_id = a.id  # slug 入口归一化为主键，正文查询不受影响
     question_ids = select(Question.id).where(Question.assignment_id == assignment_id)
     await db.execute(delete(ErrorRecord).where(ErrorRecord.question_id.in_(question_ids)))
     await db.execute(delete(Submission).where(Submission.assignment_id == assignment_id))
@@ -595,7 +604,7 @@ class GradingIn(BaseModel):
 
 @router.put("/{assignment_id}/students/{student_id}/grading")
 async def save_grading(
-    assignment_id: int,
+    assignment_id: str,
     student_id: int,
     body: GradingIn,
     db: AsyncSession = Depends(get_db),
@@ -604,6 +613,7 @@ async def save_grading(
     """批改落库：score/rating 由后端按 score_weight 复算（不信前端），
     error_records 先删后插，feedback_snapshots 存档 final_text。"""
     a = await owned_assignment(db, assignment_id, user)
+    assignment_id = a.id  # slug 入口归一化为主键，正文查询不受影响
     s = await db.get(Student, student_id)
     if s is None:
         raise HTTPException(status_code=404, detail="学生不存在")

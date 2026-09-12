@@ -36,7 +36,9 @@ from models import (
     Submission,
 )
 
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.5.1"
+# 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
+AGREEMENT_VERSION = "2026-09-13"
 _STARTED_AT = datetime.now(timezone.utc)
 
 MAX_LOG_ENTRIES = 500
@@ -137,10 +139,34 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
     }
 
     db_size = os.path.getsize(DATABASE_PATH) if os.path.exists(DATABASE_PATH) else 0
+
+    # submissions 按状态拆分（排查「批改状态不对劲」类问题的第一手数据）
+    sub_status_rows = (
+        await db.execute(
+            select(Submission.status, func.count(Submission.id))
+            .join(Assignment, Submission.assignment_id == Assignment.id)
+            .join(Class, Assignment.class_id == Class.id)
+            .where(Class.owner_uid == user.uid)
+            .group_by(Submission.status)
+        )
+    ).all()
+    submissions_by_status = {status: n for status, n in sub_status_rows}
+
+    # LLM 调用按功能拆分（排查 AI 类问题：拆题 vs 起草各自量与失败）
+    llm_feature_rows = (
+        await db.execute(
+            select(LlmCallEvent.feature, func.count(LlmCallEvent.id))
+            .where(LlmCallEvent.uid == user.uid)
+            .group_by(LlmCallEvent.feature)
+        )
+    ).all()
+    llm_by_feature = {feature: n for feature, n in llm_feature_rows}
+
     return {
         "app": {
             "version": APP_VERSION,
             "exported_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": _STARTED_AT.isoformat(),
             "uptime_hours": round((datetime.now(timezone.utc) - _STARTED_AT).total_seconds() / 3600, 2),
             "is_prod": config.IS_PROD,
         },
@@ -157,6 +183,7 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
             "ai_model": os.getenv("AI_MODEL", "").strip(),
             "ai_prices": prices,
             "database_file": os.path.basename(DATABASE_PATH),
+            "agreement_version": AGREEMENT_VERSION,
         },
         "data": {
             "db_size_mb": round(db_size / 1024 / 1024, 3),
@@ -196,12 +223,14 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                     .where(Class.owner_uid == user.uid)
                 )
             ).scalar_one(),
+            "submissions_by_status": submissions_by_status,
             "phrases": await count(Phrase),  # 全局话术配置，非用户数据
             "llm_call_events": (
                 await db.execute(
                     select(func.count(LlmCallEvent.id)).where(LlmCallEvent.uid == user.uid)
                 )
             ).scalar_one(),
+            "llm_call_events_by_feature": llm_by_feature,
         },
         "recent_llm_calls": recent_llm,
         "security": {

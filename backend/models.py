@@ -73,6 +73,8 @@ class Assignment(Base):
     status: Mapped[str] = mapped_column(String(16), default="未开始")  # 未开始/批改中/已完成
     # 板块手动顺序（JSON 板块名数组，空 = 未自定义，回落录入顺序）；_ensure_columns 自动补列
     section_order: Mapped[str] = mapped_column(Text, default="")
+    # 对外短码（URL 用，不可枚举 + 防手误；主键仍为自增 int，slug 为空时前端回落 id）；启动自愈回填
+    slug: Mapped[str] = mapped_column(String(16), default="", index=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     class_: Mapped[Class] = relationship(back_populates="assignments")

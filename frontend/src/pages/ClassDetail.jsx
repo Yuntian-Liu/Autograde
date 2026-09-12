@@ -1,3 +1,4 @@
+import { IconChevronLeft } from "../components/icons";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { App as AntApp, Input, Modal, Popconfirm } from "antd";
@@ -124,7 +125,7 @@ export default function ClassDetail() {
       />
       <div className="wrap">
         <Link className="back" to="/">
-          ← 工作台
+          <IconChevronLeft />工作台
         </Link>
         <h1 style={{ marginTop: "var(--s3)" }}>{data.name}</h1>
         <div className="page-meta">
@@ -156,7 +157,7 @@ export default function ClassDetail() {
             </button>
           </div>
           {data.assignments.map((a) => (
-            <Link className="row" key={a.id} to={`/assignments/${a.id}`}>
+            <Link className="row" key={a.id} to={`/assignments/${a.slug || a.id}`}>
               <span className="row-name">
                 {a.unit_label} {a.content}
                 <span>

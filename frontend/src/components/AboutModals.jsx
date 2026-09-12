@@ -84,7 +84,7 @@ export function OpenSourceModal({ open, onClose }) {
             <div className="os-repo-name">Autograde</div>
             <div className="os-repo-sub">英语作业批改工作台</div>
           </div>
-          <span className="os-repo-link">GitHub →</span>
+          <span className="os-repo-link">GitHub</span>
         </a>
 
         {/* 开发者卡 */}
@@ -95,7 +95,7 @@ export function OpenSourceModal({ open, onClose }) {
             <div className="os-dev-sub">独立开发者 · 设计与实现</div>
           </div>
           <a href={GITHUB_HOME} target="_blank" rel="noreferrer" className="os-dev-link">
-            主页 →
+            主页
           </a>
         </div>
 

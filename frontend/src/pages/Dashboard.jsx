@@ -66,7 +66,7 @@ export default function Dashboard() {
               <Link
                 className="row"
                 key={a.id}
-                to={a.question_count > 0 ? `/grading/${a.id}` : `/assignments/${a.id}`}
+                to={a.question_count > 0 ? `/grading/${a.slug || a.id}` : `/assignments/${a.slug || a.id}`}
               >
                 <span className="todo-main">
                   <b>
@@ -127,7 +127,7 @@ export default function Dashboard() {
         <section className="block">
           <div className="sec-title">最近批次</div>
           {recent.map((a) => (
-            <Link className="row" key={a.id} to={`/assignments/${a.id}`}>
+            <Link className="row" key={a.id} to={`/assignments/${a.slug || a.id}`}>
               <span className="row-name">
                 {a.unit_label} {a.content}
                 <span>

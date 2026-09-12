@@ -9,6 +9,8 @@ import { APP_VERSION } from "../legal/changelog";
 import {
   IconAvatar,
   IconChart,
+  IconChevronLeft,
+  IconChevronRight,
   IconCode,
   IconDoc,
   IconDownload,
@@ -32,7 +34,11 @@ function RowItem({ icon, tint, label, value, onClick, arrow = true, danger = fal
       </span>
       <span className="set-label">{label}</span>
       {value && <span className="set-value">{value}</span>}
-      {arrow && onClick && <span className="set-arrow">→</span>}
+      {arrow && onClick && (
+        <span className="set-arrow">
+          <IconChevronRight />
+        </span>
+      )}
     </Tag>
   );
 }
@@ -192,7 +198,7 @@ export default function Settings() {
       <AppHeader crumbs={[{ label: "工作台", to: "/" }, { label: "设置" }]} />
       <div className="wrap settings-wrap">
         <Link className="back" to="/">
-          ← 工作台
+          <IconChevronLeft />工作台
         </Link>
         <h1 style={{ marginTop: "var(--s3)" }}>设置</h1>
 
@@ -248,10 +254,10 @@ export default function Settings() {
         </SectionCard>
 
         <SectionCard title="关于">
-          <RowItem icon={<IconDoc />} tint="var(--danger)" label="用户协议与隐私政策" onClick={() => setLegalOpen(true)} />
+          <RowItem icon={<IconInfo />} tint="var(--ink-2)" label="版本" value={APP_VERSION} arrow={false} onClick={null} />
           <RowItem icon={<IconHistory />} tint="var(--accent)" label="版本日志" value={APP_VERSION} onClick={() => setChangelogOpen(true)} />
           <RowItem icon={<IconCode />} tint="var(--success)" label="开源声明" onClick={() => setOpenSourceOpen(true)} />
-          <RowItem icon={<IconInfo />} tint="var(--ink-2)" label="版本" value={APP_VERSION} arrow={false} onClick={null} />
+          <RowItem icon={<IconDoc />} tint="var(--danger)" label="用户协议与隐私政策" onClick={() => setLegalOpen(true)} />
         </SectionCard>
 
         <SectionCard>
