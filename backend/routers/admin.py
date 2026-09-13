@@ -61,7 +61,7 @@ async def overview(
         "graded": graded,
         "db_size_mb": round(db_size / 1024 / 1024, 2),
         "ai_cost_today_yuan": round(float(today_cost), 6),
-        "version": "0.5.1",
+        "version": "0.6.0",
     }
 
 
@@ -256,3 +256,33 @@ async def revoke_invite_code(
         raise HTTPException(status_code=404, detail="邀请码不存在")
     c.revoked = True
     await db.commit()
+
+
+# ---- 对象存储（COS）用量 ----
+
+
+@router.get("/cos-usage")
+async def cos_usage(admin: User = Depends(get_admin_user), db: AsyncSession = Depends(get_db)) -> dict:
+    """对象存储区块：库内追踪数 + 桶内真实对象对照（COS 未配置或拉取失败降级只显 DB 数）。"""
+    from cos_store import bucket_stats, cos_enabled
+    from models import NoteImage
+
+    db_images = (await db.execute(select(func.count(NoteImage.id)))).scalar_one()
+    db_bytes = (
+        await db.execute(select(func.coalesce(func.sum(NoteImage.size), 0)))
+    ).scalar_one()
+    result = {
+        "cos_set": cos_enabled(),
+        "db_images": db_images,
+        "db_bytes": int(db_bytes),
+        "bucket_objects": None,
+        "bucket_bytes": None,
+    }
+    if cos_enabled():
+        try:
+            objects, total = await bucket_stats("notes/")
+            result["bucket_objects"] = objects
+            result["bucket_bytes"] = total
+        except Exception:
+            pass  # 降级：只显 DB 数
+    return result

@@ -122,6 +122,8 @@ a.row:hover { background: var(--bg-soft); }
   color: var(--ink-2);
   text-decoration: none;
   display: inline-block;
+  white-space: nowrap; /* 按钮文字不折行（修复窄位竖排） */
+  flex: none;
   transition: all var(--dur) var(--ease);
 }
 .btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -961,3 +963,32 @@ a.qg-name:hover { color: var(--accent); }
 .um-text { font-size: var(--t-body); color: var(--ink-2); line-height: 1.8; margin: 0 0 var(--s4); text-align: left; }
 .um-actions { display: flex; gap: var(--s2); }
 .um-actions .btn { flex: 1; }
+
+/* ---------- 笔记详情编辑器 ---------- */
+.note-editor {
+  margin-top: var(--s4);
+  min-height: 320px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--s4);
+  line-height: 1.85;
+  outline: none;
+  white-space: pre-wrap;
+}
+.note-editor:focus { border-color: var(--accent-line); }
+.note-editor b, .note-editor strong { font-weight: 600; }
+.note-img { max-width: 100%; border-radius: var(--r-sm); border: 1px solid var(--line); margin: var(--s2) 0; }
+.note-img-missing {
+  display: inline-block;
+  font-size: var(--t-caption);
+  color: var(--ink-3);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: var(--s2) var(--s3);
+  margin: var(--s2) 0;
+}
+
+/* ---------- 笔记库筛选区（一行排开、控件等高、搜索框弹性占主） ---------- */
+.notes-toolbar { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.notes-toolbar .ant-input-affix-wrapper { flex: 1; min-width: 160px; }
+.notes-toolbar .ant-picker { width: 240px; }

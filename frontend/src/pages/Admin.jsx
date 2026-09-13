@@ -634,10 +634,12 @@ function SecurityPanel() {
 function DataPanel() {
   const { message } = AntApp.useApp();
   const [overview, setOverview] = useState(null);
+  const [cos, setCos] = useState(null);
   const [busy, setBusy] = useState(false);
   const load = useCallback(() => {
     setOverview(null);
     adminApi.overview().then(setOverview).catch(() => setOverview({ error: true }));
+    apiGet("/admin/cos-usage").then(setCos).catch(() => setCos(null));
   }, []);
   useEffect(() => {
     load();
@@ -665,6 +667,31 @@ function DataPanel() {
         <Metric label="版本" value={overview?.version ?? "…"} />
       </div>
       )}
+      <section className="block">
+        <div className="sec-title">对象存储（COS）</div>
+        <div className="settings-row static">
+          <span>配置状态</span>
+          <span className={`settings-value ${cos?.cos_set ? "tone-good" : "tone-bad"}`}>
+            {cos ? (cos.cos_set ? "已配置" : "未配置") : "…"}
+          </span>
+        </div>
+        <div className="settings-row static">
+          <span>库内追踪图片</span>
+          <span className="settings-value">
+            {cos ? `${cos.db_images} 张 · ${(cos.db_bytes / 1024 / 1024).toFixed(1)} MB` : "…"}
+          </span>
+        </div>
+        {cos?.cos_set && (
+          <div className="settings-row static">
+            <span>桶内实际对象（notes/ 前缀）</span>
+            <span className="settings-value">
+              {cos.bucket_objects === null
+                ? "拉取失败（仅显库内数）"
+                : `${cos.bucket_objects} 个 · ${(cos.bucket_bytes / 1024 / 1024).toFixed(1)} MB`}
+            </span>
+          </div>
+        )}
+      </section>
       <section className="block">
         <div className="sec-title sec-title-row">
           备份

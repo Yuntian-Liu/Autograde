@@ -1,7 +1,7 @@
 // 版本日志数据源（设置页「版本日志」弹窗 + 登录后更新提醒弹窗；发版时与 CHANGELOG.md 同步）
 // 结构：minor 为主条目，patch 嵌套在 patches 数组里（主界面只呈现 minor，展开后见 patch）
 // ⚠️ 公开文件：不得出现私人信息
-export const APP_VERSION = "V0.5.1";
+export const APP_VERSION = "V0.6.0";
 
 /** 协议版本（用户协议/隐私政策最后更新日期，改协议时同步递增；触发登录后协议变更提醒） */
 export const AGREEMENT_VERSION = "2026-09-13";
@@ -17,6 +17,17 @@ export function getLatestUpdate() {
 }
 
 export const CHANGELOG = [
+  {
+    version: "V0.6.0",
+    date: "2026-09-13",
+    items: [
+      "笔记库：图文混排反馈存档，粘贴图片自动上传，可搜索可筛选可回溯",
+      "批改联动：保存批改自动生成笔记，手动编辑过的笔记永不覆盖",
+      "对象存储：腾讯 COS 私有桶，图片直传直读不占服务器带宽",
+      "管理后台数据面板新增对象存储用量对照",
+      "协议补充笔记库与学生照片保护条款",
+    ],
+  },
   {
     version: "V0.5.0",
     date: "2026-09-12",

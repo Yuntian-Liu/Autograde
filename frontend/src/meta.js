@@ -78,6 +78,14 @@ export function scoreColorVar(score) {
   return "var(--ink-3)";
 }
 
+// 字节 → 人类可读（KB/MB 一位小数）
+export function fmtBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
 // 问候语时段（对应 phrases 表「问候语·X」category，参照旧版 build_greeting 划分）
 export function greetingSlot(date = new Date()) {
   const h = date.getHours();

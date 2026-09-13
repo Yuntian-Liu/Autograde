@@ -125,6 +125,15 @@ export default function Dashboard() {
         </section>
 
         <section className="block">
+          <Link className="row" to="/notes">
+            <span className="row-name">
+              笔记库
+              <span>批改反馈与图文笔记</span>
+            </span>
+          </Link>
+        </section>
+
+        <section className="block">
           <div className="sec-title">最近批次</div>
           {recent.map((a) => (
             <Link className="row" key={a.id} to={`/assignments/${a.slug || a.id}`}>

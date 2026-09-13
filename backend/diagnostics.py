@@ -30,13 +30,15 @@ from models import (
     ErrorRecord,
     FeedbackSnapshot,
     LlmCallEvent,
+    Note,
+    NoteImage,
     Phrase,
     Question,
     Student,
     Submission,
 )
 
-APP_VERSION = "0.5.1"
+APP_VERSION = "0.6.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
 AGREEMENT_VERSION = "2026-09-13"
 _STARTED_AT = datetime.now(timezone.utc)
@@ -179,6 +181,9 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
             "jwt_secret_set": config.JWT_SECRET != "dev-secret-change-me",
             "resend_set": bool(config.RESEND_API_KEY and config.RESEND_FROM),
             "openai_key_set": bool(os.getenv("OPENAI_API_KEY", "").strip()),
+            "cos_set": bool(
+                config.COS_SECRET_ID and config.COS_SECRET_KEY and config.COS_BUCKET
+            ),
             "ai_base_url": mask_urls(os.getenv("OPENAI_BASE_URL", "").strip()),
             "ai_model": os.getenv("AI_MODEL", "").strip(),
             "ai_prices": prices,
@@ -231,6 +236,14 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                 )
             ).scalar_one(),
             "llm_call_events_by_feature": llm_by_feature,
+            "notes": (
+                await db.execute(select(func.count(Note.id)).where(Note.owner_uid == user.uid))
+            ).scalar_one(),
+            "note_images": (
+                await db.execute(
+                    select(func.count(NoteImage.id)).where(NoteImage.owner_uid == user.uid)
+                )
+            ).scalar_one(),
         },
         "recent_llm_calls": recent_llm,
         "security": {

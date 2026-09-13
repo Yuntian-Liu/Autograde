@@ -15,6 +15,7 @@ from models import (
     Class,
     ErrorRecord,
     FeedbackSnapshot,
+    Note,
     Phrase,
     Question,
     Student,
@@ -730,6 +731,35 @@ async def save_grading(
                 snap = FeedbackSnapshot(student_id=student_id, assignment_id=assignment_id)
                 db.add(snap)
             snap.final_text = body.final_text
+
+            # 笔记联动：正常保存与补录（有正文）都同步一条关联笔记；重复保存更新文本不重复建条
+            # 「手动未改才更新」：user_edited=1（老师已贴图/改过）的笔记永久脱钩不动
+            if body.status in GRADED_STATUSES:
+                from routers.notes import _title_of
+
+                note = (
+                    await db.execute(
+                        select(Note).where(
+                            Note.owner_uid == user.uid,
+                            Note.assignment_id == assignment_id,
+                            Note.student_id == student_id,
+                        )
+                    )
+                ).scalars().first()
+                if note is None:
+                    note = Note(
+                        owner_uid=user.uid,
+                        class_id=a.class_id,
+                        assignment_id=assignment_id,
+                        student_id=student_id,
+                    )
+                    db.add(note)
+                    note.content = body.final_text
+                    note.title = _title_of(body.final_text)
+                elif not note.user_edited:
+                    note.content = body.final_text
+                    note.title = _title_of(body.final_text)
+                # user_edited=1：不动
 
         # 话术使用计数：同一学生同一批次重复保存不重复计（先按本次全量回滚旧计数再累加新计数）
         if body.used_phrase_ids:

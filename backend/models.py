@@ -184,3 +184,38 @@ class LlmCallEvent(Base):
     finish_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)  # None=调用异常
     is_empty: Mapped[bool] = mapped_column(Boolean, default=False)  # 正文 0 字符
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class Note(Base):
+    """笔记：多租户锚点直挂 owner_uid（游离笔记无班级）；关联字段均可空。
+
+    content 为文本行 + 图片占位符 [[img:key]]；title = 内容首行冗余（微信笔记规则）。
+    """
+
+    __tablename__ = "notes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_uid: Mapped[int] = mapped_column(Integer, index=True)
+    class_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    student_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    assignment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    title: Mapped[str] = mapped_column(String(128), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    # 用户手动编辑过（笔记编辑页 PATCH 即置位）后，批改联动永久脱钩不再覆盖
+    user_edited: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class NoteImage(Base):
+    """笔记图片追踪：上传签发时入库（note_id 可空=未贴进正文的临时件），
+    笔记保存时对账归属；删除笔记连带清理。"""
+
+    __tablename__ = "note_images"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    note_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # NULL = 临时（未贴进正文）
+    owner_uid: Mapped[int] = mapped_column(Integer, index=True)
+    key: Mapped[str] = mapped_column(String(256), unique=True)  # COS 对象 key
+    size: Mapped[int] = mapped_column(Integer, default=0)  # 字节
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
