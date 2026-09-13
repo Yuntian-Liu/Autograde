@@ -116,3 +116,14 @@ async def bucket_stats(prefix: str = "notes/") -> tuple[int, int]:
         return count, total
 
     return await asyncio.to_thread(_scan)
+
+
+async def upload_bytes(key: str, data: bytes, content_type: str) -> None:
+    """服务端代传（fetch-image 链路：外链图片取回后写入 COS）。"""
+    await asyncio.to_thread(
+        _get_client().put_object,
+        Bucket=config.COS_BUCKET,
+        Key=key,
+        Body=data,
+        ContentType=content_type,
+    )

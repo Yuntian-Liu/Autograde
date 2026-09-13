@@ -15,6 +15,7 @@ from cos_store import (
     make_image_key,
     presign_download,
     presign_upload,
+    upload_bytes,
 )
 from database import get_db
 from models import Assignment, Class, Note, NoteImage, Student
@@ -29,9 +30,9 @@ def _title_of(content: str) -> str:
 
 
 def _excerpt(content: str) -> str:
-    """列表摘要：跳过首行标题，取后续前两行纯文本。"""
+    """列表摘要：跳过首行标题，取后续三行并保留换行（前端 pre-line + line-clamp 截断）。"""
     lines = [l.strip() for l in (content or "").split("\n")[1:] if l.strip()]
-    return " ".join(lines)[:120]
+    return "\n".join(lines[:3])[:180]
 
 
 def _note_brief(n: Note, names: dict, sizes: dict[int, int]) -> dict:
@@ -291,3 +292,85 @@ async def create_upload_url(
     db.add(NoteImage(note_id=body.note_id, owner_uid=user.uid, key=key, size=body.size))
     await db.commit()
     return {"key": key, "upload_url": await presign_upload(key)}
+
+
+_CONTENT_TYPE_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+
+
+def _assert_public_url(url: str) -> str:
+    """SSRF 防护：只允许 http/https 公网地址；解析域名后拒绝内网/环回/保留网段。
+    返回 host（供日志）。重定向后的最终 URL 也要过这道闸。"""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    u = urlparse(url)
+    if u.scheme not in ("http", "https") or not u.hostname:
+        raise HTTPException(status_code=400, detail="仅支持 http/https 图片链接")
+    host = u.hostname
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        raise HTTPException(status_code=400, detail="图片链接域名无法解析")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise HTTPException(status_code=400, detail="图片链接指向不允许的地址")
+    return host
+
+
+class FetchImageIn(BaseModel):
+    url: str = Field(..., max_length=2048)
+    note_id: int | None = None
+
+
+@router.post("/fetch-image")
+async def fetch_image(
+    body: FetchImageIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """外链图片迁移：后端取回字节（10MB 上限 / 15s 超时 / 仅 image/*）→ 传 COS → 返回 key + 签名读 URL。"""
+    import httpx
+
+    if not cos_enabled():
+        raise HTTPException(status_code=503, detail="图片存储未配置，暂不支持图片迁移")
+    _assert_public_url(body.url)
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            async with client.stream("GET", body.url) as resp:
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=400, detail=f"图片拉取失败（HTTP {resp.status_code}）")
+                _assert_public_url(str(resp.url))  # 重定向落点再过闸
+                ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+                ext = _CONTENT_TYPE_EXT.get(ctype)
+                if ext is None:
+                    raise HTTPException(status_code=400, detail="链接内容不是图片")
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes(65536):
+                    total += len(chunk)
+                    if total > MAX_IMAGE_BYTES:
+                        raise HTTPException(status_code=400, detail="图片不能超过 10MB")
+                    chunks.append(chunk)
+        data = b"".join(chunks)
+    except HTTPException:
+        raise
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="图片拉取超时")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"图片拉取失败：{str(e)[:120]}")
+
+    key = make_image_key(user.uid, body.note_id, f"fetch.{ext}")
+    await upload_bytes(key, data, ctype)
+    db.add(NoteImage(note_id=body.note_id, owner_uid=user.uid, key=key, size=total))
+    await db.commit()
+    return {"key": key, "url": await presign_download(key)}

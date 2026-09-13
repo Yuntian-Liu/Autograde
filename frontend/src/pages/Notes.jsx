@@ -137,20 +137,18 @@ export default function Notes() {
 
         <section className="block">
           {shown.map((n) => (
-            <Link className="row" key={n.id} to={`/notes/${n.id}`}>
-              <span className="row-name">
-                {n.title}
-                <span>{n.excerpt}</span>
-              </span>
-              <span className="mono">
+            <Link className="row note-card" key={n.id} to={`/notes/${n.id}`}>
+              <div className="note-card-title">{n.title}</div>
+              {n.excerpt && <div className="note-card-excerpt">{n.excerpt}</div>}
+              <div className="note-card-meta">
                 {n.class_name
                   ? [n.class_name, n.student_name, n.assignment_label].filter(Boolean).join(" · ")
                   : "历史记录"}
-              </span>
-              <span className="mono">
+                {" · "}
                 {n.image_count > 0 ? `${n.image_count} 图 · ${fmtBytes(n.image_size)}` : "纯文本"}
-              </span>
-              <span className="mono">{(n.updated_at || "").slice(0, 10)}</span>
+                {" · "}
+                {(n.updated_at || "").slice(0, 10)}
+              </div>
             </Link>
           ))}
           {shown.length === 0 && <div className="row">暂无笔记</div>}

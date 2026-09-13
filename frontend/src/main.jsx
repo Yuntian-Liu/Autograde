@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { App as AntApp, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import App from "./App";
@@ -20,16 +20,17 @@ import "@fontsource/jetbrains-mono/600.css";
 import "./tokens.css";
 import "./styles.css";
 
+// data router（createBrowserRouter）：useBlocker 导航拦截的前提；App 内部 <Routes> 作后继路由不变
+const router = createBrowserRouter([{ path: "*", element: <App /> }]);
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <ConfigProvider locale={zhCN} theme={antdTheme}>
       <AntApp>
         <ErrorBoundary>
-          <BrowserRouter>
-            <AuthProvider>
-              <App />
-            </AuthProvider>
-          </BrowserRouter>
+          <AuthProvider>
+            <RouterProvider router={router} />
+          </AuthProvider>
         </ErrorBoundary>
       </AntApp>
     </ConfigProvider>
