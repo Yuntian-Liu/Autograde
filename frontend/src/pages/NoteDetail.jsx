@@ -61,7 +61,8 @@ export default function NoteDetail() {
   const [saving, setSaving] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [uploading, setUploading] = useState(0);
-  const [migrating, setMigrating] = useState(""); // 图片迁移进度（「正在迁移图片 2/5」）
+  const [migrating, setMigrating] = useState(""); // 图片迁移进度文字（底部保留）
+  const [migrateBar, setMigrateBar] = useState(null); // { done, total, phase: run|done } 顶部进度条
 
   // 防丢保护：编辑态且有未保存修改时，所有离开路径都要确认
   const blocking = editing && dirty;
@@ -161,6 +162,7 @@ export default function NoteDetail() {
     if (text) document.execCommand("insertText", false, text);
     let failed = 0;
     let i = 0;
+    setMigrateBar({ done: 0, total: srcs.length, phase: "run" });
     for (const src of srcs) {
       i++;
       setMigrating(`正在迁移图片 ${i}/${srcs.length}`);
@@ -179,8 +181,12 @@ export default function NoteDetail() {
       } catch {
         failed++;
       }
+      setMigrateBar({ done: i, total: srcs.length, phase: "run" });
     }
     setMigrating("");
+    // 满格短暂停留后淡出消失
+    setMigrateBar({ done: srcs.length, total: srcs.length, phase: "done" });
+    setTimeout(() => setMigrateBar(null), 900);
     if (failed) {
       message.warning(`${srcs.length - failed} 张已迁移，${failed} 张无法自动迁移，需手动补`);
     } else {
@@ -232,6 +238,46 @@ export default function NoteDetail() {
     } catch {
       message.error("复制失败，请检查浏览器剪贴板权限");
     }
+  }
+
+  // 阅读态图片点击 → 新开标签页看原图（签名 URL 直达，浏览器原生支持右键复制/另存）
+  function onReaderClick(e) {
+    const img = e.target.closest?.("img[data-key]");
+    if (img) window.open(img.src, "_blank");
+  }
+
+  // 签名 URL 过期（1 小时）：img 加载失败时提示刷新重签
+  function onReaderErrorCapture(e) {
+    if (e.target.tagName === "IMG") {
+      message.warning("图片链接已过期，请刷新页面重新获取");
+    }
+  }
+
+  // 下载全部图片：签名 URL 跨域 a[download] 不生效，先 fetch 转 blob 触发真下载；
+  // CORS 受限时退化为逐个新开标签页
+  async function downloadAllImages() {
+    const keys = [...(note.content || "").matchAll(/\[\[img:([^\]]+)\]\]/g)].map((m) => m[1]);
+    const entries = keys
+      .map((key) => ({ key, url: (note.image_urls || {})[key] }))
+      .filter((e) => e.url);
+    if (entries.length === 0) return message.warning("图片链接已过期，请刷新页面重新获取");
+    for (let i = 0; i < entries.length; i++) {
+      const ext = entries[i].key.rsplit(".", 1)[1] || "png";
+      const name = `note-${id}-${i + 1}.${ext}`;
+      try {
+        const resp = await fetch(entries[i].url);
+        if (!resp.ok) throw new Error(String(resp.status));
+        const blob = await resp.blob();
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch {
+        window.open(entries[i].url, "_blank");
+      }
+    }
+    message.success(`已处理 ${entries.length} 张图片`);
   }
 
   async function remove() {
@@ -308,6 +354,11 @@ export default function NoteDetail() {
               <button className="btn" onClick={copyContent}>
                 复制全文
               </button>
+              {(note.image_urls && Object.keys(note.image_urls).length > 0) && (
+                <button className="btn" onClick={downloadAllImages}>
+                  下载全部图片
+                </button>
+              )}
             </>
           )}
           <button className="btn danger" style={{ marginLeft: "auto" }} onClick={() => setDeleteOpen(true)}>
@@ -317,6 +368,21 @@ export default function NoteDetail() {
 
         {editing ? (
           <>
+            {migrateBar && (
+              <div className={`migrate-bar ${migrateBar.phase}`}>
+                <div className="migrate-track">
+                  <div
+                    className="migrate-fill"
+                    style={{ width: `${(migrateBar.done / migrateBar.total) * 100}%` }}
+                  />
+                </div>
+                <div className="migrate-text">
+                  {migrateBar.phase === "done"
+                    ? `已迁移 ${migrateBar.total} 张图片`
+                    : `正在迁移图片 ${migrateBar.done}/${migrateBar.total}`}
+                </div>
+              </div>
+            )}
             <h1 className="note-title">{note.title}</h1>
             <div
               ref={editorRef}
@@ -334,6 +400,8 @@ export default function NoteDetail() {
             <h1 className="note-title">{note.title}</h1>
             <div
               className="note-reader"
+              onClick={onReaderClick}
+              onErrorCapture={onReaderErrorCapture}
               dangerouslySetInnerHTML={{
                 __html: contentToHtml(note.content, note.image_urls || {}),
               }}
