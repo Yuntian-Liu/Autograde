@@ -5,6 +5,7 @@ import { App as AntApp, Input, InputNumber, Modal, Popconfirm, Segmented, Select
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { adminApi, apiDelete, apiGet, apiPost, apiPut, downloadBackup } from "../api";
 import AppHeader from "../components/AppHeader";
+import { fmtTime } from "../meta";
 import { useAuth } from "../contexts/AuthContext";
 
 // 管理后台（仅 is_admin 可达，路由已守卫；此处再判一次防御深度）
@@ -242,7 +243,7 @@ function AiPanel() {
           dataSource={data.recent}
           columns={[
             { title: "时间", dataIndex: "created_at", width: 170,
-              render: (v) => (v ? v.slice(0, 19).replace("T", " ") : "—") },
+              render: (v) => (v ? fmtTime(v) : "—") },
             { title: "功能", dataIndex: "feature", width: 130 },
             { title: "峰谷", dataIndex: "price_tier", width: 60,
               render: (v) => <TierTag tier={v} /> },
@@ -535,7 +536,7 @@ function InvitesPanel() {
           { title: "使用", width: 90,
             render: (_, r) => `${r.use_count} / ${r.max_uses}${r.used_by ? `（UID ${r.used_by}）` : ""}` },
           { title: "有效期至", dataIndex: "expires_at", width: 170,
-            render: (v) => (v ? v.slice(0, 10) : "永不过期") },
+            render: (v) => (v ? fmtTime(v).slice(0, 10) : "永不过期") },
           { title: "备注", dataIndex: "note", ellipsis: true },
           { title: "操作", width: 90, render: (_, row) =>
             row.status === "可用" ? (

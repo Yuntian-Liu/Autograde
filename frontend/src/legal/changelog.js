@@ -1,7 +1,7 @@
 // 版本日志数据源（设置页「版本日志」弹窗 + 登录后更新提醒弹窗；发版时与 CHANGELOG.md 同步）
 // 结构：minor 为主条目，patch 嵌套在 patches 数组里（主界面只呈现 minor，展开后见 patch）
 // ⚠️ 公开文件：不得出现私人信息
-export const APP_VERSION = "V0.6.2";
+export const APP_VERSION = "V0.6.3";
 
 /** 协议版本（用户协议/隐私政策最后更新日期，改协议时同步递增；触发登录后协议变更提醒） */
 export const AGREEMENT_VERSION = "2026-09-13";
@@ -44,6 +44,14 @@ export const CHANGELOG = [
         items: [
           "图片可取回：阅读态点击看原图（可复制/另存），支持一键下载全部图片",
           "图片迁移进度条：编辑器顶部主题色细条实时推进，第几张一目了然",
+        ],
+      },
+      {
+        version: "V0.6.3",
+        date: "2026-09-13",
+        items: [
+          "全站时间统一为北京时间（UTC+8）显示",
+          "Windows 微信迁移补救：识别剪贴板无图片数据并提示，编辑器支持拖拽图片上传",
         ],
       },
     ],

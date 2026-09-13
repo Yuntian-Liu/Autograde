@@ -4,7 +4,7 @@ import { App as AntApp, DatePicker, Input, Modal, Select } from "antd";
 import { apiGet, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
 import PageSkeleton from "../components/PageSkeleton";
-import { fmtBytes } from "../meta";
+import { fmtBytes, fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
 
 // 笔记库：搜索（学生名/标题）+ 班级筛选 + 时间倒序卡片；新建可选关联（班级→学生→批次），全不选即游离笔记
@@ -147,7 +147,7 @@ export default function Notes() {
                 {" · "}
                 {n.image_count > 0 ? `${n.image_count} 图 · ${fmtBytes(n.image_size)}` : "纯文本"}
                 {" · "}
-                {(n.updated_at || "").slice(0, 10)}
+                {(fmtTime(n.updated_at) || "").slice(0, 10)}
               </div>
             </Link>
           ))}

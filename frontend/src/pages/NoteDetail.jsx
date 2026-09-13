@@ -4,6 +4,7 @@ import { App as AntApp, Modal } from "antd";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
 import PageSkeleton from "../components/PageSkeleton";
+import { fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
 import { blobExt, classifyImgSrc, dataUriToBlob, parseImgSrcs } from "../utils/paste";
 
@@ -63,6 +64,7 @@ export default function NoteDetail() {
   const [uploading, setUploading] = useState(0);
   const [migrating, setMigrating] = useState(""); // 图片迁移进度文字（底部保留）
   const [migrateBar, setMigrateBar] = useState(null); // { done, total, phase: run|done } 顶部进度条
+  const [dragOver, setDragOver] = useState(false); // 拖拽悬停视觉反馈
 
   // 防丢保护：编辑态且有未保存修改时，所有离开路径都要确认
   const blocking = editing && dirty;
@@ -161,6 +163,7 @@ export default function NoteDetail() {
     // 先落纯文本（含原文的「[图片]」占位），再逐张迁移
     if (text) document.execCommand("insertText", false, text);
     let failed = 0;
+    let fileLocal = 0; // file:// 本地路径（Windows 微信剪贴板不含图片数据）
     let i = 0;
     setMigrateBar({ done: 0, total: srcs.length, phase: "run" });
     for (const src of srcs) {
@@ -176,7 +179,8 @@ export default function NoteDetail() {
           insertImgHtml(res.key, res.url);
           setDirty(true);
         } else {
-          failed++; // wx-、file:// 等拿不到的 scheme 保留原文占位
+          if (kind === "file") fileLocal++;
+          failed++; // file:// / wx- 等拿不到的，保留原文占位
         }
       } catch {
         failed++;
@@ -187,7 +191,9 @@ export default function NoteDetail() {
     // 满格短暂停留后淡出消失
     setMigrateBar({ done: srcs.length, total: srcs.length, phase: "done" });
     setTimeout(() => setMigrateBar(null), 900);
-    if (failed) {
+    if (fileLocal > 0) {
+      message.warning("Windows 微信剪贴板不含图片数据，请直接把图片拖进编辑器");
+    } else if (failed) {
       message.warning(`${srcs.length - failed} 张已迁移，${failed} 张无法自动迁移，需手动补`);
     } else {
       message.success(`已迁移 ${srcs.length} 张图片`);
@@ -316,7 +322,7 @@ export default function NoteDetail() {
           ← 笔记库
         </Link>
         <div className="page-meta" style={{ marginTop: "var(--s3)" }}>
-          {linkLine} · 更新于 {(note.updated_at || "").slice(0, 16).replace("T", " ")}
+          {linkLine} · 更新于 {fmtTime(note.updated_at)}
         </div>
 
         <div className="btn-row" style={{ marginTop: "var(--s3)" }}>
@@ -386,11 +392,26 @@ export default function NoteDetail() {
             <h1 className="note-title">{note.title}</h1>
             <div
               ref={editorRef}
-              className="note-editor"
+              className={dragOver ? "note-editor drag-over" : "note-editor"}
               contentEditable
               suppressContentEditableWarning
               onPaste={onPaste}
               onInput={() => setDirty(true)}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                // Windows 微信补救：剪贴板拿不到图片时，直接拖文件进来
+                const files = [...(e.dataTransfer?.files || [])].filter((f) =>
+                  f.type.startsWith("image/")
+                );
+                if (files.length === 0) return;
+                for (const f of files) uploadImage(f);
+              }}
             />
             {uploading > 0 && <div className="page-meta">图片上传中…</div>}
             {migrating && <div className="page-meta">{migrating}</div>}

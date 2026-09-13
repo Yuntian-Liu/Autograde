@@ -1035,3 +1035,6 @@ a.qg-name:hover { color: var(--accent); }
 .migrate-track { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
 .migrate-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width var(--dur) var(--ease); }
 .migrate-text { font-family: var(--font-mono); font-size: var(--t-micro); color: var(--ink-3); margin-top: var(--s1); }
+
+/* 编辑器拖拽悬停反馈 */
+.note-editor.drag-over { border-style: dashed; border-color: var(--accent); background: var(--accent-bg); }

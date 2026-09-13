@@ -1,9 +1,11 @@
 // 粘贴图片分流工具（纯函数，便于 node 侧验证；微信笔记整篇复制时图片在 text/html 的 <img> 里）
 
-// data:image/... → 转 Blob 直传；http(s) → 后端 fetch-image 代取；其余 scheme 拿不到 → unsupported
+// data:image/... → 转 Blob 直传；http(s) → 后端 fetch-image 代取；
+// file:// → Windows 微信本地路径（浏览器读不到，单独识别给拖拽指引）；其余 → unsupported
 export function classifyImgSrc(src) {
   if (src.startsWith("data:image/")) return "datauri";
   if (/^https?:\/\//i.test(src)) return "http";
+  if (/^file:\/\//i.test(src)) return "file";
   return "unsupported";
 }
 

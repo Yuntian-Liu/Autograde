@@ -86,6 +86,27 @@ export function fmtBytes(bytes) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+// 时间戳统一转 Asia/Shanghai 显示（后端存 UTC）；无效/空值原样返回
+export function fmtTime(iso) {
+  if (!iso) return iso;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(d)
+      .map((p) => [p.type, p.value])
+  );
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+}
+
 // 问候语时段（对应 phrases 表「问候语·X」category，参照旧版 build_greeting 划分）
 export function greetingSlot(date = new Date()) {
   const h = date.getHours();
