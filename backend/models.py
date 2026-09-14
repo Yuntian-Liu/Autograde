@@ -149,6 +149,8 @@ class Phrase(Base):
     category: Mapped[str] = mapped_column(String(32))  # 问候语·早上/Issue 模板/催交……
     name: Mapped[str] = mapped_column(String(64), default="")  # 条目名（Issue 模板用，如「未交预习」）
     content: Mapped[str] = mapped_column(Text)
+    # 渲染格式：空=纯文本 / title_bold=首行加粗 / title_bold+body_italic=首行加粗+其余行倾斜
+    format: Mapped[str] = mapped_column(String(32), default="")
     scope: Mapped[str] = mapped_column(String(16), default="内置")  # 内置/自定义
     use_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { authApi } from "../api";
+import { authApi, apiGet } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 import AgreementModal from "../components/AgreementModal";
 import Confetti from "../components/Confetti";
@@ -18,6 +18,12 @@ const PWD_RULES = [
 ];
 
 const AVATAR_COUNT = 9;
+
+// 阿里云 ESA 人机验证（边缘验签）：场景 ID 对应 ESA 后台两条规则
+// send-code → 图像复原；login-password → 拼图验证
+const ALIYUN_PREFIX = "esa-r443qsm5d5";
+const ALIYUN_SCENES = { send: "15r85739", login: "1r94ah45" };
+const ALIYUN_SERVERS = ["captcha-esa-open.aliyuncs.com", "captcha-esa-open-b.aliyuncs.com"];
 
 export default function Login() {
   const { login, user } = useAuth();
@@ -43,6 +49,80 @@ export default function Login() {
   const [agreed, setAgreed] = useState(false); // 协议勾选（发码前必须同意）
   const [legalOpen, setLegalOpen] = useState(false);
   const captchaRef = useRef(null);
+  const [captchaMode, setCaptchaMode] = useState(null); // null=加载中 / self=自托管图形码 / aliyun=ESA 边缘验签
+  const [captchaError, setCaptchaError] = useState(false);
+  const [captchaLoading, setCaptchaLoading] = useState(false); // aliyun 首次 init 的加载态
+  const captchaInstance = useRef(null); // aliyun captcha 实例（全局单例）
+  const captchaScriptReady = useRef(false);
+  const activeScene = useRef(null); // 当前实例所属场景
+  // 业务函数从 ref 读最新表单值（success 回调是 init 时绑定的旧闭包，state 会过期）
+  const formRef = useRef({ email: "", password: "", agreed: false });
+  formRef.current = { email: email.trim(), password, agreed };
+
+  // 验证码通道探测（aliyun 模式不再 mount 即 init，改为按需懒初始化——官方不支持重复 init）
+  useEffect(() => {
+    apiGet("/config")
+      .then((c) => setCaptchaMode(c.captcha === "aliyun" ? "aliyun" : "self"))
+      .catch(() => setCaptchaMode("self"));
+  }, []);
+
+  useEffect(() => {
+    if (captchaMode !== "aliyun") return;
+    window.AliyunCaptchaConfig = { region: "cn", prefix: ALIYUN_PREFIX };
+    const s = document.createElement("script");
+    // 官方要求必须动态引入（禁止本地化部署）
+    s.src = "https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js";
+    s.onload = () => {
+      captchaScriptReady.current = true;
+      // 脚本就绪前用户已点按钮 → 补触发
+      if (activeScene.current) initOrTrigger(activeScene.current);
+    };
+    s.onerror = () => setCaptchaError(true);
+    document.head.appendChild(s);
+    // 脚本与实例是页面级单例，组件卸载不拆除
+  }, [captchaMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 按需懒初始化：实例场景与目标不同才重新 init（文档允许参数变化时重新 init），相同直接触发
+  function initOrTrigger(scene) {
+    if (activeScene.current === scene && captchaInstance.current) {
+      document.getElementById("captcha-btn")?.click();
+      return;
+    }
+    setCaptchaLoading(true);
+    activeScene.current = scene;
+    window.initAliyunCaptcha({
+      SceneId: ALIYUN_SCENES[scene],
+      mode: "popup",
+      element: "#captcha-el",
+      button: "#captcha-btn",
+      language: "cn",
+      success: (param) => {
+        // SDK 回调参数形态以实机为准：字符串直接用，对象取 captchaVerifyParam 字段，兜底 JSON 序列化
+        const p =
+          typeof param === "string" ? param : param?.captchaVerifyParam ?? JSON.stringify(param);
+        if (scene === "send") sendCode(p);
+        else loginPassword(p);
+      },
+      getInstance: (inst) => {
+        captchaInstance.current = inst;
+        setCaptchaLoading(false);
+        // init 完成即弹出（用户已经点过按钮）
+        document.getElementById("captcha-btn")?.click();
+      },
+      server: ALIYUN_SERVERS,
+    });
+  }
+
+  // 触发对应场景的验证弹层（脚本未就绪给加载态，加载失败降级提示）
+  function triggerAliyun(scene) {
+    if (captchaError) return;
+    if (!captchaScriptReady.current) {
+      setCaptchaLoading(true);
+      activeScene.current = scene; // 脚本 onload 后补触发
+      return;
+    }
+    initOrTrigger(scene);
+  }
 
   useEffect(() => {
     if (countdown <= 0) return;
@@ -56,19 +136,23 @@ export default function Login() {
   const isUidIdentity = /^\d{1,18}$/.test(email.trim());
 
   // ── 第一步：邮箱或 UID（验证码 / 密码双通道）──
-  async function sendCode() {
+  // verifyParam：aliyun 场景验证成功后的回调参数；为空调用 = 先触发验证弹层
+  // 表单值从 formRef 读（success 回调闭包会拿到过期的 state）
+  async function sendCode(verifyParam = null) {
+    const f = formRef.current;
     setError("");
-    if (!email.trim()) return setError("请输入邮箱地址或 UID");
-    if (!agreed) return setError("请先阅读并同意用户协议和隐私政策");
-    if (!captchaRef.current || !captchaRef.current.answer)
+    if (!f.email) return setError("请输入邮箱地址或 UID");
+    if (!f.agreed) return setError("请先阅读并同意用户协议和隐私政策");
+    if (captchaMode === "aliyun" && typeof verifyParam !== "string") return triggerAliyun("send");
+    if (captchaMode !== "aliyun" && (!captchaRef.current || !captchaRef.current.answer))
       return setError("请完成人机验证");
     setBusy(true);
     try {
       // 顺带探测注册是否需要邀请码（新用户注册步显示输入框）；UID 路径不探测
-      if (!isUidIdentity) {
-        authApi.checkEmail(email.trim()).then((r) => setNeedInvite(r.need_invite)).catch(() => {});
+      if (!/^\d{1,18}$/.test(f.email)) {
+        authApi.checkEmail(f.email).then((r) => setNeedInvite(r.need_invite)).catch(() => {});
       }
-      await authApi.sendCode(email.trim(), captchaRef.current);
+      await authApi.sendCode(f.email, captchaRef.current, verifyParam);
       setCountdown(60);
       setStep("code");
     } catch (e) {
@@ -76,17 +160,20 @@ export default function Login() {
       setCaptchaRefresh((k) => k + 1); // 票据一次性，失败换新题
     } finally {
       setBusy(false);
+      if (verifyParam) captchaInstance.current?.refresh?.(); // 验签参数一次性，刷新备用
     }
   }
 
-  async function loginPassword() {
+  async function loginPassword(verifyParam = null) {
+    const f = formRef.current;
     setError("");
-    if (!email.trim() || !password) return setError("请输入邮箱/UID 和密码");
-    if (!captchaRef.current || !captchaRef.current.answer)
+    if (!f.email || !f.password) return setError("请输入邮箱/UID 和密码");
+    if (captchaMode === "aliyun" && typeof verifyParam !== "string") return triggerAliyun("login");
+    if (captchaMode !== "aliyun" && (!captchaRef.current || !captchaRef.current.answer))
       return setError("请完成人机验证");
     setBusy(true);
     try {
-      const res = await authApi.loginPassword(email.trim(), password, captchaRef.current);
+      const res = await authApi.loginPassword(f.email, f.password, captchaRef.current, verifyParam);
       login(res.token, res.user);
       navigate(from, { replace: true });
     } catch (e) {
@@ -94,6 +181,7 @@ export default function Login() {
       setCaptchaRefresh((k) => k + 1);
     } finally {
       setBusy(false);
+      if (verifyParam) captchaInstance.current?.refresh?.();
     }
   }
 
@@ -123,6 +211,8 @@ export default function Login() {
   async function resend() {
     if (countdown > 0) return;
     setError("");
+    // aliyun 模式：重发走同一 send 场景弹层，成功后由 sendCode(param) 回调完成
+    if (captchaMode === "aliyun") return triggerAliyun("send");
     if (!captchaRef.current || !captchaRef.current.answer)
       return setError("请完成人机验证");
     try {
@@ -225,11 +315,14 @@ export default function Login() {
                 onKeyDown={(e) => e.key === "Enter" && loginPassword()}
               />
             )}
-            <CaptchaField
-              key={captchaRefresh}
-              refreshKey={captchaRefresh}
-              onChange={(c) => (captchaRef.current = c)}
-            />
+            {captchaMode !== "aliyun" && (
+              <CaptchaField
+                key={captchaRefresh}
+                refreshKey={captchaRefresh}
+                onChange={(c) => (captchaRef.current = c)}
+              />
+            )}
+            {captchaError && <p className="login-hint">人机验证加载失败，请刷新重试</p>}
             {tab === "code" && (
               <label className="agree-row">
                 <input
@@ -246,7 +339,7 @@ export default function Login() {
             )}
             <button
               className="login-btn"
-              onClick={tab === "code" ? sendCode : loginPassword}
+              onClick={() => (tab === "code" ? sendCode() : loginPassword())}
               disabled={busy}
             >
               {busy ? "请稍候…" : tab === "code" ? "发送验证码" : "登录"}
@@ -266,8 +359,8 @@ export default function Login() {
               {busy ? "验证中…" : "验证并登录"}
             </button>
             <div className="login-resend">
-              {/* 倒计时结束后才展人机验证（重发必须现场完成新票据，一次性）；倒计时期间只显示等待文案 */}
-              {countdown <= 0 && (
+              {/* 倒计时结束后才展人机验证（重发必须现场完成新票据，一次性）；倒计时期间只显示等待文案；aliyun 模式隐藏 */}
+              {countdown <= 0 && captchaMode !== "aliyun" && (
                 <CaptchaField
                   key={`code-${captchaRefresh}`}
                   refreshKey={captchaRefresh}
@@ -374,9 +467,19 @@ export default function Login() {
             </button>
           </div>
         )}
+        {captchaLoading && <p className="login-hint">人机验证加载中…</p>}
       </div>
 
       <AgreementModal open={legalOpen} onClose={() => setLegalOpen(false)} />
+
+      {/* 阿里 ESA 验证码隐藏占位：0 尺寸脱离文档流定位（不用 display:none——popup 要量它；
+          全局 CSS 无裸 img 选择器，不会渗进弹层改图） */}
+      {captchaMode === "aliyun" && (
+        <div style={{ position: "absolute", width: 0, height: 0, overflow: "hidden" }}>
+          <div id="captcha-el" />
+          <span id="captcha-btn" />
+        </div>
+      )}
     </div>
   );
 }

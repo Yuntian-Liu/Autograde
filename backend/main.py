@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Autograde", version="0.6.3", lifespan=lifespan)
+app = FastAPI(title="Autograde", version="0.7.0", lifespan=lifespan)
 
 # GZip：JS/CSS/JSON 压缩传输（1.8MB bundle → 约 450KB）
 from fastapi.middleware.gzip import GZipMiddleware
@@ -93,10 +93,13 @@ async def captcha(request: Request):
     return new_captcha()
 
 
-# ---- 公开配置（前端判断 dev/prod：dev 不渲染图形验证码）----
+# ---- 公开配置（前端判断 dev/prod 与验证码通道：dev 不渲染图形验证码）----
 @app.get("/api/config")
 async def public_config() -> dict:
-    return {"is_prod": config.IS_PROD}
+    return {
+        "is_prod": config.IS_PROD,
+        "captcha": "aliyun" if config.ALIYUN_CAPTCHA_PREFIX else "self",
+    }
 
 
 # ---- 诊断日志导出（登录即可；前端注入浏览器端事件后整包下载）----

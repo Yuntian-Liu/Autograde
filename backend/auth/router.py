@@ -10,6 +10,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
+import config
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -127,7 +128,8 @@ async def send_code(
     client_ip = get_client_ip(request)
 
     # 图形验证码：remote_ip 传 socket peer（不可伪造）；限流才用 XFF 推导值
-    if not await verify_captcha(
+    # 阿里 ESA 模式：captchaVerifyParam 已在边缘验签，源站跳过自托管图形码（自托管保留作 dev/无配置回退）
+    if not config.ALIYUN_CAPTCHA_PREFIX and not await verify_captcha(
         req.captcha_id, req.captcha_answer, request.client.host if request.client else None
     ):
         raise HTTPException(status_code=403, detail="人机验证失败，请重试")
@@ -317,7 +319,7 @@ async def login_password(
     db: AsyncSession = Depends(get_db),
 ):
     """密码登录：支持邮箱或 UID（纯数字按 UID 查）。"""
-    if not await verify_captcha(
+    if not config.ALIYUN_CAPTCHA_PREFIX and not await verify_captcha(
         req.captcha_id, req.captcha_answer, request.client.host if request.client else None
     ):
         raise HTTPException(status_code=403, detail="人机验证失败，请重试")

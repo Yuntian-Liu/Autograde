@@ -7,45 +7,8 @@ import PageSkeleton from "../components/PageSkeleton";
 import { fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
 import { blobExt, classifyImgSrc, dataUriToBlob, parseImgSrcs } from "../utils/paste";
-
-// 存储格式：文本行 + 图片占位符 [[img:key]]；编辑态 DOM 即模型，保存时序列化回存储格式
-function esc(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function contentToHtml(content, imageUrls) {
-  return (content || "")
-    .split("\n")
-    .map((line) => {
-      const html = esc(line).replace(/\[\[img:([^\]]+)\]\]/g, (_, key) =>
-        imageUrls[key]
-          ? `<img class="note-img" src="${imageUrls[key]}" data-key="${key}" alt="" />`
-          : `<span class="note-img-missing">[图片未加载]</span>`
-      );
-      return `<div>${html || "<br>"}</div>`;
-    })
-    .join("");
-}
-
-function inlineText(node) {
-  let out = "";
-  for (const n of node.childNodes ?? []) {
-    if (n.nodeType === Node.TEXT_NODE) out += n.textContent;
-    else if (n.nodeName === "IMG") out += `[[img:${n.dataset.key}]]`;
-    else if (n.nodeName === "BR") out += "";
-    else out += inlineText(n);
-  }
-  return out;
-}
-
-function serializeEditor(root) {
-  const lines = [];
-  for (const child of root.childNodes) {
-    if (child.nodeType === Node.TEXT_NODE) lines.push(child.textContent);
-    else lines.push(inlineText(child));
-  }
-  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-}
+import { contentToHtml, sanitizePastedHtml, serializeEditor, stripMarks } from "../utils/noteFormat";
+import { IconBold, IconHighlight, IconItalic } from "../components/icons";
 
 // 笔记详情：默认阅读模式，编辑是主动动作
 export default function NoteDetail() {
@@ -65,6 +28,37 @@ export default function NoteDetail() {
   const [migrating, setMigrating] = useState(""); // 图片迁移进度文字（底部保留）
   const [migrateBar, setMigrateBar] = useState(null); // { done, total, phase: run|done } 顶部进度条
   const [dragOver, setDragOver] = useState(false); // 拖拽悬停视觉反馈
+  const [fmt, setFmt] = useState({ bold: false, italic: false }); // 选区格式状态（工具栏高亮）
+
+  // 选区格式状态同步（高亮 mark 无 queryCommandState，只跟 bold/italic）
+  function syncFmt() {
+    try {
+      setFmt({
+        bold: document.queryCommandState("bold"),
+        italic: document.queryCommandState("italic"),
+      });
+    } catch {
+      /* 无选区时忽略 */
+    }
+  }
+
+  // 高亮：选区在 mark 内再点取消，否则包 mark（跨节点选区放弃）
+  function applyMark() {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    const inMark = range.commonAncestorContainer.parentElement?.closest?.("mark");
+    if (inMark) {
+      inMark.replaceWith(...inMark.childNodes);
+    } else {
+      try {
+        range.surroundContents(document.createElement("mark"));
+      } catch {
+        /* 跨节点选区忽略 */
+      }
+    }
+    setDirty(true);
+  }
 
   // 防丢保护：编辑态且有未保存修改时，所有离开路径都要确认
   const blocking = editing && dirty;
@@ -145,7 +139,7 @@ export default function NoteDetail() {
     }
   }
 
-  // 粘贴：files 通道（单张图）→ text/html 通道（微信整篇，<img> 分流迁移）→ 纯文本
+  // 粘贴：files 通道（单张图）→ text/html 通道（清洗式：保留 b/i/mark，图片分流迁移）→ 纯文本
   async function onPaste(e) {
     e.preventDefault();
     const files = [...(e.clipboardData?.files || [])];
@@ -157,11 +151,16 @@ export default function NoteDetail() {
     const srcs = html ? parseImgSrcs(html) : [];
     const text = e.clipboardData?.getData("text/plain") || "";
     if (srcs.length === 0) {
-      document.execCommand("insertText", false, text);
+      // 清洗式粘贴：有 HTML 则保四种白名单格式剥其余标签，纯文本原样
+      const clean = html ? sanitizePastedHtml(html) : "";
+      document.execCommand(clean ? "insertHTML" : "insertText", false, clean || text);
+      setDirty(true);
       return;
     }
-    // 先落纯文本（含原文的「[图片]」占位），再逐张迁移
-    if (text) document.execCommand("insertText", false, text);
+    // 先落清洗后的文本（含原文的「[图片]」占位与保住的加粗），再逐张迁移
+    const clean = sanitizePastedHtml(html);
+    if (clean) document.execCommand("insertHTML", false, clean);
+    else if (text) document.execCommand("insertText", false, text);
     let failed = 0;
     let fileLocal = 0; // file:// 本地路径（Windows 微信剪贴板不含图片数据）
     let i = 0;
@@ -239,10 +238,23 @@ export default function NoteDetail() {
 
   async function copyContent() {
     try {
-      await navigator.clipboard.writeText(note.content);
+      // 双格式：text/plain 剥标记可读，text/html 带排版（微信笔记等保留加粗/倾斜/高亮）
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([stripMarks(note.content)], { type: "text/plain" }),
+          "text/html": new Blob([contentToHtml(note.content, note.image_urls || {})], {
+            type: "text/html",
+          }),
+        }),
+      ]);
       message.success("已复制全文");
     } catch {
-      message.error("复制失败，请检查浏览器剪贴板权限");
+      try {
+        await navigator.clipboard.writeText(stripMarks(note.content));
+        message.success("已复制全文");
+      } catch {
+        message.error("复制失败，请检查浏览器剪贴板权限");
+      }
     }
   }
 
@@ -328,17 +340,45 @@ export default function NoteDetail() {
         <div className="btn-row" style={{ marginTop: "var(--s3)" }}>
           {editing ? (
             <>
-              <button
-                type="button"
-                className="btn"
-                onMouseDown={(e) => {
-                  e.preventDefault(); // 保住选区
-                  document.execCommand("bold");
-                  setDirty(true);
-                }}
-              >
-                加粗
-              </button>
+              <div className="note-toolbar">
+                <button
+                  type="button"
+                  className={`fmt-btn ${fmt.bold ? "on" : ""}`}
+                  title="加粗"
+                  onMouseDown={(e) => {
+                    e.preventDefault(); // 保住选区
+                    document.execCommand("bold");
+                    syncFmt();
+                    setDirty(true);
+                  }}
+                >
+                  <IconBold />
+                </button>
+                <button
+                  type="button"
+                  className={`fmt-btn ${fmt.italic ? "on" : ""}`}
+                  title="倾斜"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    document.execCommand("italic");
+                    syncFmt();
+                    setDirty(true);
+                  }}
+                >
+                  <IconItalic />
+                </button>
+                <button
+                  type="button"
+                  className="fmt-btn"
+                  title="高亮"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    applyMark();
+                  }}
+                >
+                  <IconHighlight />
+                </button>
+              </div>
               <button className="btn primary" onClick={save} disabled={saving || !dirty}>
                 {saving ? "保存中…" : "保存"}
               </button>
@@ -397,6 +437,8 @@ export default function NoteDetail() {
               suppressContentEditableWarning
               onPaste={onPaste}
               onInput={() => setDirty(true)}
+              onKeyUp={syncFmt}
+              onMouseUp={syncFmt}
               onDragOver={(e) => {
                 e.preventDefault();
                 setDragOver(true);

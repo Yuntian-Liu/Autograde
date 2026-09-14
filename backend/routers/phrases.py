@@ -27,11 +27,20 @@ async def list_phrases(
     return [phrase_brief(p) for p in phrases]
 
 
+PHRASE_FORMATS = ("", "title_bold", "title_bold+body_italic")
+
+
 class PhraseIn(BaseModel):
     category: str = Field(..., min_length=1, max_length=32)
     name: str = Field(default="", max_length=64)
     content: str = Field(..., min_length=1)
+    format: str = Field(default="", max_length=32)
     scope: str = "自定义"  # 新增一律自定义；内置由系统补种
+
+    def clean_format(self) -> str:
+        if self.format not in PHRASE_FORMATS:
+            raise HTTPException(status_code=400, detail=f"未知话术格式：{self.format}")
+        return self.format
 
 
 @router.post("", status_code=201)
@@ -44,6 +53,7 @@ async def create_phrase(
         category=body.category.strip(),
         name=body.name.strip(),
         content=body.content.strip(),
+        format=body.clean_format(),
         scope="自定义",
     )
     db.add(p)
@@ -65,6 +75,7 @@ async def update_phrase(
     p.category = body.category.strip()
     p.name = body.name.strip()
     p.content = body.content.strip()
+    p.format = body.clean_format()
     await db.commit()
     return phrase_brief(p)
 

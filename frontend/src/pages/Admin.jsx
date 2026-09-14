@@ -345,7 +345,7 @@ function PhrasesPanel() {
   const [rows, setRows] = useState(null);
   const [category, setCategory] = useState(null);
   const [editing, setEditing] = useState(null); // null=关；{} = 新增；{id...} = 编辑
-  const [form, setForm] = useState({ category: "", name: "", content: "" });
+  const [form, setForm] = useState({ category: "", name: "", content: "", format: "" });
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(() => {
@@ -361,12 +361,12 @@ function PhrasesPanel() {
   }, [load]);
 
   function openNew() {
-    setForm({ category: category || "Issue 模板", name: "", content: "" });
+    setForm({ category: category || "Issue 模板", name: "", content: "", format: "" });
     setEditing({});
   }
 
   function openEdit(row) {
-    setForm({ category: row.category, name: row.name, content: row.content });
+    setForm({ category: row.category, name: row.name, content: row.content, format: row.format || "" });
     setEditing(row);
   }
 
@@ -380,6 +380,7 @@ function PhrasesPanel() {
       } else {
         await apiPost("/phrases", form);
       }
+      clientLog.add("ui", editing.id ? `编辑话术 #${editing.id}` : `新增话术（${form.category}）`);
       message.success(editing.id ? "话术已更新" : "话术已新增");
       setEditing(null);
       load();
@@ -467,6 +468,14 @@ function PhrasesPanel() {
           <span className="flab">内容</span>
           <Input.TextArea value={form.content} autoSize={{ minRows: 3, maxRows: 8 }}
             onChange={(e) => setForm({ ...form, content: e.target.value })} />
+          <span className="flab">格式</span>
+          <Select value={form.format} style={{ width: "100%" }}
+            onChange={(v) => setForm({ ...form, format: v })}
+            options={[
+              { value: "", label: "纯文本" },
+              { value: "title_bold", label: "标题加粗（首行）" },
+              { value: "title_bold+body_italic", label: "标题加粗 + 正文倾斜" },
+            ]} />
         </div>
       </Modal>
     </div>

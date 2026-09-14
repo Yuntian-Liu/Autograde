@@ -109,3 +109,23 @@ export const IconChevronLeft = (p) => (
     <path d="M15 6l-6 6 6 6" />
   </svg>
 );
+
+export const IconBold = (p) => (
+  <svg {...base} {...p}>
+    <path d="M7 4h6a3 3 0 0 1 0 6H7zM7 10h7a3 3 0 1 1 0 6H7zM7 4v12" />
+  </svg>
+);
+
+export const IconItalic = (p) => (
+  <svg {...base} {...p}>
+    <path d="M19 4h-9M14 20H5M15 4l-6 16" />
+  </svg>
+);
+
+export const IconHighlight = (p) => (
+  <svg {...base} {...p}>
+    <path d="M4 20h16" />
+    <path d="M8 16l-2-2 8-8 2 2-8 8z" />
+    <path d="M14 6l2 2" />
+  </svg>
+);

@@ -27,6 +27,9 @@ RESEND_FROM = os.getenv("RESEND_FROM", "").strip()
 # ---- 前端静态目录（单服务部署时 FastAPI 托管 dist）----
 FRONTEND_DIST = os.getenv("FRONTEND_DIST", "").strip()
 
+# ---- 阿里云 ESA 人机验证（身份标 prefix；配置后登录链路走边缘验签，源站跳过自托管图形码）----
+ALIYUN_CAPTCHA_PREFIX = os.getenv("ALIYUN_CAPTCHA_PREFIX", "").strip()
+
 # ---- 腾讯云 COS（笔记图片对象存储；空配置整体禁用，本地开发零负担）----
 COS_SECRET_ID = os.getenv("COS_SECRET_ID", "").strip()
 COS_SECRET_KEY = os.getenv("COS_SECRET_KEY", "").strip()

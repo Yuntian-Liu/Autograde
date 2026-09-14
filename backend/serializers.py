@@ -113,6 +113,7 @@ def phrase_brief(p: Phrase) -> dict:
         "category": p.category,
         "name": p.name,
         "content": p.content,
+        "format": p.format,
         "scope": p.scope,
         "use_count": p.use_count,
     }

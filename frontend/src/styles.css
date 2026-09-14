@@ -1038,3 +1038,23 @@ a.qg-name:hover { color: var(--accent); }
 
 /* 编辑器拖拽悬停反馈 */
 .note-editor.drag-over { border-style: dashed; border-color: var(--accent); background: var(--accent-bg); }
+
+/* ---------- 笔记编辑器格式工具栏（加粗/倾斜/高亮） ---------- */
+.note-toolbar { display: flex; gap: var(--s1); }
+.fmt-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+.fmt-btn:hover { border-color: var(--accent); color: var(--accent); }
+.fmt-btn.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+.note-editor mark { background: var(--accent-bg); color: var(--ink); padding: 0 2px; border-radius: 2px; }
+.note-reader mark { background: var(--accent-bg); color: var(--ink); padding: 0 2px; border-radius: 2px; }

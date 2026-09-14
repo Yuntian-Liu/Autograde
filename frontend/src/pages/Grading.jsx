@@ -22,6 +22,7 @@ import {
   collapseBlankLines,
   docToHtml,
   docToText,
+  issueLinesOf,
   sectionTitle,
   snapshotMatchesDoc,
 } from "../utils/feedback";
@@ -315,7 +316,7 @@ export default function Grading() {
   }
 
   // 反馈装配单一数据源（utils/feedback.js）：doc → 预览 / 纯文本 / HTML 三形态
-  // 勾选的 Issue 话术 + 未交自动催交，追加到正文尾部（跟随保存进 final_text）
+  // 勾选的 Issue 话术 + 未交自动催交，追加到正文尾部（跟随保存进 final_text）；format 随话术走
   const issueTexts = useMemo(() => {
     if (!current || !assignment) return [];
     const ids = issuesMap[current.id] || [];
@@ -329,9 +330,9 @@ export default function Grading() {
         if (n && p.name === PREVIEW_ERROR_PHRASE) {
           text = text.replace("错了1个小题", `错了${n}个小题`);
         }
-        return text;
+        return { text, format: p.format || "" };
       });
-    if (statusDraft === "未交" && urging) lines.push(urging);
+    if (statusDraft === "未交" && urging) lines.push({ text: urging, format: "" });
     return lines;
   }, [current, assignment, issuesMap, issueParams, issuePhrases, statusDraft, urging]);
 
@@ -887,9 +888,16 @@ export default function Grading() {
                     )}
                   </div>
                 ))}
-                {/* Issue 话术不加粗（加粗规格：仅标题/板块/答案） */}
-                {doc.issues.map((text, i) => (
-                  <p key={i}>{text}</p>
+                {/* Issue 话术按话术 format 渲染（title_bold 首行加粗 / body_italic 其余行倾斜） */}
+                {doc.issues.map((item, i) => (
+                  <p key={i}>
+                    {issueLinesOf(item).map((l, j) => (
+                      <span key={j}>
+                        {j > 0 && "\n"}
+                        {l.bold ? <strong>{l.text}</strong> : l.italic ? <em>{l.text}</em> : l.text}
+                      </span>
+                    ))}
+                  </p>
                 ))}
               </>
             )}

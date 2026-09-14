@@ -80,23 +80,49 @@ export const apiPatch = jsonBody("PATCH");
 export const apiDelete = (path) => request(path, { method: "DELETE" });
 
 // ---- 认证接口 ----
+// captcha: 自托管图形码 { captchaId, answer }（dev 可空）；verifyParam: 阿里 ESA 边缘验签参数（走 header）
+// verifyParam 归一化：ESA SDK 回调给的是对象（如 { captchaVerifyParam: {...} }），
+// header 必须是字符串——取内层字段后仍非字符串则 JSON 序列化（票据本身就是 JSON 结构）
+function normVerifyParam(p) {
+  if (!p) return null;
+  const v = typeof p === "string" ? p : p.captchaVerifyParam ?? p;
+  return typeof v === "string" ? v : JSON.stringify(v);
+}
+
 export const authApi = {
   checkEmail: (email) => apiPost("/auth/check-email", { email }),
-  // captcha: { captchaId, answer }（dev 模式后端 bypass，可传 null 占位）
-  sendCode: (email, captcha) =>
-    apiPost("/auth/send-code", {
-      email,
-      captcha_id: captcha?.captchaId ?? null,
-      captcha_answer: captcha?.answer ?? null,
+  sendCode: (email, captcha, verifyParam) =>
+    request("/auth/send-code", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(normVerifyParam(verifyParam)
+          ? { "captcha-verify-param": normVerifyParam(verifyParam) }
+          : {}),
+      },
+      body: JSON.stringify({
+        email,
+        captcha_id: captcha?.captchaId ?? null,
+        captcha_answer: captcha?.answer ?? null,
+      }),
     }),
   loginCode: (email, code) => apiPost("/auth/login-code", { email, code }),
   register: (payload) => apiPost("/auth/register", payload),
-  loginPassword: (emailOrUid, password, captcha) =>
-    apiPost("/auth/login-password", {
-      email_or_uid: emailOrUid,
-      password,
-      captcha_id: captcha?.captchaId ?? null,
-      captcha_answer: captcha?.answer ?? null,
+  loginPassword: (emailOrUid, password, captcha, verifyParam) =>
+    request("/auth/login-password", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(normVerifyParam(verifyParam)
+          ? { "captcha-verify-param": normVerifyParam(verifyParam) }
+          : {}),
+      },
+      body: JSON.stringify({
+        email_or_uid: emailOrUid,
+        password,
+        captcha_id: captcha?.captchaId ?? null,
+        captcha_answer: captcha?.answer ?? null,
+      }),
     }),
   getMe: () => apiGet("/auth/me"),
 };

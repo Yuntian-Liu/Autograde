@@ -6,6 +6,7 @@ import AppHeader from "../components/AppHeader";
 import PageSkeleton from "../components/PageSkeleton";
 import { fmtBytes, fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
+import { renderNoteInline } from "../utils/noteFormat";
 
 // 笔记库：搜索（学生名/标题）+ 班级筛选 + 时间倒序卡片；新建可选关联（班级→学生→批次），全不选即游离笔记
 export default function Notes() {
@@ -139,7 +140,12 @@ export default function Notes() {
           {shown.map((n) => (
             <Link className="row note-card" key={n.id} to={`/notes/${n.id}`}>
               <div className="note-card-title">{n.title}</div>
-              {n.excerpt && <div className="note-card-excerpt">{n.excerpt}</div>}
+              {n.excerpt && (
+                <div
+                  className="note-card-excerpt"
+                  dangerouslySetInnerHTML={{ __html: renderNoteInline(n.excerpt) }}
+                />
+              )}
               <div className="note-card-meta">
                 {n.class_name
                   ? [n.class_name, n.student_name, n.assignment_label].filter(Boolean).join(" · ")

@@ -1,7 +1,7 @@
 // 版本日志数据源（设置页「版本日志」弹窗 + 登录后更新提醒弹窗；发版时与 CHANGELOG.md 同步）
 // 结构：minor 为主条目，patch 嵌套在 patches 数组里（主界面只呈现 minor，展开后见 patch）
 // ⚠️ 公开文件：不得出现私人信息
-export const APP_VERSION = "V0.6.3";
+export const APP_VERSION = "V0.7.0";
 
 /** 协议版本（用户协议/隐私政策最后更新日期，改协议时同步递增；触发登录后协议变更提醒） */
 export const AGREEMENT_VERSION = "2026-09-13";
@@ -10,13 +10,24 @@ export const AGREEMENT_VERSION = "2026-09-13";
 export function getLatestUpdate() {
   const minor = CHANGELOG[0];
   if (minor.patches?.length) {
-    const p = minor.patches[0];
+    // 补丁按时间追加在数组尾部，最新的是最后一个（不是第一个）
+    const p = minor.patches[minor.patches.length - 1];
     return { version: p.version, date: p.date, items: p.items };
   }
   return { version: minor.version, date: minor.date, items: minor.items };
 }
 
 export const CHANGELOG = [
+  {
+    version: "V0.7.0",
+    date: "2026-09-15",
+    items: [
+      "笔记编辑器排版三件套：加粗/倾斜/高亮，保存后格式不丢，粘贴保留微信笔记格式",
+      "话术管理界面：在线编辑话术内容与格式（标题加粗/正文倾斜），直通反馈输出",
+      "ESA AI 验证码：发码与密码登录接入大厂级人机验证，边缘验签",
+      "修复：更新弹窗补丁版本不弹",
+    ],
+  },
   {
     version: "V0.6.0",
     date: "2026-09-13",

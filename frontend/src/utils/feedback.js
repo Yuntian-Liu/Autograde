@@ -1,10 +1,10 @@
 // 反馈装配单一数据源：同一份结构化 doc 产出 预览数据 / 纯文本 / HTML 三形态，
 // 三条路径物理上不可能不一致（货不对板的根因修复）。
 //
-// 加粗规格（碳碳定）：作业标题加粗、板块标题加粗、答案加粗（题号不加粗）；
+// 加粗规格：作业标题加粗、板块标题加粗、答案加粗（题号不加粗）；
 // 解析、Issue、评级话术不加粗。HTML 只带 <b> 不带色（家长端克制，accent 仅预览）。
 //
-// 纯文本节奏（碳碳定：全程无空行，板块靠加粗标题区分，紧凑一体）：
+// 纯文本节奏（全程无空行，板块靠加粗标题区分，紧凑一体）：
 //   {标题}
 //   {评级话术}（可选）
 //   {板块} 部分
@@ -13,6 +13,7 @@
 //   {Issue 话术}（可多行）
 
 // 构造结构化 doc（sections 为批次题库，checkedSet/notes 为当前学生表单态或落库态）
+// issueTexts 为 [{text, format}]：format 来自话术库（title_bold 首行加粗 / body_italic 其余行倾斜）
 export function buildFeedbackDoc({ title, ratingPhrase, sections, checkedSet, notes, issueTexts }) {
   const blocks = [];
   for (const sec of sections || []) {
@@ -39,6 +40,18 @@ export function buildFeedbackDoc({ title, ratingPhrase, sections, checkedSet, no
     });
   }
   return { title, ratingPhrase: ratingPhrase || "", blocks, issues: issueTexts || [] };
+}
+
+// Issue 话术按话术 format 渲染：首行/其余行分别包标记（预览 JSX 与 HTML 复制一致生效）
+export function issueLinesOf(item) {
+  const lines = item.text.split("\n");
+  const tb = (item.format || "").includes("title_bold");
+  const bi = (item.format || "").includes("body_italic");
+  return lines.map((text, i) => ({
+    text,
+    bold: tb && i === 0,
+    italic: bi && i > 0,
+  }));
 }
 
 export function docToText(doc) {
@@ -85,7 +98,14 @@ export function docToHtml(doc) {
       }
     }
   }
-  for (const text of doc.issues) lines.push(...text.split("\n").map(esc));
+  for (const it of doc.issues) {
+    for (const l of issueLinesOf(it)) {
+      let h = esc(l.text);
+      if (l.bold) h = `<b>${h}</b>`;
+      else if (l.italic) h = `<i>${h}</i>`;
+      lines.push(h);
+    }
+  }
   return lines.join("<br>");
 }
 
