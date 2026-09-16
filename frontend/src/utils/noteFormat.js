@@ -85,5 +85,5 @@ export function sanitizePastedHtml(html) {
     }
     return out;
   };
-  return walk(doc.body).replace(/\n{3,}/g, "\n\n").replace(/^\n+|\n+$/g, "");
+  return walk(doc.body).replace(/\n{2,}/g, "\n").replace(/^\n+|\n+$/g, "");
 }

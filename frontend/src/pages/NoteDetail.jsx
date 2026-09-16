@@ -111,11 +111,29 @@ export default function NoteDetail() {
   }, [editing, note]);
 
   function insertImgHtml(key, src) {
-    document.execCommand(
-      "insertHTML",
-      false,
-      `<img class="note-img" src="${src}" data-key="${key}" alt="" />`
-    );
+    // 用 DOM API 插入而非 execCommand("insertHTML")——后者在编辑器失焦时静默失败（图片丢失根因）
+    const editor = editorRef.current;
+    if (!editor) return;
+    const img = document.createElement("img");
+    img.className = "note-img";
+    img.src = src;
+    img.dataset.key = key;
+    img.alt = "";
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
+      sel.getRangeAt(0).insertNode(img);
+      clientLog.add("ui", `插图落地：光标处（${key}）`);
+    } else {
+      // 失焦时追加到编辑器末尾（最后一行 div 内，无则新建）
+      let last = editor.lastElementChild;
+      if (!last) {
+        last = document.createElement("div");
+        editor.appendChild(last);
+      }
+      last.appendChild(img);
+      clientLog.add("ui", `插图落地：末尾（编辑器失焦，${key}）`);
+    }
+    setDirty(true);
   }
 
   async function uploadImage(file) {
