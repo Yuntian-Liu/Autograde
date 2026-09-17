@@ -5,7 +5,9 @@
 单服务部署：生产环境托管 frontend/dist 静态文件 + SPA fallback。
 """
 
+import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -20,8 +22,8 @@ from auth.dependencies import get_current_user
 from auth.router import router as auth_router
 from auth.utils import check_captcha_rate, get_client_ip
 from database import get_db, init_db
-from diagnostics import attach_log_buffer, build_diagnostics
-from routers import admin, ai, assignments, classes, health, notes, phrases, questions, students
+from diagnostics import APP_VERSION, attach_log_buffer, build_diagnostics
+from routers import admin, ai, assignments, classes, client_log, health, notes, phrases, questions, students
 
 load_dotenv()
 
@@ -30,6 +32,7 @@ load_dotenv()
 async def lifespan(app: FastAPI):
     await init_db()
     attach_log_buffer()  # 服务端日志环形缓冲（诊断导出用）
+    logging.getLogger("autograde").warning("启动完成 version=%s", APP_VERSION)
     # 生产环境关键配置缺失时启动即警告（不阻断——降级运行便于排查）
     if config.IS_PROD:
         if config.JWT_SECRET == "dev-secret-change-me":
@@ -42,12 +45,43 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Autograde", version="0.7.1", lifespan=lifespan)
+app = FastAPI(title="Autograde", version="0.7.2", lifespan=lifespan)
 
 # GZip：JS/CSS/JSON 压缩传输（1.8MB bundle → 约 450KB）
 from fastapi.middleware.gzip import GZipMiddleware
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+# 可观测性：5xx（含未捕获异常，带堆栈）与慢请求（>3s）进服务端日志环形缓冲，诊断导出可见
+@app.middleware("http")
+async def access_observability(request: Request, call_next):
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logging.getLogger("autograde.http").exception(
+            "未捕获异常 %s %s", request.method, request.url.path
+        )
+        raise
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    if response.status_code >= 500:
+        logging.getLogger("autograde.http").error(
+            "5xx %s %s → %s（%.0fms）",
+            request.method,
+            request.url.path,
+            response.status_code,
+            elapsed_ms,
+        )
+    elif elapsed_ms > 3000:
+        logging.getLogger("autograde.http").warning(
+            "慢请求 %s %s → %s（%.0fms）",
+            request.method,
+            request.url.path,
+            response.status_code,
+            elapsed_ms,
+        )
+    return response
 
 
 # 静态资源缓存头（照 Gradify 旧版策略）：
@@ -83,6 +117,7 @@ app.include_router(questions.router)
 app.include_router(ai.router)
 app.include_router(phrases.router)
 app.include_router(notes.router)
+app.include_router(client_log.router)
 
 
 # ---- 图形验证码（公开；生成接口限流防刷）----

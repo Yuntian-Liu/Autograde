@@ -21,6 +21,8 @@ import {
   IconUser,
 } from "../components/icons";
 import { useAuth } from "../contexts/AuthContext";
+
+/* global __APP_VERSION__, __BUILD_TIME__ */
 import { avatarUrl, randomSeed } from "../utils/avatar";
 import { clientLog } from "../utils/clientLog";
 
@@ -165,7 +167,7 @@ export default function Settings() {
       });
       if (!res.ok) throw new Error(`导出失败 (${res.status})`);
       const data = await res.json();
-      data.client_events = clientLog.dump();
+      data.client_events_local = clientLog.dump(); // 本地未 flush 尾段（落库部分由后端 client_events 提供）
       data.client_env = {
         userAgent: navigator.userAgent,
         language: navigator.language,
@@ -175,6 +177,8 @@ export default function Settings() {
         url: window.location.href,
         uid: user?.uid,
         hasToken: Boolean(getToken()),
+        app_version: __APP_VERSION__,
+        build_time: __BUILD_TIME__,
       };
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const a = document.createElement("a");

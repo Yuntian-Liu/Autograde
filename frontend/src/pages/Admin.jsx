@@ -380,7 +380,12 @@ function PhrasesPanel() {
       } else {
         await apiPost("/phrases", form);
       }
-      clientLog.add("ui", editing.id ? `编辑话术 #${editing.id}` : `新增话术（${form.category}）`);
+      clientLog.add(
+        "ui",
+        editing.id
+          ? `编辑话术 #${editing.id} len=${form.content.length} fp=${fp(form.content)}`
+          : `新增话术（${form.category}）len=${form.content.length} fp=${fp(form.content)}`
+      );
       message.success(editing.id ? "话术已更新" : "话术已新增");
       setEditing(null);
       load();

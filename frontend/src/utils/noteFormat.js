@@ -6,11 +6,12 @@ export function escapeHtml(s) {
 }
 
 // 单行渲染：转义 → 图片占位符 → 内联标记（** 先于 *，避免互相吃掉）
+// 加载失败的图片占位也带 data-key：进编辑态再保存时占位符能原样往返，不会退化成纯文本丢图
 export function renderNoteLine(line, imageUrls = {}) {
   let html = escapeHtml(line).replace(/\[\[img:([^\]]+)\]\]/g, (_, key) =>
     imageUrls[key]
-      ? `<img class="note-img" src="${imageUrls[key]}" data-key="${key}" alt="" />`
-      : `<span class="note-img-missing">[图片未加载]</span>`
+      ? `<img class="note-img" src="${imageUrls[key]}" data-key="${escapeHtml(key)}" alt="" />`
+      : `<span class="note-img-missing" data-key="${escapeHtml(key)}">[图片未加载]</span>`
   );
   html = html
     .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
@@ -42,12 +43,13 @@ export function stripMarks(text) {
     .replace(/==([^=]+)==/g, "$1");
 }
 
-// 编辑器 DOM → 存储格式：b/strong→**、i/em→*、mark→==，图片→占位符
+// 编辑器 DOM → 存储格式：b/strong→**、i/em→*、mark→==，图片（含「图片未加载」占位）→占位符
 export function inlineText(node) {
   let out = "";
   for (const n of node.childNodes ?? []) {
     if (n.nodeType === Node.TEXT_NODE) out += n.textContent;
-    else if (n.nodeName === "IMG") out += `[[img:${n.dataset.key}]]`;
+    else if (n.nodeName === "IMG") out += n.dataset?.key ? `[[img:${n.dataset.key}]]` : "";
+    else if (n.nodeName === "SPAN" && n.dataset?.key) out += `[[img:${n.dataset.key}]]`;
     else if (n.nodeName === "BR") out += "";
     else if (n.nodeName === "B" || n.nodeName === "STRONG") out += `**${inlineText(n)}**`;
     else if (n.nodeName === "I" || n.nodeName === "EM") out += `*${inlineText(n)}*`;
@@ -57,13 +59,22 @@ export function inlineText(node) {
   return out;
 }
 
+// 纯空白行（含 &nbsp;）视为空行；笔记正文不留空行（紧凑排版），
+// 连续换行全部坍缩——同时自愈 V0.7.1 前已存入的 \n\n 存量
+const collapseLines = (text) =>
+  text
+    .split("\n")
+    .map((l) => (/^[\s\u00A0]*$/.test(l) ? "" : l))
+    .join("\n")
+    .replace(/\n{2,}/g, "\n");
+
 export function serializeEditor(root) {
   const lines = [];
   for (const child of root.childNodes) {
     if (child.nodeType === Node.TEXT_NODE) lines.push(child.textContent);
     else lines.push(inlineText(child));
   }
-  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return collapseLines(lines.join("\n")).trim();
 }
 
 // 清洗式粘贴：只保留 b/strong/i/em/mark 四种格式，其余标签剥掉；
@@ -85,5 +96,5 @@ export function sanitizePastedHtml(html) {
     }
     return out;
   };
-  return walk(doc.body).replace(/\n{2,}/g, "\n").replace(/^\n+|\n+$/g, "");
+  return collapseLines(walk(doc.body)).replace(/^\n+|\n+$/g, "");
 }

@@ -31,7 +31,10 @@ async function request(path, options = {}) {
     clientLog.add("network", `${method} ${path} 网络错误: ${e.message}`);
     throw e;
   }
-  clientLog.add("api", `${method} ${path} ${res.status} ${Date.now() - startedAt}ms`);
+  // /client-log 自身的请求跳过不记（否则日志自激）
+  if (path !== "/client-log") {
+    clientLog.add("api", `${method} ${path} ${res.status} ${Date.now() - startedAt}ms`);
+  }
   if (res.status === 401) {
     clientLog.add("auth", `401 ${method} ${path} → 清登录态`);
     clearToken();

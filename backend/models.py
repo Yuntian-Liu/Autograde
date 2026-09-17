@@ -221,3 +221,16 @@ class NoteImage(Base):
     key: Mapped[str] = mapped_column(String(256), unique=True)  # COS 对象 key
     size: Mapped[int] = mapped_column(Integer, default=0)  # 字节
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class ClientEvent(Base):
+    """客户端事件落库：前端 clientLog 定期 flush 上来（诊断导出随包返回）。"""
+
+    __tablename__ = "client_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    uid: Mapped[int] = mapped_column(Integer, index=True)  # 上报者业务 uid
+    client_ts: Mapped[str] = mapped_column(String(32), default="")  # 前端时间戳（MM-DD HH:mm:ss）
+    type: Mapped[str] = mapped_column(String(16), default="")
+    detail: Mapped[str] = mapped_column(String(800), default="")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)  # 服务端时间

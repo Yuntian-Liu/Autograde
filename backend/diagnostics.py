@@ -27,6 +27,7 @@ from llm_events_store import get_prices
 from models import (
     Assignment,
     Class,
+    ClientEvent,
     ErrorRecord,
     FeedbackSnapshot,
     LlmCallEvent,
@@ -38,7 +39,7 @@ from models import (
     Submission,
 )
 
-APP_VERSION = "0.7.1"
+APP_VERSION = "0.7.2"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
 AGREEMENT_VERSION = "2026-09-13"
 _STARTED_AT = datetime.now(timezone.utc)
@@ -80,7 +81,8 @@ def attach_log_buffer() -> None:
 
 
 async def build_diagnostics(db: AsyncSession, user: User) -> dict:
-    """组装诊断包（仅请求者本人数据；前端会再注入浏览器端事件后整包下载）。"""
+    """组装诊断包（仅请求者本人数据）。
+    client_events 为落库的客户端事件（前端周期 flush）；导出时前端另注入 client_events_local（未 flush 尾段）。"""
 
     async def count(model) -> int:
         return (await db.execute(select(func.count(model.id)))).scalar_one()
@@ -245,8 +247,29 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                     select(func.count(NoteImage.id)).where(NoteImage.owner_uid == user.uid)
                 )
             ).scalar_one(),
+            "client_events": (
+                await db.execute(select(func.count(ClientEvent.id)).where(ClientEvent.uid == user.uid))
+            ).scalar_one(),
         },
         "recent_llm_calls": recent_llm,
+        # 客户端事件（落库，该用户最近 200 条；detail 过 URL 打码）
+        "client_events": [
+            {
+                "id": e.id,
+                "client_ts": e.client_ts,
+                "type": e.type,
+                "detail": mask_urls(e.detail),
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in (
+                await db.execute(
+                    select(ClientEvent)
+                    .where(ClientEvent.uid == user.uid)
+                    .order_by(ClientEvent.id.desc())
+                    .limit(200)
+                )
+            ).scalars().all()
+        ],
         "security": {
             # 拦截事件含第三方 IP，不进包；管理员可在后台安全面板查看
             "login_blocked_count": get_login_blocked_count(),

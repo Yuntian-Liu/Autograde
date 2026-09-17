@@ -17,6 +17,8 @@ import {
   seriesLabel,
 } from "../meta";
 import { RATINGS, ratingFor } from "../rating";
+import { clientLog } from "../utils/clientLog";
+import { fp } from "../utils/fingerprint";
 import {
   buildFeedbackDoc,
   collapseBlankLines,
@@ -491,6 +493,10 @@ export default function Grading() {
         setNotesMap((prev) => ({ ...prev, [me.id]: { ...me.error_notes } }));
         setStatusDrafts((prev) => ({ ...prev, [me.id]: me.submission?.status || statusDraft }));
       }
+      clientLog.add(
+        "ui",
+        `批改保存：${current.name} · ${assignment.unit_label} len=${finalText.length} fp=${fp(finalText)}`
+      );
       message.success(`已保存：${current.name}`);
     } catch (e) {
       message.error(e.message);

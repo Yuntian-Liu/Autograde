@@ -6,6 +6,7 @@ import AppHeader from "../components/AppHeader";
 import PageSkeleton from "../components/PageSkeleton";
 import { fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
+import { fp } from "../utils/fingerprint";
 import { blobExt, classifyImgSrc, dataUriToBlob, parseImgSrcs } from "../utils/paste";
 import { contentToHtml, sanitizePastedHtml, serializeEditor, stripMarks } from "../utils/noteFormat";
 import { IconBold, IconHighlight, IconItalic } from "../components/icons";
@@ -222,12 +223,15 @@ export default function NoteDetail() {
     setSaving(true);
     try {
       const content = serializeEditor(editorRef.current);
-      const updated = await apiPatch(`/notes/${id}`, { content });
-      setNote((prev) => ({ ...prev, ...updated, content }));
+      await apiPatch(`/notes/${id}`, { content });
+      // PATCH 响应不含 image_urls：取回完整笔记，新贴图立即以签名 URL 渲染（否则误显「图片未加载」）
+      const fresh = await apiGet(`/notes/${id}`);
+      setNote(fresh);
       setDirty(false);
       setEditing(false);
       editorInitRef.current = false;
-      clientLog.add("ui", `保存笔记 #${id}`);
+      const imgCount = (content.match(/\[\[img:/g) || []).length;
+      clientLog.add("ui", `保存笔记 #${id} len=${content.length} img=${imgCount} fp=${fp(content)}`);
       message.success("已保存");
     } catch (e) {
       message.error(e.message);
