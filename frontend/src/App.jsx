@@ -10,6 +10,7 @@ import QuestionBatchEdit from "./pages/QuestionBatchEdit";
 import QuickGrade from "./pages/QuickGrade";
 import Notes from "./pages/Notes";
 import NoteDetail from "./pages/NoteDetail";
+import NoteImport from "./pages/NoteImport";
 import Login from "./pages/Login";
 import Settings from "./pages/Settings";
 import Admin from "./pages/Admin";
@@ -131,6 +132,14 @@ export default function App() {
         element={
           <RequireAuth>
             <Notes />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/notes/import"
+        element={
+          <RequireAuth>
+            <NoteImport />
           </RequireAuth>
         }
       />

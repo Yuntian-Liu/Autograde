@@ -1073,3 +1073,42 @@ a.qg-name:hover { color: var(--accent); }
 .fmt-btn.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
 .note-editor mark { background: var(--accent-bg); color: var(--ink); padding: 0 2px; border-radius: 2px; }
 .note-reader mark { background: var(--accent-bg); color: var(--ink); padding: 0 2px; border-radius: 2px; }
+
+/* ---------- 批量导入（/notes/import） ---------- */
+.import-row {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--s3);
+  display: grid;
+  gap: var(--s2);
+  background: var(--surface);
+}
+.import-row.ok { border-color: var(--success); }
+.import-row.fail { border-color: var(--danger); }
+.import-row-head { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.import-row-status { margin-left: auto; font-size: var(--t-caption); }
+.import-row-status .ok { color: var(--success); }
+.import-row-status .fail { color: var(--danger); }
+.note-editor.mini { min-height: 96px; margin-top: 0; padding: var(--s3); }
+.btn.sm { padding: var(--s1) var(--s2); font-size: var(--t-caption); }
+
+/* ---------- 保存状态灯（常驻） ---------- */
+.save-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  font-size: var(--t-caption);
+  color: var(--ink-3);
+}
+.save-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.save-status.ok { color: var(--success); }
+.save-status.ok .save-status-dot { background: var(--success); }
+.save-status.warn { color: var(--warning); }
+.save-status.warn .save-status-dot { background: var(--warning); }
+.save-status.err { color: var(--danger); }
+.save-status.err .save-status-dot { background: var(--danger); }

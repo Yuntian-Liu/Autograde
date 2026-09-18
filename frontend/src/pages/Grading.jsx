@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { App as AntApp, Input, Modal, Select } from "antd";
 import { apiGet, apiPatch, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
+import SaveStatus from "../components/SaveStatus";
 import QuestionEditor from "../components/QuestionEditor";
 import {
   STATUS_META,
@@ -55,6 +56,7 @@ export default function Grading() {
   const [statusDrafts, setStatusDrafts] = useState({});
   const [editingQid, setEditingQid] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false); // 上次保存失败（状态灯红灯）
   const [phrases, setPhrases] = useState([]);
   const [greetingId, setGreetingId] = useState(null);
   const [slot, setSlot] = useState(() => greetingSlot()); // 问候语时段：默认当前时段，可手选
@@ -497,8 +499,10 @@ export default function Grading() {
         "ui",
         `批改保存：${current.name} · ${assignment.unit_label} len=${finalText.length} fp=${fp(finalText)}`
       );
+      setSaveFailed(false);
       message.success(`已保存：${current.name}`);
     } catch (e) {
+      setSaveFailed(true);
       message.error(e.message);
     } finally {
       setSaving(false);
@@ -724,6 +728,11 @@ export default function Grading() {
                 <button className="btn primary" onClick={() => saveGrading()} disabled={saving}>
                   {saving ? "保存中…" : "保存批改"}
                 </button>
+                <SaveStatus
+                  dirty={Boolean(dirtyMap[current?.id])}
+                  saving={saving}
+                  failed={saveFailed}
+                />
                 <button
                   className="btn"
                   disabled={saving}

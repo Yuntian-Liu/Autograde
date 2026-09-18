@@ -205,6 +205,9 @@ class Note(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     # 用户手动编辑过（笔记编辑页 PATCH 即置位）后，批改联动永久脱钩不再覆盖
     user_edited: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 归档：旧班历史笔记单独收进归档区，不污染活跃列表；legacy_name = 归档时填的学生名/备注
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    legacy_name: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 

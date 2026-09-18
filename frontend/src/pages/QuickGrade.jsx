@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { App as AntApp } from "antd";
 import { apiGet, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
+import SaveStatus from "../components/SaveStatus";
 import PageSkeleton from "../components/PageSkeleton";
 import { STATUS_META, scoreTone, seriesLabel } from "../meta";
 import { ratingFor } from "../rating";
@@ -23,6 +24,7 @@ export default function QuickGrade() {
   const [dirtyMap, setDirtyMap] = useState({}); // studentId -> bool
   const [savingIds, setSavingIds] = useState(new Set());
   const [savingAll, setSavingAll] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false); // 上次批量保存有失败（状态灯红灯）
 
   const load = useCallback(() => {
     Promise.all([apiGet(`/assignments/${id}`), apiGet(`/assignments/${id}/students`)])
@@ -133,8 +135,10 @@ export default function QuickGrade() {
     }
     setSavingAll(false);
     if (failed.length) {
+      setSaveFailed(true);
       message.error(`保存失败：${failed.join("、")}`);
     } else {
+      setSaveFailed(false);
       message.success(`已全部保存（${dirtyIds.length} 人）`);
     }
   }
@@ -203,6 +207,7 @@ export default function QuickGrade() {
           <section className="block">
             <div className="sec-title sec-title-row">
               标错矩阵
+              <SaveStatus dirty={dirtyCount > 0} saving={savingAll} failed={saveFailed} />
               <button
                 className="btn primary"
                 onClick={saveAll}

@@ -367,7 +367,15 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
         let detail = `${res.status} ${res.statusText}`;
         try {
           const body = await res.json();
-          if (body && body.detail) detail = body.detail;
+          if (body && body.detail) {
+            // detail 可能是字符串 / 422 校验错误数组 / 其他对象，统一归一为可读文本
+            detail =
+              typeof body.detail === "string"
+                ? body.detail
+                : Array.isArray(body.detail)
+                  ? body.detail.map((d) => d.msg || JSON.stringify(d)).join("；")
+                  : JSON.stringify(body.detail);
+          }
         } catch {
           /* 保留状态码描述 */
         }

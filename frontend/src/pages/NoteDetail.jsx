@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useBlocker, useNavigate, useParams } from "react-router-dom";
-import { App as AntApp, Modal } from "antd";
+import { App as AntApp, Input, Modal } from "antd";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
+import SaveStatus from "../components/SaveStatus";
 import PageSkeleton from "../components/PageSkeleton";
 import { fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
 import { fp } from "../utils/fingerprint";
-import { blobExt, classifyImgSrc, dataUriToBlob, parseImgSrcs } from "../utils/paste";
-import { contentToHtml, sanitizePastedHtml, serializeEditor, stripMarks } from "../utils/noteFormat";
+import { useNotePaste } from "../utils/useNotePaste";
+import { contentToHtml, serializeEditor, stripMarks } from "../utils/noteFormat";
 import { IconBold, IconHighlight, IconItalic } from "../components/icons";
 
 // 笔记详情：默认阅读模式，编辑是主动动作
@@ -24,14 +25,22 @@ export default function NoteDetail() {
   const [editing, setEditing] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false); // 上次保存失败（状态灯红灯）
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [uploading, setUploading] = useState(0);
-  const [migrating, setMigrating] = useState(""); // 图片迁移进度文字（底部保留）
-  const [migrateBar, setMigrateBar] = useState(null); // { done, total, phase: run|done } 顶部进度条
-  const [dragOver, setDragOver] = useState(false); // 拖拽悬停视觉反馈
+  const [archiveOpen, setArchiveOpen] = useState(false); // 归档弹窗（填学生名/备注）
+  const [legacyNameDraft, setLegacyNameDraft] = useState("");
+  const [archiving, setArchiving] = useState(false);
   const [fmt, setFmt] = useState({ bold: false, italic: false }); // 选区格式状态（工具栏高亮）
   const [titleDraft, setTitleDraft] = useState(""); // 编辑态标题草稿
   const [titleEdited, setTitleEdited] = useState(false); // 手动改过才随 PATCH 提交（否则后端按首行自动重算）
+
+  // 图文粘贴全套（上传/迁移/落地/拖拽）：共享 hook，批量导入页同款
+  const markDirty = () => setDirty(true);
+  const { onPaste, dndProps, uploading, migrating, migrateBar, dragOver } = useNotePaste({
+    editorRef,
+    noteId: Number(id),
+    onDirty: markDirty,
+  });
 
   // 选区格式状态同步（高亮 mark 无 queryCommandState，只跟 bold/italic）
   function syncFmt() {
@@ -113,118 +122,6 @@ export default function NoteDetail() {
     }
   }, [editing, note]);
 
-  function insertImgHtml(key, src) {
-    // 用 DOM API 插入而非 execCommand("insertHTML")——后者在编辑器失焦时静默失败（图片丢失根因）
-    const editor = editorRef.current;
-    if (!editor) return;
-    const img = document.createElement("img");
-    img.className = "note-img";
-    img.src = src;
-    img.dataset.key = key;
-    img.alt = "";
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
-      sel.getRangeAt(0).insertNode(img);
-      clientLog.add("ui", `插图落地：光标处（${key}）`);
-    } else {
-      // 失焦时追加到编辑器末尾（最后一行 div 内，无则新建）
-      let last = editor.lastElementChild;
-      if (!last) {
-        last = document.createElement("div");
-        editor.appendChild(last);
-      }
-      last.appendChild(img);
-      clientLog.add("ui", `插图落地：末尾（编辑器失焦，${key}）`);
-    }
-    // 光标移到刚插入的图片之后：insertNode 不动选区，不移的话连续插图会逐张倒序
-    const after = document.createRange();
-    after.setStartAfter(img);
-    after.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(after);
-    setDirty(true);
-  }
-
-  async function uploadImage(file) {
-    setUploading((n) => n + 1);
-    try {
-      const res = await apiPost("/notes/upload-url", {
-        filename: file.name || "pasted.png",
-        size: file.size,
-        note_id: Number(id),
-      });
-      // 浏览器直传 COS（流量不经过我们服务器）
-      const put = await fetch(res.upload_url, { method: "PUT", body: file });
-      if (!put.ok) throw new Error(`上传失败（${put.status}）`);
-      clientLog.add("ui", `笔记贴图上传：${file.name || "pasted"}（${file.size}B）`);
-      insertImgHtml(res.key, URL.createObjectURL(file));
-      setDirty(true);
-    } catch (e) {
-      message.error(e.message);
-    } finally {
-      setUploading((n) => n - 1);
-    }
-  }
-
-  // 粘贴：files 通道（单张图）→ text/html 通道（清洗式：保留 b/i/mark，图片分流迁移）→ 纯文本
-  async function onPaste(e) {
-    e.preventDefault();
-    const files = [...(e.clipboardData?.files || [])];
-    if (files.length > 0) {
-      for (const f of files) await uploadImage(f);
-      return;
-    }
-    const html = e.clipboardData?.getData("text/html") || "";
-    const srcs = html ? parseImgSrcs(html) : [];
-    const text = e.clipboardData?.getData("text/plain") || "";
-    if (srcs.length === 0) {
-      // 清洗式粘贴：有 HTML 则保四种白名单格式剥其余标签，纯文本原样
-      const clean = html ? sanitizePastedHtml(html) : "";
-      document.execCommand(clean ? "insertHTML" : "insertText", false, clean || text);
-      setDirty(true);
-      return;
-    }
-    // 先落清洗后的文本（含原文的「[图片]」占位与保住的加粗），再逐张迁移
-    const clean = sanitizePastedHtml(html);
-    if (clean) document.execCommand("insertHTML", false, clean);
-    else if (text) document.execCommand("insertText", false, text);
-    let failed = 0;
-    let fileLocal = 0; // file:// 本地路径（Windows 微信剪贴板不含图片数据）
-    let i = 0;
-    setMigrateBar({ done: 0, total: srcs.length, phase: "run" });
-    for (const src of srcs) {
-      i++;
-      setMigrating(`正在迁移图片 ${i}/${srcs.length}`);
-      try {
-        const kind = classifyImgSrc(src);
-        if (kind === "datauri") {
-          const blob = dataUriToBlob(src);
-          await uploadImage(new File([blob], `pasted.${blobExt(blob.type)}`, { type: blob.type }));
-        } else if (kind === "http") {
-          const res = await apiPost("/notes/fetch-image", { url: src, note_id: Number(id) });
-          insertImgHtml(res.key, res.url);
-          setDirty(true);
-        } else {
-          if (kind === "file") fileLocal++;
-          failed++; // file:// / wx- 等拿不到的，保留原文占位
-        }
-      } catch {
-        failed++;
-      }
-      setMigrateBar({ done: i, total: srcs.length, phase: "run" });
-    }
-    setMigrating("");
-    // 满格短暂停留后淡出消失
-    setMigrateBar({ done: srcs.length, total: srcs.length, phase: "done" });
-    setTimeout(() => setMigrateBar(null), 900);
-    if (fileLocal > 0) {
-      message.warning("Windows 微信剪贴板不含图片数据，请直接把图片拖进编辑器");
-    } else if (failed) {
-      message.warning(`${srcs.length - failed} 张已迁移，${failed} 张无法自动迁移，需手动补`);
-    } else {
-      message.success(`已迁移 ${srcs.length} 张图片`);
-    }
-  }
 
   async function save() {
     if (!editorRef.current) return;
@@ -242,8 +139,10 @@ export default function NoteDetail() {
       editorInitRef.current = false;
       const imgCount = (content.match(/\[\[img:/g) || []).length;
       clientLog.add("ui", `保存笔记 #${id} len=${content.length} img=${imgCount} fp=${fp(content)}`);
+      setSaveFailed(false);
       message.success("已保存");
     } catch (e) {
+      setSaveFailed(true);
       message.error(e.message);
     } finally {
       setSaving(false);
@@ -341,6 +240,32 @@ export default function NoteDetail() {
     }
   }
 
+  async function archive() {
+    setArchiving(true);
+    try {
+      const res = await apiPost(`/notes/${id}/archive`, { legacy_name: legacyNameDraft.trim() });
+      setNote((prev) => ({ ...prev, archived: true, legacy_name: res.legacy_name }));
+      clientLog.add("ui", `归档笔记 #${id}${res.legacy_name ? `（${res.legacy_name}）` : ""}`);
+      message.success("已归档（笔记库 → 归档区可见）");
+      setArchiveOpen(false);
+    } catch (e) {
+      message.error(e.message);
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  async function unarchive() {
+    try {
+      await apiPost(`/notes/${id}/unarchive`);
+      setNote((prev) => ({ ...prev, archived: false }));
+      clientLog.add("ui", `还原笔记 #${id} 回活跃区`);
+      message.success("已还原到活跃区");
+    } catch (e) {
+      message.error(e.message);
+    }
+  }
+
   if (error)
     return (
       <div className="page-enter">
@@ -354,9 +279,11 @@ export default function NoteDetail() {
       </div>
     );
 
-  const linkLine = note.class_name
-    ? [note.class_name, note.student_name, note.assignment_label].filter(Boolean).join(" · ")
-    : "历史记录";
+  const linkLine = note.archived
+    ? `归档${note.legacy_name ? ` · ${note.legacy_name}` : ""}`
+    : note.class_name
+      ? [note.class_name, note.student_name, note.assignment_label].filter(Boolean).join(" · ")
+      : "历史记录";
 
   return (
     <div className="page-enter">
@@ -414,6 +341,7 @@ export default function NoteDetail() {
               <button className="btn primary" onClick={save} disabled={saving || !dirty}>
                 {saving ? "保存中…" : "保存"}
               </button>
+              <SaveStatus dirty={dirty} saving={saving} failed={saveFailed} />
               <button className="btn" onClick={cancelEdit} disabled={saving}>
                 取消
               </button>
@@ -437,6 +365,21 @@ export default function NoteDetail() {
               {(note.image_urls && Object.keys(note.image_urls).length > 0) && (
                 <button className="btn" onClick={downloadAllImages}>
                   下载全部图片
+                </button>
+              )}
+              {note.archived ? (
+                <button className="btn" onClick={unarchive}>
+                  还原到活跃区
+                </button>
+              ) : (
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setLegacyNameDraft(note.legacy_name || "");
+                    setArchiveOpen(true);
+                  }}
+                >
+                  归档
                 </button>
               )}
             </>
@@ -483,21 +426,7 @@ export default function NoteDetail() {
               onInput={() => setDirty(true)}
               onKeyUp={syncFmt}
               onMouseUp={syncFmt}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-                // Windows 微信补救：剪贴板拿不到图片时，直接拖文件进来
-                const files = [...(e.dataTransfer?.files || [])].filter((f) =>
-                  f.type.startsWith("image/")
-                );
-                if (files.length === 0) return;
-                for (const f of files) uploadImage(f);
-              }}
+              {...dndProps}
             />
             {uploading > 0 && <div className="page-meta">图片上传中…</div>}
             {migrating && <div className="page-meta">{migrating}</div>}
@@ -529,6 +458,28 @@ export default function NoteDetail() {
         width={400}
       >
         <p className="danger-text">删除后不可恢复，笔记内的图片将一并清除。</p>
+      </Modal>
+
+      <Modal
+        centered
+        open={archiveOpen}
+        onCancel={() => setArchiveOpen(false)}
+        onOk={archive}
+        title="归档笔记"
+        okText="归档"
+        cancelText="取消"
+        width={400}
+        confirmLoading={archiving}
+      >
+        <p className="page-meta" style={{ marginBottom: "var(--s2)" }}>
+          归档后移入「归档区」，不再出现在活跃笔记列表；可随时还原。
+        </p>
+        <Input
+          placeholder="学生名 / 备注（可空，归档区可搜索）"
+          value={legacyNameDraft}
+          maxLength={64}
+          onChange={(e) => setLegacyNameDraft(e.target.value)}
+        />
       </Modal>
     </div>
   );

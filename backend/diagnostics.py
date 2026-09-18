@@ -39,9 +39,9 @@ from models import (
     Submission,
 )
 
-APP_VERSION = "0.7.3"
+APP_VERSION = "0.8.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
-AGREEMENT_VERSION = "2026-09-13"
+AGREEMENT_VERSION = "2026-09-19"
 _STARTED_AT = datetime.now(timezone.utc)
 
 MAX_LOG_ENTRIES = 500
@@ -241,6 +241,13 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
             "llm_call_events_by_feature": llm_by_feature,
             "notes": (
                 await db.execute(select(func.count(Note.id)).where(Note.owner_uid == user.uid))
+            ).scalar_one(),
+            "notes_archived": (
+                await db.execute(
+                    select(func.count(Note.id)).where(
+                        Note.owner_uid == user.uid, Note.archived.is_(True)
+                    )
+                )
             ).scalar_one(),
             "note_images": (
                 await db.execute(

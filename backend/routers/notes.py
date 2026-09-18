@@ -60,6 +60,8 @@ def _note_brief(n: Note, names: dict, sizes: dict[int, int]) -> dict:
         "student_name": names.get("students", {}).get(n.student_id),
         "assignment_label": names.get("assignments", {}).get(n.assignment_id),
         "user_edited": n.user_edited,
+        "archived": n.archived,
+        "legacy_name": n.legacy_name,
         "updated_at": n.updated_at.isoformat() if n.updated_at else None,
         "created_at": n.created_at.isoformat() if n.created_at else None,
     }
@@ -163,14 +165,17 @@ async def _validate_links(db: AsyncSession, user: User, class_id, student_id, as
 async def list_notes(
     q: str = "",
     class_id: int | None = None,
+    archived: bool = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
-    """搜索（标题/学生名）+ 班级筛选，时间倒序。"""
+    """搜索（标题/学生名/归档备注）+ 班级筛选 + 归档过滤，时间倒序。"""
     notes = (
         (
             await db.execute(
-                select(Note).where(Note.owner_uid == user.uid).order_by(Note.updated_at.desc())
+                select(Note)
+                .where(Note.owner_uid == user.uid, Note.archived == archived)
+                .order_by(Note.updated_at.desc())
             )
         )
         .scalars()
@@ -188,6 +193,7 @@ async def list_notes(
             for b in briefs
             if kw in b["title"].lower()
             or (b["student_name"] and kw in b["student_name"].lower())
+            or (b["legacy_name"] and kw in b["legacy_name"].lower())
         ]
     return briefs
 
@@ -218,6 +224,79 @@ async def create_note(
     await db.commit()
     names = await _names_map(db, user.uid, [n])
     return _note_brief(n, names, await _sizes_map(db, [n]))
+
+
+class BulkNoteItem(BaseModel):
+    content: str = ""
+    title: str | None = None  # 可空=取正文首行
+    class_id: int | None = None
+    student_id: int | None = None
+    assignment_id: int | None = None
+    archived: bool = False  # 历史行直接进归档区
+    legacy_name: str = Field(default="", max_length=64)
+
+
+class BulkNoteIn(BaseModel):
+    items: list[BulkNoteItem] = Field(..., min_length=1, max_length=50)
+
+
+@router.post("/bulk", status_code=201)
+async def bulk_create_notes(
+    body: BulkNoteIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict:
+    """批量导入：逐条独立创建，部分失败不回滚（行级返回成败原因）。"""
+    created, failed = [], []
+    for i, item in enumerate(body.items):
+        try:
+            if not item.archived:
+                await _validate_links(db, user, item.class_id, item.student_id, item.assignment_id)
+            n = Note(
+                owner_uid=user.uid,
+                class_id=None if item.archived else item.class_id,
+                student_id=None if item.archived else item.student_id,
+                assignment_id=None if item.archived else item.assignment_id,
+                content=item.content,
+                title=item.title.strip()[:128] if item.title and item.title.strip() else _title_of(item.content),
+                archived=item.archived,
+                legacy_name=item.legacy_name.strip() if item.archived else "",
+            )
+            db.add(n)
+            await db.commit()
+            await _reconcile_images(db, n)  # tmp key 归属对账到正式笔记
+            await db.commit()
+            created.append({"index": i, "id": n.id, "title": n.title})
+        except HTTPException as e:
+            await db.rollback()
+            failed.append({"index": i, "error": e.detail})
+    return {"created": created, "failed": failed}
+
+
+class ArchiveIn(BaseModel):
+    legacy_name: str = Field(default="", max_length=64)
+
+
+@router.post("/{note_id}/archive")
+async def archive_note(
+    note_id: int,
+    body: ArchiveIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    n = await _owned_note(db, note_id, user)
+    n.archived = True
+    n.legacy_name = body.legacy_name.strip()
+    await db.commit()
+    return {"id": n.id, "archived": True, "legacy_name": n.legacy_name}
+
+
+@router.post("/{note_id}/unarchive")
+async def unarchive_note(
+    note_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict:
+    n = await _owned_note(db, note_id, user)
+    n.archived = False
+    await db.commit()
+    return {"id": n.id, "archived": False, "legacy_name": n.legacy_name}
 
 
 @router.get("/{note_id}")

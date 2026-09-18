@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { App as AntApp, DatePicker, Input, Modal, Select } from "antd";
+import { App as AntApp, DatePicker, Input, Modal, Segmented, Select } from "antd";
 import { apiGet, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
 import PageSkeleton from "../components/PageSkeleton";
@@ -8,7 +8,7 @@ import { fmtBytes, fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
 import { renderNoteInline } from "../utils/noteFormat";
 
-// 笔记库：搜索（学生名/标题）+ 班级筛选 + 时间倒序卡片；新建可选关联（班级→学生→批次），全不选即游离笔记
+// 笔记库：活跃/归档双区；搜索（学生名/标题/归档备注）+ 班级筛选 + 时间倒序卡片；新建可选关联，全不选即游离笔记
 export default function Notes() {
   const { message } = AntApp.useApp();
   const navigate = useNavigate();
@@ -18,6 +18,7 @@ export default function Notes() {
   const [q, setQ] = useState("");
   const [classFilter, setClassFilter] = useState(null);
   const [range, setRange] = useState(null); // 创建时间筛选（起止日期，前端内存过滤）
+  const [archived, setArchived] = useState(false); // 活跃区 / 归档区
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({ class_id: null, student_id: null, assignment_id: null });
   const [classDetail, setClassDetail] = useState(null); // 选中班级的学生/批次选项
@@ -27,11 +28,11 @@ export default function Notes() {
     const params = new URLSearchParams();
     if (q.trim()) params.set("q", q.trim());
     if (classFilter) params.set("class_id", String(classFilter));
-    const qs = params.toString();
-    apiGet(`/notes${qs ? `?${qs}` : ""}`)
+    params.set("archived", archived ? "true" : "false");
+    apiGet(`/notes?${params.toString()}`)
       .then(setNotes)
       .catch((e) => setError(e.message));
-  }, [q, classFilter]);
+  }, [q, classFilter, archived]);
 
   useEffect(() => {
     load();
@@ -107,9 +108,20 @@ export default function Notes() {
         </Link>
         <h1 style={{ marginTop: "var(--s3)" }}>笔记库</h1>
 
-        <div className="notes-toolbar" style={{ marginTop: "var(--s4)" }}>
+        <div style={{ marginTop: "var(--s3)" }}>
+          <Segmented
+            value={archived ? "archived" : "active"}
+            onChange={(v) => setArchived(v === "archived")}
+            options={[
+              { value: "active", label: "活跃" },
+              { value: "archived", label: "归档" },
+            ]}
+          />
+        </div>
+
+        <div className="notes-toolbar" style={{ marginTop: "var(--s3)" }}>
           <Input
-            placeholder="搜索学生名 / 标题"
+            placeholder={archived ? "搜索标题 / 归档备注" : "搜索学生名 / 标题"}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             allowClear
@@ -127,6 +139,9 @@ export default function Notes() {
             onChange={setRange}
             placeholder={["创建起", "创建止"]}
           />
+          <button className="btn" onClick={() => navigate("/notes/import")}>
+            批量导入
+          </button>
           <button className="btn primary" onClick={() => setCreateOpen(true)}>
             + 新建笔记
           </button>
@@ -147,9 +162,13 @@ export default function Notes() {
                 />
               )}
               <div className="note-card-meta">
-                {n.class_name
-                  ? [n.class_name, n.student_name, n.assignment_label].filter(Boolean).join(" · ")
-                  : "历史记录"}
+                {archived
+                  ? n.legacy_name
+                    ? `归档 · ${n.legacy_name}`
+                    : "归档"
+                  : n.class_name
+                    ? [n.class_name, n.student_name, n.assignment_label].filter(Boolean).join(" · ")
+                    : "历史记录"}
                 {" · "}
                 {n.image_count > 0 ? `${n.image_count} 图 · ${fmtBytes(n.image_size)}` : "纯文本"}
                 {" · "}
@@ -157,7 +176,7 @@ export default function Notes() {
               </div>
             </Link>
           ))}
-          {shown.length === 0 && <div className="row">暂无笔记</div>}
+          {shown.length === 0 && <div className="row">{archived ? "暂无归档笔记" : "暂无笔记"}</div>}
         </section>
       </div>
 

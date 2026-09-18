@@ -381,7 +381,7 @@ export default function AssignmentDetail() {
       <ManualEntryModal
         open={manualOpen}
         onClose={() => setManualOpen(false)}
-        assignmentId={id}
+        assignmentId={assignment.id}
         sections={sectionNames}
         existingCount={assignment.question_count}
         onSaved={reload}
@@ -389,7 +389,7 @@ export default function AssignmentDetail() {
       <ManualEntryModal
         open={addSection !== null}
         onClose={() => setAddSection(null)}
-        assignmentId={id}
+        assignmentId={assignment.id}
         sections={sectionNames}
         initialSection={addSection ?? undefined}
         existingCount={assignment.question_count}
@@ -398,7 +398,7 @@ export default function AssignmentDetail() {
       <AiEntryModal
         open={aiOpen}
         onClose={() => setAiOpen(false)}
-        assignmentId={id}
+        assignmentId={assignment.id}
         sections={sectionNames}
         existingCount={assignment.question_count}
         onSaved={reload}

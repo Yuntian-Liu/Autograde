@@ -1,10 +1,10 @@
 // 版本日志数据源（设置页「版本日志」弹窗 + 登录后更新提醒弹窗；发版时与 CHANGELOG.md 同步）
 // 结构：minor 为主条目，patch 嵌套在 patches 数组里（主界面只呈现 minor，展开后见 patch）
 // ⚠️ 公开文件：不得出现私人信息
-export const APP_VERSION = "V0.7.3";
+export const APP_VERSION = "V0.8.0";
 
 /** 协议版本（用户协议/隐私政策最后更新日期，改协议时同步递增；触发登录后协议变更提醒） */
-export const AGREEMENT_VERSION = "2026-09-13";
+export const AGREEMENT_VERSION = "2026-09-19";
 
 /** 取全站最新更新条目（最新 minor 有 patch 取最新 patch，否则取最新 minor） */
 export function getLatestUpdate() {
@@ -18,6 +18,16 @@ export function getLatestUpdate() {
 }
 
 export const CHANGELOG = [
+  {
+    version: "V0.8.0",
+    date: "2026-09-19",
+    items: [
+      "笔记批量导入：一张大表一次录入多篇，内容支持直接粘贴图文；关联学生落活跃区，历史归档落归档区",
+      "归档区：笔记可手动归档/还原，归档时可填学生名备注（可搜索），旧班数据不再占用活跃列表",
+      "保存状态灯：笔记编辑、批改台、快捷批改常驻显示（已同步/有未保存修改/保存失败），与防丢弹窗双保险",
+      "修复：批次短码链接下 AI 录题报 [object Object]（短码被当数字 id 提交触发 422）",
+    ],
+  },
   {
     version: "V0.7.0",
     date: "2026-09-15",
