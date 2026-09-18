@@ -7,6 +7,8 @@ import { adminApi, apiDelete, apiGet, apiPost, apiPut, downloadBackup } from "..
 import AppHeader from "../components/AppHeader";
 import { fmtTime } from "../meta";
 import { useAuth } from "../contexts/AuthContext";
+import { clientLog } from "../utils/clientLog";
+import { fp } from "../utils/fingerprint";
 
 // 管理后台（仅 is_admin 可达，路由已守卫；此处再判一次防御深度）
 const WINDOWS = [

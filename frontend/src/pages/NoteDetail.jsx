@@ -30,6 +30,8 @@ export default function NoteDetail() {
   const [migrateBar, setMigrateBar] = useState(null); // { done, total, phase: run|done } 顶部进度条
   const [dragOver, setDragOver] = useState(false); // 拖拽悬停视觉反馈
   const [fmt, setFmt] = useState({ bold: false, italic: false }); // 选区格式状态（工具栏高亮）
+  const [titleDraft, setTitleDraft] = useState(""); // 编辑态标题草稿
+  const [titleEdited, setTitleEdited] = useState(false); // 手动改过才随 PATCH 提交（否则后端按首行自动重算）
 
   // 选区格式状态同步（高亮 mark 无 queryCommandState，只跟 bold/italic）
   function syncFmt() {
@@ -134,6 +136,12 @@ export default function NoteDetail() {
       last.appendChild(img);
       clientLog.add("ui", `插图落地：末尾（编辑器失焦，${key}）`);
     }
+    // 光标移到刚插入的图片之后：insertNode 不动选区，不移的话连续插图会逐张倒序
+    const after = document.createRange();
+    after.setStartAfter(img);
+    after.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(after);
     setDirty(true);
   }
 
@@ -223,7 +231,9 @@ export default function NoteDetail() {
     setSaving(true);
     try {
       const content = serializeEditor(editorRef.current);
-      await apiPatch(`/notes/${id}`, { content });
+      const body = { content };
+      if (titleEdited) body.title = titleDraft;
+      await apiPatch(`/notes/${id}`, body);
       // PATCH 响应不含 image_urls：取回完整笔记，新贴图立即以签名 URL 渲染（否则误显「图片未加载」）
       const fresh = await apiGet(`/notes/${id}`);
       setNote(fresh);
@@ -413,6 +423,8 @@ export default function NoteDetail() {
               <button
                 className="btn primary"
                 onClick={() => {
+                  setTitleDraft(note.title);
+                  setTitleEdited(false);
                   setEditing(true);
                   editorInitRef.current = false; // 进入编辑态时重新写入最新内容
                 }}
@@ -451,7 +463,17 @@ export default function NoteDetail() {
                 </div>
               </div>
             )}
-            <h1 className="note-title">{note.title}</h1>
+            <input
+              className="note-title-input"
+              value={titleDraft}
+              maxLength={128}
+              placeholder="笔记标题（留空则取正文首行）"
+              onChange={(e) => {
+                setTitleDraft(e.target.value);
+                setTitleEdited(true);
+                setDirty(true);
+              }}
+            />
             <div
               ref={editorRef}
               className={dragOver ? "note-editor drag-over" : "note-editor"}

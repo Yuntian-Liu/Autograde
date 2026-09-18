@@ -27,11 +27,11 @@ export function contentToHtml(content, imageUrls) {
     .join("");
 }
 
-// 列表摘要等无图场景的内联渲染（安全 HTML）
+// 列表摘要等无图场景的内联渲染（安全 HTML；图片标记显示为中性的 [图片]，不误导「未加载」）
 export function renderNoteInline(text) {
   return (text || "")
     .split("\n")
-    .map((l) => renderNoteLine(l, {}))
+    .map((l) => renderNoteLine(l.replace(/\[\[img:[^\]]+\]\]/g, "[图片]"), {}))
     .join("<br>");
 }
 
@@ -72,6 +72,9 @@ export function serializeEditor(root) {
   const lines = [];
   for (const child of root.childNodes) {
     if (child.nodeType === Node.TEXT_NODE) lines.push(child.textContent);
+    // 顶层图片/占位也要收：insertHTML 拆块后内容可能落在顶层裸节点（不在 div 内），漏收即丢图
+    else if (child.nodeName === "IMG") lines.push(child.dataset?.key ? `[[img:${child.dataset.key}]]` : "");
+    else if (child.nodeName === "SPAN" && child.dataset?.key) lines.push(`[[img:${child.dataset.key}]]`);
     else lines.push(inlineText(child));
   }
   return collapseLines(lines.join("\n")).trim();

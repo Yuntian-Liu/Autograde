@@ -1,5 +1,7 @@
 """笔记库接口：CRUD + 搜索筛选 + 图片直传签发。全部走 owner_uid 校验，越权 404。"""
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, update
@@ -23,10 +25,19 @@ from models import Assignment, Class, Note, NoteImage, Student
 router = APIRouter(prefix="/api/notes", tags=["notes"])
 
 
+_IMG_MARK_RE = re.compile(r"\[\[img:[^\]]+\]\]")
+_INLINE_MARK_RE = re.compile(r"\*\*([^*]+)\*\*|\*([^*]+)\*|==([^=]+)==")
+
+
 def _title_of(content: str) -> str:
-    """标题 = 内容首行（微信笔记规则），空内容兜底「无标题」。"""
+    """标题 = 内容首行（微信笔记规则），剥内联格式/图片标记为纯文本，空内容兜底「无标题」。"""
     first = (content or "").strip().split("\n", 1)[0].strip()
-    return first[:128] or "无标题"
+    first = _IMG_MARK_RE.sub("", first)
+    prev = None
+    while prev != first:  # 嵌套标记逐层剥（如 **==x==**）
+        prev = first
+        first = _INLINE_MARK_RE.sub(lambda m: next(g for g in m.groups() if g is not None), first)
+    return first.strip()[:128] or "无标题"
 
 
 def _excerpt(content: str) -> str:
@@ -226,6 +237,7 @@ async def get_note(
 
 class NotePatch(BaseModel):
     content: str
+    title: str | None = None  # 手动改的标题才传；None=按首行自动重算
     class_id: int | None = None
     student_id: int | None = None
     assignment_id: int | None = None
@@ -243,7 +255,11 @@ async def update_note(
     # 笔记编辑页是 PATCH 的唯一入口：改字/贴图都算手动编辑，置位后批改联动永久脱钩
     n.user_edited = True
     n.content = body.content
-    n.title = _title_of(body.content)  # 首行自动重算
+    # 标题：前端只在用户手动改过时才传；否则按内容首行自动重算
+    if body.title is not None and body.title.strip():
+        n.title = body.title.strip()[:128]
+    else:
+        n.title = _title_of(body.content)
     if body.relink:
         await _validate_links(db, user, body.class_id, body.student_id, body.assignment_id)
         n.class_id = body.class_id

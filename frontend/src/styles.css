@@ -1020,6 +1020,21 @@ a.qg-name:hover { color: var(--accent); }
   font-size: var(--t-page);
   margin-top: var(--s4);
 }
+/* 编辑态标题输入：与阅读态标题同字形，底线提示可编辑 */
+.note-title-input {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--t-page);
+  margin-top: var(--s4);
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  outline: none;
+  padding: 0 0 var(--s1);
+}
+.note-title-input:focus { border-bottom-color: var(--accent-line); }
 .note-reader {
   margin-top: var(--s4);
   border: 1px solid var(--line);
