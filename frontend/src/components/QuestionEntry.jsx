@@ -334,7 +334,7 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
     };
   }, [open]);
 
-  // SSE：fetch + ReadableStream 逐事件读取，实时更新「已整理 N 题」
+  // 任务制 + 轮询：POST 建任务立即返回 job_id，短轮询拿进度/结果（SSE 长连接会被边缘代理掐断）
   async function parse() {
     if (!rawText.trim()) return message.error("请先粘贴答案原文");
     const controller = new AbortController();
@@ -349,12 +349,13 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
     );
     try {
       const token = getToken();
+      const authHeaders = {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
       const res = await fetch("/api/ai/parse-questions", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: authHeaders,
         body: JSON.stringify({ raw_text: rawText, assignment_id: Number(assignmentId) }),
         signal: controller.signal,
       });
@@ -363,7 +364,7 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
         window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
         throw new Error("登录已过期，请重新登录");
       }
-      if (!res.ok || !res.body) {
+      if (!res.ok) {
         let detail = `${res.status} ${res.statusText}`;
         try {
           const body = await res.json();
@@ -381,24 +382,31 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
         }
         throw new Error(detail);
       }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
+      const { job_id: jobId } = await res.json();
       let draft = null;
       for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let idx;
-        while ((idx = buf.indexOf("\n\n")) !== -1) {
-          const chunk = buf.slice(0, idx).trim();
-          buf = buf.slice(idx + 2);
-          if (!chunk.startsWith("data:")) continue;
-          const event = JSON.parse(chunk.slice(5).trim());
-          if (event.type === "progress") setDoneCount(event.done);
-          else if (event.type === "done") draft = event.data;
-          else if (event.type === "error") throw new Error(event.detail);
+        await new Promise((r) => setTimeout(r, 2000));
+        const jr = await fetch(`/api/ai/parse-jobs/${jobId}`, {
+          headers: authHeaders,
+          signal: controller.signal,
+        });
+        if (!jr.ok) {
+          let msg = `${jr.status} ${jr.statusText}`;
+          try {
+            const b = await jr.json();
+            if (typeof b?.detail === "string") msg = b.detail;
+          } catch {
+            /* 保留状态码描述 */
+          }
+          throw new Error(msg);
         }
+        const job = await jr.json();
+        setDoneCount(job.done_count || 0);
+        if (job.status === "done") {
+          draft = job.data;
+          break;
+        }
+        if (job.status === "error") throw new Error(job.error || "解析失败");
       }
       const flat = draft ? flattenDraft(draft) : [];
       if (flat.length === 0) {

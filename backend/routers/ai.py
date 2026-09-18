@@ -1,9 +1,17 @@
-"""AI 辅助接口：题库结构化拆分（SSE 流式，草稿不落库）与讲解起草。"""
+"""AI 辅助接口：题库结构化拆分（任务制 + 轮询，草稿不落库）与讲解起草。
 
+拆题是分钟级长任务：SSE 长连接会被边缘代理（ESA ~60s 无响应即 524）掐断，
+故改为「POST 建任务立即返回 job_id + GET 轮询状态」——每次轮询都是短请求，代理免疫。
+任务表在内存（单实例部署），服务重启任务失效，前端按「任务不存在」提示重试即可。
+"""
+
+import asyncio
 import json
+import logging
+import time
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,9 +36,15 @@ router = APIRouter(prefix="/api/ai", tags=["ai"])
 TIMEOUT_HINT = "AI 响应超时，文档可能过长，请分段粘贴后重试"
 AI_RATE_HINT = "AI 调用过于频繁，请稍后再试"
 
+# 拆题任务表（内存，单实例）：job_id -> {uid, status, done_count, data/error, created}
+_PARSE_JOBS: dict[str, dict] = {}
+_JOB_TTL = 1800  # 30 分钟后清理
 
-def _sse(event: dict) -> str:
-    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+def _gc_jobs() -> None:
+    now = time.time()
+    for jid in [j for j, v in _PARSE_JOBS.items() if now - v["created"] > _JOB_TTL]:
+        del _PARSE_JOBS[jid]
 
 
 class ParseQuestionsIn(BaseModel):
@@ -39,62 +53,94 @@ class ParseQuestionsIn(BaseModel):
     assignment_id: int
 
 
-@router.post("/parse-questions")
+async def _run_parse_job(job_id: str, raw_text: str, uid: int, assignment_id: int) -> None:
+    """后台跑拆题流：progress 更新计数，done/error 落任务表；成本埋点在 finally（自带 session）。"""
+    job = _PARSE_JOBS[job_id]
+    usage = None
+    finish_reason = None
+    text_chars = 0
+    try:
+        async for event in parse_questions_stream(raw_text):
+            if event["type"] == "progress":
+                job["done_count"] = event["done"]
+            elif event["type"] == "done":
+                usage = event.get("usage")
+                finish_reason = event.get("finish_reason")
+                text_chars = event.get("text_chars", 0)
+                job["status"] = "done"
+                job["data"] = event["data"]
+    except APITimeoutError:
+        job["status"] = "error"
+        job["error"] = TIMEOUT_HINT
+    except AIParseError as e:
+        finish_reason = "parse_error"
+        text_chars = len(e.raw or "")
+        job["status"] = "error"
+        job["error"] = f"AI 输出解析失败：{e}｜原始输出片段：{e.raw}"
+    except AIUnavailable as e:
+        job["status"] = "error"
+        job["error"] = str(e)
+    except Exception:
+        job["status"] = "error"
+        job["error"] = "服务内部错误，请重试"
+        logging.getLogger("autograde.ai").exception("拆题任务异常 job=%s", job_id)
+    finally:
+        # 成本埋点：成功/失败/空回答都记一行，绝不阻断主流程
+        await record_llm_call(
+            uid=uid,
+            feature="parse_questions",
+            model=ai_model(),
+            prompt_tokens=(usage or {}).get("prompt_tokens", 0),
+            completion_tokens=(usage or {}).get("completion_tokens", 0),
+            finish_reason=finish_reason,
+            is_empty=text_chars == 0,
+            assignment_id=assignment_id,
+        )
+
+
+@router.post("/parse-questions", status_code=202)
 async def parse_questions_api(
     body: ParseQuestionsIn,
-    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> StreamingResponse:
-    """SSE 事件流：progress（已整理题目数）→ done（完整草稿）/ error（中文原因）。"""
-    await owned_assignment(db, body.assignment_id, user)
+) -> dict:
+    """建拆题任务并立即返回 job_id；结果走 GET /parse-jobs/{job_id} 轮询。"""
+    # 注意：owned_assignment 需要 db，这里不开请求级 session 进后台任务（任务内不碰请求 session）
+    from database import SessionLocal
+
+    async with SessionLocal() as db:
+        await owned_assignment(db, body.assignment_id, user)
     if not check_ai_rate(user.uid):
         raise HTTPException(status_code=429, detail=AI_RATE_HINT)
     if not body.raw_text.strip():
         raise HTTPException(status_code=400, detail="粘贴内容不能为空")
     try:
-        ensure_available()  # key 缺失在起流前按 503 快速失败
+        ensure_available()  # key 缺失在建任务前按 503 快速失败
     except AIUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
+    _gc_jobs()
+    job_id = uuid.uuid4().hex[:16]
+    _PARSE_JOBS[job_id] = {
+        "uid": user.uid,
+        "status": "running",
+        "done_count": 0,
+        "created": time.time(),
+    }
+    asyncio.create_task(_run_parse_job(job_id, body.raw_text, user.uid, body.assignment_id))
+    return {"job_id": job_id}
 
-    async def event_stream():
-        usage = None
-        finish_reason = None
-        text_chars = 0
-        try:
-            async for event in parse_questions_stream(body.raw_text):
-                if event["type"] == "done":
-                    usage = event.get("usage")
-                    finish_reason = event.get("finish_reason")
-                    text_chars = event.get("text_chars", 0)
-                yield _sse(event)
-        except APITimeoutError:
-            yield _sse({"type": "error", "detail": TIMEOUT_HINT})
-        except AIParseError as e:
-            finish_reason = "parse_error"
-            text_chars = len(e.raw or "")
-            yield _sse(
-                {"type": "error", "detail": f"AI 输出解析失败：{e}｜原始输出片段：{e.raw}"}
-            )
-        except AIUnavailable as e:
-            yield _sse({"type": "error", "detail": str(e)})
-        finally:
-            # 成本埋点：成功/失败/空回答都记一行，绝不阻断主流程
-            await record_llm_call(
-                uid=user.uid,
-                feature="parse_questions",
-                model=ai_model(),
-                prompt_tokens=(usage or {}).get("prompt_tokens", 0),
-                completion_tokens=(usage or {}).get("completion_tokens", 0),
-                finish_reason=finish_reason,
-                is_empty=text_chars == 0,
-                assignment_id=body.assignment_id,
-            )
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+@router.get("/parse-jobs/{job_id}")
+async def get_parse_job(job_id: str, user: User = Depends(get_current_user)) -> dict:
+    """轮询拆题任务：running（带 done_count）/ done（带 data）/ error（带 error）。"""
+    job = _PARSE_JOBS.get(job_id)
+    if not job or job["uid"] != user.uid:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期，请重新发起")
+    out = {"status": job["status"], "done_count": job["done_count"]}
+    if job["status"] == "done":
+        out["data"] = job["data"]
+    elif job["status"] == "error":
+        out["error"] = job["error"]
+    return out
 
 
 class DraftExplanationIn(BaseModel):

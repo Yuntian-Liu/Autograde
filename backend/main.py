@@ -10,10 +10,11 @@ import os
 import time
 from contextlib import asynccontextmanager
 
+import anyio
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 import config
@@ -45,7 +46,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Autograde", version="0.8.0", lifespan=lifespan)
+app = FastAPI(title="Autograde", version="0.8.1", lifespan=lifespan)
 
 # GZip：JS/CSS/JSON 压缩传输（1.8MB bundle → 约 450KB）
 from fastapi.middleware.gzip import GZipMiddleware
@@ -59,6 +60,9 @@ async def access_observability(request: Request, call_next):
     started = time.perf_counter()
     try:
         response = await call_next(request)
+    except anyio.EndOfStream:
+        # 客户端中途断连（页面关闭瞬间的 keepalive 上报等）：正常噪音，不进错误日志
+        return Response(status_code=499)
     except Exception:
         logging.getLogger("autograde.http").exception(
             "未捕获异常 %s %s", request.method, request.url.path
