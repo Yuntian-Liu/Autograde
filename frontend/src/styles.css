@@ -1091,24 +1091,31 @@ a.qg-name:hover { color: var(--accent); }
 .import-row-status .fail { color: var(--danger); }
 .note-editor.mini { min-height: 96px; margin-top: 0; padding: var(--s3); }
 .btn.sm { padding: var(--s1) var(--s2); font-size: var(--t-caption); }
+/* 末尾空行：输入位占位样式（虚线），提交时自动跳过 */
+.import-row.placeholder { border-style: dashed; }
 
-/* ---------- 保存状态灯（常驻） ---------- */
+/* ---------- 保存状态灯（胶囊条，定宽防跳动） ---------- */
 .save-status {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--s1);
+  min-width: 96px; /* 最宽文案「有未保存修改」：定宽，状态切换不跳动 */
+  white-space: nowrap;
   font-size: var(--t-caption);
+  line-height: 20px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
   color: var(--ink-3);
 }
 .save-status-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--line-strong);
+  background: currentColor; /* 跟随状态色 */
 }
-.save-status.ok { color: var(--success); }
-.save-status.ok .save-status-dot { background: var(--success); }
-.save-status.warn { color: var(--warning); }
-.save-status.warn .save-status-dot { background: var(--warning); }
-.save-status.err { color: var(--danger); }
-.save-status.err .save-status-dot { background: var(--danger); }
+.save-status.ok { color: var(--success); border-color: var(--success); }
+.save-status.warn { color: var(--warning); border-color: var(--warning); }
+.save-status.err { color: var(--danger); border-color: var(--danger); }

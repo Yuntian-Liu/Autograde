@@ -19,17 +19,18 @@ const newRow = () => ({
   assignment_id: null,
   legacy_name: "",
   title: "",
+  touched: false, // 有任何内容即 true（末尾未触碰行渲染为占位样式）
   status: "idle", // idle | ok | fail
   noteId: null,
   error: "",
 });
 
-function ImportRow({ row, classes, classDetails, ensureClassDetail, onChange, onRemove, registerEditor, disabled }) {
+function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetail, onChange, onRemove, registerEditor, onTouch, disabled }) {
   const editorRef = useRef(null);
   const { onPaste, dndProps, uploading, migrating, dragOver } = useNotePaste({
     editorRef,
     noteId: null, // 未创建先贴图：tmp key，提交后后端对账
-    onDirty: () => {},
+    onDirty: () => onTouch(),
   });
   const detail = row.class_id ? classDetails[row.class_id] : null;
   // 编辑器 DOM 上报给父级：提交时逐行 serialize
@@ -39,7 +40,7 @@ function ImportRow({ row, classes, classDetails, ensureClassDetail, onChange, on
   };
 
   return (
-    <div className={`import-row ${row.status}`}>
+    <div className={`import-row ${row.status}${isPlaceholder ? " placeholder" : ""}`}>
       <div className="import-row-head">
         <Segmented
           size="small"
@@ -130,6 +131,7 @@ function ImportRow({ row, classes, classDetails, ensureClassDetail, onChange, on
         contentEditable={!disabled}
         suppressContentEditableWarning
         onPaste={onPaste}
+        onInput={onTouch}
         {...dndProps}
       />
       {(uploading > 0 || migrating) && (
@@ -159,6 +161,22 @@ export default function NoteImport() {
   }
 
   const patchRow = (key, next) => setRows((prev) => prev.map((r) => (r.key === key ? next : r)));
+
+  // 表格始终留一行空行：最后一行有任何内容即在末尾补新空行；行带 touched 标记（末尾未触碰行渲染为占位样式）
+  function touchRow(key) {
+    setRows((prev) => {
+      const idx = prev.findIndex((r) => r.key === key);
+      if (idx === -1) return prev;
+      const r = prev[idx];
+      const ed = editorsRef.current[r.key];
+      const hasContent = Boolean(ed && (ed.textContent.trim() || ed.querySelector("img")));
+      const hasField = Boolean(r.title.trim() || r.legacy_name.trim() || r.class_id || r.student_id);
+      const touched = hasField || hasContent;
+      let next = prev.map((x) => (x.key === key ? { ...x, touched } : x));
+      if (touched && idx === next.length - 1) next = [...next, newRow()];
+      return next;
+    });
+  }
 
   async function submitAll() {
     // 逐行序列化，收集有效行（内容为空且未成功的行跳过）
@@ -224,24 +242,34 @@ export default function NoteImport() {
           批量导入笔记
         </h1>
         <p className="page-meta" style={{ marginTop: "var(--s1)" }}>
-          每行一篇：关联学生落活跃区，历史归档落归档区。内容支持直接粘贴图文。
+          每行一篇：关联学生落活跃区，历史归档落归档区。内容支持直接粘贴图文；最后一行开始填写后会自动补新行。
         </p>
 
         <div style={{ marginTop: "var(--s4)", display: "grid", gap: "var(--s3)" }}>
-          {rows.map((r) => (
+          {rows.map((r, i) => (
             <ImportRow
               key={r.key}
               row={r}
+              isPlaceholder={i === rows.length - 1 && !r.touched && r.status === "idle"}
               classes={classes}
               classDetails={classDetails}
               ensureClassDetail={ensureClassDetail}
               disabled={submitting || r.status === "ok"}
-              onChange={(next) => patchRow(r.key, next)}
-              onRemove={() => setRows((prev) => prev.filter((x) => x.key !== r.key))}
+              onChange={(next) => {
+                patchRow(r.key, next);
+                touchRow(r.key);
+              }}
+              onRemove={() =>
+                setRows((prev) => {
+                  const next = prev.filter((x) => x.key !== r.key);
+                  return next.length ? next : [newRow()]; // 删光时保底一行空行
+                })
+              }
               registerEditor={(key, el) => {
                 if (el) editorsRef.current[key] = el;
                 else delete editorsRef.current[key];
               }}
+              onTouch={() => touchRow(r.key)}
             />
           ))}
         </div>
