@@ -799,6 +799,23 @@ function DataPanel() {
     return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : key;
   };
 
+  // 桶内与库内一致性：偏差 >1MB 视为不一致（tmp 未对账的临时件允许小差）
+  const bucketPulled = cos?.bucket_bytes !== null && cos?.bucket_bytes !== undefined;
+  const bucketMismatch = bucketPulled && Math.abs(cos.bucket_bytes - cos.db_bytes) > 1024 * 1024;
+
+  // 最新备份新鲜度（东八区时间戳在 key 里，本机同时区直接构造）：≤24h 绿、≤72h 黄、更久红
+  const latestBackupKey = backups?.[0]?.key || null;
+  const backupAgeHours = (() => {
+    const m = latestBackupKey?.match(/autograde-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})\.db$/);
+    if (!m) return null;
+    const t = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+    return (Date.now() - t) / 3.6e6;
+  })();
+  const backupTone =
+    backupAgeHours === null ? "" : backupAgeHours <= 24 ? "tone-good" : backupAgeHours <= 72 ? "tone-mid" : "tone-bad";
+  const backupAgeText =
+    backupAgeHours === null ? "" : backupAgeHours < 1 ? "1 小时内" : backupAgeHours < 24 ? `${Math.floor(backupAgeHours)} 小时前` : `${Math.floor(backupAgeHours / 24)} 天前`;
+
   async function scanOrphans() {
     setGcBusy(true);
     try {
@@ -831,6 +848,12 @@ function DataPanel() {
         <PanelError onRetry={load} />
       ) : (
       <div className="metric-grid">
+        <Metric
+          label="图片存储（COS）"
+          tone="accent"
+          value={cos ? `${(cos.db_bytes / 1024 / 1024).toFixed(1)} MB` : "…"}
+          sub={cos ? `${cos.db_images} 张` : ""}
+        />
         <Metric label="数据库大小" value={overview ? `${overview.db_size_mb} MB` : "…"} />
         <Metric label="版本" value={overview?.version ?? "…"} />
       </div>
@@ -852,17 +875,19 @@ function DataPanel() {
         {cos?.cos_set && (
           <div className="settings-row static">
             <span>桶内实际对象（notes/ 前缀）</span>
-            <span className="settings-value">
+            <span
+              className={`settings-value ${bucketPulled ? (bucketMismatch ? "tone-mid" : "tone-good") : "tone-bad"}`}
+            >
               {cos.bucket_objects === null
                 ? "拉取失败（仅显库内数）"
-                : `${cos.bucket_objects} 个 · ${(cos.bucket_bytes / 1024 / 1024).toFixed(1)} MB`}
+                : `${cos.bucket_objects} 个 · ${(cos.bucket_bytes / 1024 / 1024).toFixed(1)} MB${bucketMismatch ? " · 与库内不一致" : ""}`}
             </span>
           </div>
         )}
         {cos?.cos_set && (
           <div className="settings-row static">
             <span>未引用图片（孤儿）</span>
-            <span className="settings-value">
+            <span className={`settings-value ${orphans ? (orphans.count > 0 ? "tone-mid" : "tone-good") : ""}`}>
               {orphans ? `${orphans.count} 个 · ${fmtBytes(orphans.bytes)}` : "未扫描"}{" "}
               <button className="btn sm" onClick={scanOrphans} disabled={gcBusy}>
                 扫描
@@ -870,7 +895,11 @@ function DataPanel() {
               {orphans && orphans.count > 0 && (
                 <Popconfirm
                   title={`确认删除 ${orphans.count} 个未引用图片？`}
-                  description="只清理 7 天前上传且任何笔记都未引用的对象，此操作不可恢复"
+                  description={
+                    <span>
+                      只清理 <span className="tone-mid">7 天前</span> 上传且任何笔记都未引用的对象，此操作不可恢复
+                    </span>
+                  }
                   onConfirm={cleanupOrphans}
                   okText="删除"
                   cancelText="取消"
@@ -906,8 +935,19 @@ function DataPanel() {
           </button>
         </div>
         <div className="row">
-          每日自动备份（最新备份超 24 小时自动补一份，保留最近 30 份）。恢复为手动操作：下载备份文件，停服替换数据库后重启。
+          <span>
+            每日自动备份（最新备份超 <span className="tone-mid">24 小时</span>自动补一份，保留最近 <span className="tone-mid">30 份</span>）。恢复为手动操作：下载备份文件，停服替换数据库后重启。
+          </span>
         </div>
+        {backups !== null && backups.length > 0 && (
+          <div className="settings-row static">
+            <span>最新备份</span>
+            <span className={`settings-value ${backupTone}`}>
+              {fmtBackupKey(latestBackupKey)} · {backupAgeText}
+              {backupAgeHours > 24 ? "（偏旧，留意自动备份是否正常）" : ""}
+            </span>
+          </div>
+        )}
         {backups === null ? (
           <div className="row">加载中…</div>
         ) : backups.length === 0 ? (

@@ -9,7 +9,7 @@ import { fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
 import { fp } from "../utils/contentfp";
 import { useNotePaste } from "../utils/useNotePaste";
-import { contentToHtml, serializeEditor, stripMarks } from "../utils/noteFormat";
+import { contentToHtml, serializeEditor, stripMarks, studentNameFromTitle } from "../utils/noteFormat";
 import { IconBold, IconHighlight, IconItalic } from "../components/icons";
 
 // 笔记详情：默认阅读模式，编辑是主动动作
@@ -375,7 +375,8 @@ export default function NoteDetail() {
                 <button
                   className="btn"
                   onClick={() => {
-                    setLegacyNameDraft(note.legacy_name || "");
+                    // 名字优先沿用已存备注，否则从标题首词自动提取（标题格式：名字 + 单元进度 + 反馈类型）
+                    setLegacyNameDraft(note.legacy_name || studentNameFromTitle(note.title || ""));
                     setArchiveOpen(true);
                   }}
                 >

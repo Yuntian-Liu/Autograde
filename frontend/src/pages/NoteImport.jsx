@@ -4,7 +4,7 @@ import { App as AntApp, Input, Segmented, Select } from "antd";
 import { apiGet, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
 import { clientLog } from "../utils/clientLog";
-import { serializeEditor } from "../utils/noteFormat";
+import { serializeEditor, studentNameFromTitle } from "../utils/noteFormat";
 import { useNotePaste } from "../utils/useNotePaste";
 
 // 批量导入：一张大表一次录入多份笔记。关联学生行落活跃区；历史行进归档区（带学生名/备注）。
@@ -19,6 +19,7 @@ const newRow = (mode = "link") => ({
   student_id: null,
   assignment_id: null,
   legacy_name: "",
+  nameEdited: false, // 手动改过名字后不再自动提取（自动提取只填空白）
   title: "",
   touched: false, // 有任何内容即 true（末尾未触碰行渲染为占位样式）
   status: "idle", // idle | ok | fail
@@ -28,10 +29,21 @@ const newRow = (mode = "link") => ({
 
 function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetail, onChange, onRemove, registerEditor, onTouch, disabled }) {
   const editorRef = useRef(null);
+  // 归档行：从内容首行（标题格式「名字 + 单元进度 + 反馈类型」）自动提取学生名，手动改过则不再覆盖
+  const autoFillName = () => {
+    if (row.mode !== "legacy" || row.nameEdited) return;
+    const ed = editorRef.current;
+    if (!ed) return;
+    const name = studentNameFromTitle(ed.innerText || "");
+    if (name && name !== row.legacy_name) onChange({ ...row, legacy_name: name });
+  };
   const { onPaste, dndProps, uploading, migrating, dragOver } = useNotePaste({
     editorRef,
     noteId: null, // 未创建先贴图：tmp key，提交后后端对账
-    onDirty: () => onTouch(),
+    onDirty: () => {
+      onTouch();
+      autoFillName();
+    },
   });
   const detail = row.class_id ? classDetails[row.class_id] : null;
   // 编辑器 DOM 上报给父级：提交时逐行 serialize
@@ -47,7 +59,14 @@ function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetai
           size="small"
           value={row.mode}
           disabled={disabled}
-          onChange={(v) => onChange({ ...row, mode: v })}
+          onChange={(v) => {
+            // 切到归档时若名字还空着且没手动改过，立即从已贴内容提取一次
+            const name =
+              v === "legacy" && !row.nameEdited && !row.legacy_name
+                ? studentNameFromTitle(editorRef.current?.innerText || "")
+                : "";
+            onChange({ ...row, mode: v, ...(name ? { legacy_name: name } : {}) });
+          }}
           options={[
             { value: "link", label: "关联学生" },
             { value: "legacy", label: "历史归档" },
@@ -97,7 +116,7 @@ function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetai
             disabled={disabled}
             value={row.legacy_name}
             maxLength={64}
-            onChange={(e) => onChange({ ...row, legacy_name: e.target.value })}
+            onChange={(e) => onChange({ ...row, legacy_name: e.target.value, nameEdited: true })}
           />
         )}
         <span className="import-row-status">
@@ -132,7 +151,10 @@ function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetai
         contentEditable={!disabled}
         suppressContentEditableWarning
         onPaste={onPaste}
-        onInput={onTouch}
+        onInput={() => {
+          onTouch();
+          autoFillName();
+        }}
         {...dndProps}
       />
       {(uploading > 0 || migrating) && (

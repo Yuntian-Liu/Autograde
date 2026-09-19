@@ -55,6 +55,14 @@ export function stripMarks(text) {
     .replace(/==([^=]+)==/g, "$1");
 }
 
+// 反馈标题固定格式「学生名 + 单元进度 + 反馈类型」（如 Alice U7L1 练习反馈 / Linlin U7Day3&U8A Preview 伴学手册反馈），
+// 据此从历史归档内容/标题抽学生名；不匹配标题格式返回空串（首行是问候语等正文时不硬抽）
+export function studentNameFromTitle(text) {
+  const firstLine = (text || "").split("\n").map((s) => s.trim()).find(Boolean) || "";
+  const m = stripMarks(firstLine).match(/^(\S+)\s+U\d+(?:L|Day)\d+/);
+  return m ? m[1] : "";
+}
+
 // 编辑器 DOM → 存储格式：b/strong→**、i/em→*、mark→==，图片（含「图片未加载」占位）→占位符
 export function inlineText(node) {
   let out = "";
