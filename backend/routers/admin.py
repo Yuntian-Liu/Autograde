@@ -61,7 +61,7 @@ async def overview(
         "graded": graded,
         "db_size_mb": round(db_size / 1024 / 1024, 2),
         "ai_cost_today_yuan": round(float(today_cost), 6),
-        "version": "0.8.2",
+        "version": "0.9.0",
     }
 
 
@@ -169,6 +169,45 @@ async def backup_download(admin: User = Depends(get_admin_user)) -> FileResponse
         media_type="application/octet-stream",
         background=BackgroundTask(lambda: os.path.exists(dst_path) and os.remove(dst_path)),
     )
+
+
+# ---- 对象存储备份（异地留存；恢复留手动，不做在线入口）----
+
+
+@router.post("/backups", status_code=201)
+async def backup_now(admin: User = Depends(get_admin_user)) -> dict:
+    """立即快照上传到 COS backups/ 目录。"""
+    from backup import create_backup
+    from cos_store import cos_enabled
+
+    if not cos_enabled():
+        raise HTTPException(status_code=503, detail="对象存储未配置")
+    try:
+        return await create_backup()
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/backups")
+async def backups_list(admin: User = Depends(get_admin_user)) -> list[dict]:
+    """COS 备份列表（新的在前）；未配置 COS 返回空。"""
+    from backup import list_backups
+    from cos_store import cos_enabled
+
+    if not cos_enabled():
+        return []
+    return await list_backups()
+
+
+@router.get("/backups/download")
+async def backup_download_signed(key: str, admin: User = Depends(get_admin_user)) -> dict:
+    """签发备份预签名下载 URL（key 严格限定 backups/ 前缀）。"""
+    from backup import backup_download_url
+
+    try:
+        return {"url": await backup_download_url(key)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 # ---- 邀请码 ----

@@ -1119,3 +1119,11 @@ a.qg-name:hover { color: var(--accent); }
 .save-status.ok { color: var(--success); border-color: var(--success); }
 .save-status.warn { color: var(--warning); border-color: var(--warning); }
 .save-status.err { color: var(--danger); border-color: var(--danger); }
+
+/* ---------- 搜索命中高亮（主题色） ---------- */
+mark.search-hit {
+  background: var(--accent-bg);
+  color: var(--accent);
+  padding: 0 1px;
+  border-radius: 2px;
+}

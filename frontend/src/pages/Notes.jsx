@@ -9,6 +9,30 @@ import { clientLog } from "../utils/clientLog";
 import { renderNoteInline } from "../utils/noteFormat";
 
 // 笔记库：活跃/归档双区；搜索（学生名/标题/归档备注）+ 班级筛选 + 时间倒序卡片；新建可选关联，全不选即游离笔记
+// 搜索命中关键词在标题/摘要/关联行里主题色高亮
+function Hi({ text, kw }) {
+  if (!kw || !text) return text;
+  const lower = text.toLowerCase();
+  const k = kw.toLowerCase();
+  const parts = [];
+  let i = 0;
+  for (;;) {
+    const j = lower.indexOf(k, i);
+    if (j === -1) {
+      parts.push(text.slice(i));
+      break;
+    }
+    if (j > i) parts.push(text.slice(i, j));
+    parts.push(
+      <mark key={j} className="search-hit">
+        {text.slice(j, j + k.length)}
+      </mark>
+    );
+    i = j + k.length;
+  }
+  return parts;
+}
+
 export default function Notes() {
   const { message } = AntApp.useApp();
   const navigate = useNavigate();
@@ -85,6 +109,7 @@ export default function Notes() {
   // 汇总：总图片数与总字节（列表接口加总，量小）
   const totalImages = (notes || []).reduce((sum, n) => sum + (n.image_count || 0), 0);
   const totalBytes = (notes || []).reduce((sum, n) => sum + (n.image_size || 0), 0);
+  const kw = q.trim(); // 搜索关键词（命中高亮用）
 
   if (error)
     return (
@@ -154,21 +179,28 @@ export default function Notes() {
         <section className="block">
           {shown.map((n) => (
             <Link className="row note-card" key={n.id} to={`/notes/${n.id}`}>
-              <div className="note-card-title">{n.title}</div>
+              <div className="note-card-title">
+                <Hi text={n.title} kw={kw} />
+              </div>
               {n.excerpt && (
                 <div
                   className="note-card-excerpt"
-                  dangerouslySetInnerHTML={{ __html: renderNoteInline(n.excerpt) }}
+                  dangerouslySetInnerHTML={{ __html: renderNoteInline(n.excerpt, kw) }}
                 />
               )}
               <div className="note-card-meta">
-                {archived
-                  ? n.legacy_name
-                    ? `归档 · ${n.legacy_name}`
-                    : "归档"
-                  : n.class_name
-                    ? [n.class_name, n.student_name, n.assignment_label].filter(Boolean).join(" · ")
-                    : "历史记录"}
+                <Hi
+                  text={
+                    archived
+                      ? n.legacy_name
+                        ? `归档 · ${n.legacy_name}`
+                        : "归档"
+                      : n.class_name
+                        ? [n.class_name, n.student_name, n.assignment_label].filter(Boolean).join(" · ")
+                        : "历史记录"
+                  }
+                  kw={kw}
+                />
                 {" · "}
                 {n.image_count > 0 ? `${n.image_count} 图 · ${fmtBytes(n.image_size)}` : "纯文本"}
                 {" · "}

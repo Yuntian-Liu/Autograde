@@ -5,7 +5,7 @@ import { App as AntApp, Input, InputNumber, Modal, Popconfirm, Segmented, Select
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { adminApi, apiDelete, apiGet, apiPost, apiPut, downloadBackup } from "../api";
 import AppHeader from "../components/AppHeader";
-import { fmtTime } from "../meta";
+import { fmtBytes, fmtTime } from "../meta";
 import { useAuth } from "../contexts/AuthContext";
 import { clientLog } from "../utils/clientLog";
 import { fp } from "../utils/fingerprint";
@@ -653,10 +653,13 @@ function DataPanel() {
   const [overview, setOverview] = useState(null);
   const [cos, setCos] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [backups, setBackups] = useState(null); // COS 备份列表（null=加载中）
+  const [cosBusy, setCosBusy] = useState(false);
   const load = useCallback(() => {
     setOverview(null);
     adminApi.overview().then(setOverview).catch(() => setOverview({ error: true }));
     apiGet("/admin/cos-usage").then(setCos).catch(() => setCos(null));
+    apiGet("/admin/backups").then(setBackups).catch(() => setBackups(null));
   }, []);
   useEffect(() => {
     load();
@@ -673,6 +676,35 @@ function DataPanel() {
       setBusy(false);
     }
   }
+
+  async function backupToCos() {
+    setCosBusy(true);
+    try {
+      const r = await apiPost("/admin/backups", {});
+      clientLog.add("ui", `手动备份到 COS：${r.key}（${r.size}B）`);
+      message.success("已备份到对象存储");
+      apiGet("/admin/backups").then(setBackups).catch(() => {});
+    } catch (e) {
+      message.error(e.message);
+    } finally {
+      setCosBusy(false);
+    }
+  }
+
+  async function downloadCosBackup(key) {
+    try {
+      const r = await apiGet(`/admin/backups/download?key=${encodeURIComponent(key)}`);
+      window.open(r.url, "_blank");
+    } catch (e) {
+      message.error(e.message);
+    }
+  }
+
+  // 备份 key 含东八区时间戳（backups/autograde-20260919-013000.db），直接解析展示
+  const fmtBackupKey = (key) => {
+    const m = key.match(/autograde-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})\.db$/);
+    return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : key;
+  };
 
   return (
     <div>
@@ -719,7 +751,38 @@ function DataPanel() {
         <div className="row">
           在线快照导出完整 SQLite 数据库（含账号、班级、批改与 AI 用量流水），建议每次重要批改周期后下载留存。
         </div>
-        <div className="row">对象存储自动备份（每日定时 + 异地留存）将在后续版本接入。</div>
+      </section>
+      <section className="block">
+        <div className="sec-title sec-title-row">
+          对象存储备份
+          <button
+            className="btn primary"
+            onClick={backupToCos}
+            disabled={cosBusy || cos?.cos_set === false}
+          >
+            {cosBusy ? "备份中…" : "立即备份"}
+          </button>
+        </div>
+        <div className="row">
+          每日自动备份（最新备份超 24 小时自动补一份，保留最近 30 份）。恢复为手动操作：下载备份文件，停服替换数据库后重启。
+        </div>
+        {backups === null ? (
+          <div className="row">加载中…</div>
+        ) : backups.length === 0 ? (
+          <div className="row">暂无备份</div>
+        ) : (
+          backups.map((b) => (
+            <div className="settings-row static" key={b.key}>
+              <span>{fmtBackupKey(b.key)}</span>
+              <span className="settings-value">
+                {fmtBytes(b.size)} ·{" "}
+                <button className="btn sm" onClick={() => downloadCosBackup(b.key)}>
+                  下载
+                </button>
+              </span>
+            </div>
+          ))
+        )}
       </section>
     </div>
   );

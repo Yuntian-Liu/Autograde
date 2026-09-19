@@ -127,3 +127,31 @@ async def upload_bytes(key: str, data: bytes, content_type: str) -> None:
         Body=data,
         ContentType=content_type,
     )
+
+
+async def list_objects_meta(prefix: str) -> list[dict]:
+    """列前缀下对象元信息（key/size/modified），分页全量；备份管理等场景用。"""
+
+    def _scan() -> list[dict]:
+        client = _get_client()
+        out = []
+        marker = ""
+        while True:
+            resp = client.list_objects(
+                Bucket=config.COS_BUCKET, Prefix=prefix, Marker=marker, MaxKeys=1000
+            )
+            contents = resp.get("Contents", []) or []
+            out.extend(
+                {
+                    "key": o["Key"],
+                    "size": int(o.get("Size", 0)),
+                    "modified": o.get("LastModified", ""),
+                }
+                for o in contents
+            )
+            if str(resp.get("IsTruncated", "false")).lower() != "true" or not contents:
+                break
+            marker = resp.get("NextMarker") or contents[-1]["Key"]
+        return out
+
+    return await asyncio.to_thread(_scan)

@@ -28,10 +28,22 @@ export function contentToHtml(content, imageUrls) {
 }
 
 // 列表摘要等无图场景的内联渲染（安全 HTML；图片标记显示为中性的 [图片]，不误导「未加载」）
-export function renderNoteInline(text) {
+// kw 非空时把命中关键词包 <mark class="search-hit">（主题色高亮；只在文本片段替换，不碰标签）
+export function renderNoteInline(text, kw = "") {
   return (text || "")
     .split("\n")
-    .map((l) => renderNoteLine(l.replace(/\[\[img:[^\]]+\]\]/g, "[图片]"), {}))
+    .map((l) => {
+      let html = renderNoteLine(l.replace(/\[\[img:[^\]]+\]\]/g, "[图片]"), {});
+      const k = escapeHtml(kw.trim());
+      if (k) {
+        const re = new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+        html = html
+          .split(/(<[^>]+>)/g)
+          .map((seg) => (seg.startsWith("<") ? seg : seg.replace(re, '<mark class="search-hit">$&</mark>')))
+          .join("");
+      }
+      return html;
+    })
     .join("<br>");
 }
 

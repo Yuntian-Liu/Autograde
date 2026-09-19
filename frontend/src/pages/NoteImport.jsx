@@ -11,9 +11,10 @@ import { useNotePaste } from "../utils/useNotePaste";
 // 内容区支持图文粘贴——图片先走 tmp key 直传 COS，提交后由后端对账归属到正式笔记。
 
 let rowSeq = 0;
-const newRow = () => ({
+// 新行默认跟随触发行的模式（归档连着录就一直是归档，切了关联就跟着关联）
+const newRow = (mode = "link") => ({
   key: ++rowSeq,
-  mode: "link", // link=关联学生 | legacy=历史归档
+  mode, // link=关联学生 | legacy=历史归档
   class_id: null,
   student_id: null,
   assignment_id: null,
@@ -173,7 +174,7 @@ export default function NoteImport() {
       const hasField = Boolean(r.title.trim() || r.legacy_name.trim() || r.class_id || r.student_id);
       const touched = hasField || hasContent;
       let next = prev.map((x) => (x.key === key ? { ...x, touched } : x));
-      if (touched && idx === next.length - 1) next = [...next, newRow()];
+      if (touched && idx === next.length - 1) next = [...next, newRow(next[idx].mode)]; // 续行继承本行模式
       return next;
     });
   }
@@ -262,7 +263,7 @@ export default function NoteImport() {
               onRemove={() =>
                 setRows((prev) => {
                   const next = prev.filter((x) => x.key !== r.key);
-                  return next.length ? next : [newRow()]; // 删光时保底一行空行
+                  return next.length ? next : [newRow(r.mode)]; // 删光时保底一行空行（沿用本行模式）
                 })
               }
               registerEditor={(key, el) => {
@@ -275,7 +276,11 @@ export default function NoteImport() {
         </div>
 
         <div className="btn-row" style={{ marginTop: "var(--s4)" }}>
-          <button className="btn" disabled={submitting} onClick={() => setRows((p) => [...p, newRow()])}>
+          <button
+            className="btn"
+            disabled={submitting}
+            onClick={() => setRows((p) => [...p, newRow(p[p.length - 1]?.mode || "link")])}
+          >
             + 添加一行
           </button>
           <button className="btn primary" disabled={submitting} onClick={submitAll}>
