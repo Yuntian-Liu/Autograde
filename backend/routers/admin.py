@@ -61,7 +61,7 @@ async def overview(
         "graded": graded,
         "db_size_mb": round(db_size / 1024 / 1024, 2),
         "ai_cost_today_yuan": round(float(today_cost), 6),
-        "version": "0.9.0",
+        "version": "0.10.0",
     }
 
 
@@ -208,6 +208,83 @@ async def backup_download_signed(key: str, admin: User = Depends(get_admin_user)
         return {"url": await backup_download_url(key)}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# ---- 评级分数线（管理端编辑；读端点在 main.py /api/rating-thresholds）----
+
+
+class ThresholdItem(BaseModel):
+    rating: str
+    min: float
+
+
+class ThresholdsIn(BaseModel):
+    thresholds: list[ThresholdItem]
+
+
+@router.put("/rating-thresholds")
+async def put_rating_thresholds(
+    body: ThresholdsIn,
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """保存十二档分数线：档位集合精确匹配、min∈[0,100]、严格递减、F 固定 0。"""
+    import json as _json
+
+    from models import Setting
+    from rating import RATINGS, SETTINGS_KEY
+
+    pairs = [(t.rating, t.min) for t in body.thresholds]
+    if {r for r, _ in pairs} != set(RATINGS):
+        raise HTTPException(status_code=400, detail="档位必须恰好为十二档（A+ 到 F）")
+    by_rating = dict(pairs)
+    ordered = [by_rating[r] for r in RATINGS]  # 按档位高低序
+    if any(m < 0 or m > 100 for m in ordered):
+        raise HTTPException(status_code=400, detail="分数线必须在 0-100 之间")
+    if any(ordered[i] <= ordered[i + 1] for i in range(len(ordered) - 1)):
+        raise HTTPException(status_code=400, detail="分数线必须按档位严格递减")
+    if ordered[-1] != 0:
+        raise HTTPException(status_code=400, detail="F 档分数线固定为 0")
+    value = _json.dumps([{"rating": r, "min": by_rating[r]} for r in RATINGS])
+    row = (
+        await db.execute(select(Setting).where(Setting.key == SETTINGS_KEY))
+    ).scalar_one_or_none()
+    if row:
+        row.value = value
+    else:
+        db.add(Setting(key=SETTINGS_KEY, value=value))
+    await db.commit()
+    return {"ok": True}
+
+
+# ---- 孤儿图片 GC（贴图未保存/删图残留的 COS 对象；只清 7 天前的）----
+
+@router.get("/orphan-images")
+async def orphan_images_scan(
+    admin: User = Depends(get_admin_user), db: AsyncSession = Depends(get_db)
+) -> dict:
+    """扫描预览（只读）：{count, bytes}。"""
+    from cos_store import cos_enabled
+    from orphan_gc import scan_orphans
+
+    if not cos_enabled():
+        raise HTTPException(status_code=503, detail="对象存储未配置")
+    scan = await scan_orphans(db)
+    return {"count": scan["count"], "bytes": scan["bytes"]}
+
+
+@router.post("/orphan-images/cleanup")
+async def orphan_images_cleanup(
+    admin: User = Depends(get_admin_user), db: AsyncSession = Depends(get_db)
+) -> dict:
+    """真删（内部重新扫描，不拿过期清单）：{deleted, freed_bytes}。"""
+    from cos_store import cos_enabled
+    from orphan_gc import cleanup_orphans
+
+    if not cos_enabled():
+        raise HTTPException(status_code=503, detail="对象存储未配置")
+    result = await cleanup_orphans(db)
+    return result
 
 
 # ---- 邀请码 ----

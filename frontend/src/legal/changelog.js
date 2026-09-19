@@ -1,7 +1,7 @@
 // 版本日志数据源（设置页「版本日志」弹窗 + 登录后更新提醒弹窗；发版时与 CHANGELOG.md 同步）
 // 结构：minor 为主条目，patch 嵌套在 patches 数组里（主界面只呈现 minor，展开后见 patch）
 // ⚠️ 公开文件：不得出现私人信息
-export const APP_VERSION = "V0.9.0";
+export const APP_VERSION = "V0.10.0";
 
 /** 协议版本（用户协议/隐私政策最后更新日期，改协议时同步递增；触发登录后协议变更提醒） */
 export const AGREEMENT_VERSION = "2026-09-19";
@@ -18,6 +18,14 @@ export function getLatestUpdate() {
 }
 
 export const CHANGELOG = [
+  {
+    version: "V0.10.0",
+    date: "2026-09-19",
+    items: [
+      "评级分数线可视化：管理后台「评级」页可调十二档分数线（严格递减校验 + 恢复默认），批改页与落库即刻按新线执行",
+      "孤儿图片清理：管理后台「数据」可扫描并清理未被任何笔记引用的 COS 图片对象（贴图未保存/删图残留），只清 7 天前上传的，两段式确认防误删",
+    ],
+  },
   {
     version: "V0.9.0",
     date: "2026-09-19",

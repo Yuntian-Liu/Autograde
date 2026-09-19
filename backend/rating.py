@@ -39,3 +39,15 @@ def rating_for(score: float, thresholds: list[tuple[str, float]] | None = None) 
         if score >= minimum:
             return rating
     return "F"
+
+
+async def get_thresholds(db) -> list[tuple[str, float]]:
+    """当前生效分数线：settings 表覆盖值（非法/旧档自动回退默认十二档）。"""
+    from sqlalchemy import select
+
+    from models import Setting
+
+    row = (
+        await db.execute(select(Setting).where(Setting.key == SETTINGS_KEY))
+    ).scalar_one_or_none()
+    return parse_thresholds(row.value if row else None)

@@ -74,17 +74,20 @@ export default function Grading() {
   const [clearOpen, setClearOpen] = useState(false); // 清空勾选二次确认
   const [snapshotMap, setSnapshotMap] = useState({}); // studentId -> 最新反馈快照原文（落库真值）
   const [dirtyMap, setDirtyMap] = useState({}); // studentId -> 有未保存的表单编辑（脏标记）
+  const [thresholds, setThresholds] = useState(null); // 生效分数线（null=用默认校准值）
 
   useEffect(() => {
     Promise.all([
       apiGet(`/assignments/${assignmentId}`),
       apiGet(`/assignments/${assignmentId}/students`),
       apiGet("/phrases").catch(() => []), // 话术失败不拖垮整页，Issue/问候语区退化为空
+      apiGet("/rating-thresholds").catch(() => null), // 分数线失败回退默认
     ])
-      .then(([a, s, p]) => {
+      .then(([a, s, p, t]) => {
         setAssignment(a);
         setStudents(s);
         setPhrases(p);
+        if (Array.isArray(t) && t.length) setThresholds(t.map((x) => [x.rating, x.min]));
         // 问候语按当前时段随机取一条，存 state 保持稳定（换一条才变）
         const list = p.filter((x) => x.category === `问候语·${greetingSlot()}`);
         if (list.length) setGreetingId(list[Math.floor(Math.random() * list.length)].id);
@@ -149,7 +152,7 @@ export default function Grading() {
   // 总分 100 按权重归一化，扣掉勾选错题权重，保留两位小数（与后端复算同规则）
   const score =
     totalWeight > 0 ? ((100 * (totalWeight - checkedWeight)) / totalWeight).toFixed(2) : "100.00";
-  const autoRating = ratingFor(Number(score));
+  const autoRating = ratingFor(Number(score), thresholds || undefined);
   const rating = (current && ratingOverrides[current.id]) || autoRating;
 
   // 本次保存要写入的提交状态：默认沿用已入库状态，未批过时默认「已批改」

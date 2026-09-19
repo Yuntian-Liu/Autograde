@@ -25,12 +25,18 @@ export default function QuickGrade() {
   const [savingIds, setSavingIds] = useState(new Set());
   const [savingAll, setSavingAll] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false); // 上次批量保存有失败（状态灯红灯）
+  const [thresholds, setThresholds] = useState(null); // 生效分数线（null=用默认校准值）
 
   const load = useCallback(() => {
-    Promise.all([apiGet(`/assignments/${id}`), apiGet(`/assignments/${id}/students`)])
-      .then(([a, s]) => {
+    Promise.all([
+      apiGet(`/assignments/${id}`),
+      apiGet(`/assignments/${id}/students`),
+      apiGet("/rating-thresholds").catch(() => null), // 分数线失败回退默认
+    ])
+      .then(([a, s, t]) => {
         setAssignment(a);
         setStudents(s);
+        if (Array.isArray(t) && t.length) setThresholds(t.map((x) => [x.rating, x.min]));
         // 已批改学生的已记录错题预填进矩阵
         const wrong = {};
         for (const stu of s) wrong[stu.id] = new Set(stu.error_question_ids);
@@ -298,7 +304,7 @@ export default function QuickGrade() {
                         </td>
                         <td className={`qg-right qg-ratingcol ${rowHot ? "qg-rowhead" : ""}`}>
                           <span className={`qg-ratecap ${scoreTone(score)}`}>
-                            {ratingFor(Number(score))}
+                            {ratingFor(Number(score), thresholds || undefined)}
                           </span>
                         </td>
                         <td className={rowHot ? "qg-right qg-savecol qg-rowhead" : "qg-right qg-savecol"}>

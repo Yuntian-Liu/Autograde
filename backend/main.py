@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Autograde", version="0.9.0", lifespan=lifespan)
+app = FastAPI(title="Autograde", version="0.10.0", lifespan=lifespan)
 
 # GZip：JS/CSS/JSON 压缩传输（1.8MB bundle → 约 450KB）
 from fastapi.middleware.gzip import GZipMiddleware
@@ -151,6 +151,14 @@ async def public_config() -> dict:
 @app.get("/api/diagnostics/export")
 async def export_diagnostics(db=Depends(get_db), user=Depends(get_current_user)) -> dict:
     return await build_diagnostics(db, user)
+
+
+# ---- 评级分数线（登录即可读；批改页实时预览用）----
+@app.get("/api/rating-thresholds")
+async def rating_thresholds(db=Depends(get_db), user=Depends(get_current_user)) -> list:
+    from rating import get_thresholds
+
+    return [{"rating": r, "min": m} for r, m in await get_thresholds(db)]
 
 
 # ---- 单服务部署：托管前端静态文件（FRONTEND_DIST 指向 vite build 产物目录）----

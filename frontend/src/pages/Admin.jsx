@@ -5,6 +5,8 @@ import { App as AntApp, Input, InputNumber, Modal, Popconfirm, Segmented, Select
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { adminApi, apiDelete, apiGet, apiPost, apiPut, downloadBackup } from "../api";
 import AppHeader from "../components/AppHeader";
+import PageSkeleton from "../components/PageSkeleton";
+import { RATING_THRESHOLDS } from "../rating";
 import { fmtBytes, fmtTime } from "../meta";
 import { useAuth } from "../contexts/AuthContext";
 import { clientLog } from "../utils/clientLog";
@@ -55,6 +57,7 @@ export default function Admin() {
             { key: "overview", label: "总览", children: <OverviewPanel /> },
             { key: "ai", label: "AI 用量", children: <AiPanel /> },
             { key: "phrases", label: "话术", children: <PhrasesPanel /> },
+            { key: "rating", label: "评级", children: <RatingPanel /> },
             { key: "invites", label: "邀请码", children: <InvitesPanel /> },
             { key: "security", label: "安全", children: <SecurityPanel /> },
             { key: "data", label: "数据", children: <DataPanel /> },
@@ -648,6 +651,94 @@ function SecurityPanel() {
 }
 
 /* ---------- 数据管理 ---------- */
+/* ---------- 评级分数线 ---------- */
+function RatingPanel() {
+  const { message } = AntApp.useApp();
+  const [rows, setRows] = useState(null); // [{rating, min}] 按档位高低序
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(() => {
+    setRows(null);
+    apiGet("/rating-thresholds")
+      .then((t) => setRows(t.map((x) => ({ rating: x.rating, min: x.min }))))
+      .catch(() => setRows({ error: true }));
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // 前端先拦一道（后端仍会校验）：范围 0-100、严格递减、F 固定 0
+  function validate() {
+    for (const r of rows) {
+      if (r.min < 0 || r.min > 100) return "分数线必须在 0-100 之间";
+    }
+    for (let i = 0; i < rows.length - 1; i++) {
+      if (rows[i].min <= rows[i + 1].min) return "分数线必须按档位严格递减";
+    }
+    if (rows[rows.length - 1].min !== 0) return "F 档分数线固定为 0";
+    return null;
+  }
+
+  async function save() {
+    const err = validate();
+    if (err) return message.error(err);
+    setSaving(true);
+    try {
+      await apiPut("/admin/rating-thresholds", { thresholds: rows });
+      clientLog.add("ui", `评级分数线更新 fp=${fp(JSON.stringify(rows))}`);
+      message.success("分数线已保存，即刻生效");
+    } catch (e) {
+      message.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (rows?.error) return <PanelError onRetry={load} />;
+  if (!rows) return <PageSkeleton />;
+  return (
+    <section className="block">
+      <div className="sec-title sec-title-row">
+        十二档分数线（左闭右开）
+        <span>
+          <button
+            className="btn sm"
+            disabled={saving}
+            onClick={() => setRows(RATING_THRESHOLDS.map(([rating, min]) => ({ rating, min })))}
+          >
+            恢复默认
+          </button>{" "}
+          <button className="btn primary sm" onClick={save} disabled={saving}>
+            {saving ? "保存中…" : "保存"}
+          </button>
+        </span>
+      </div>
+      <div className="row">
+        改线后实时计算的页面立即按新线显示；已落库的历史等级不变（等级是保存时刻算好存库的）。
+      </div>
+      {rows.map((r, i) => (
+        <div className="settings-row static" key={r.rating}>
+          <span>{r.rating}</span>
+          <span className="settings-value">
+            ≥{" "}
+            <InputNumber
+              size="small"
+              min={0}
+              max={100}
+              step={0.5}
+              disabled={r.rating === "F"}
+              value={r.min}
+              onChange={(v) =>
+                setRows((prev) => prev.map((x, j) => (j === i ? { ...x, min: v ?? 0 } : x)))
+              }
+            />
+          </span>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function DataPanel() {
   const { message } = AntApp.useApp();
   const [overview, setOverview] = useState(null);
@@ -655,6 +746,8 @@ function DataPanel() {
   const [busy, setBusy] = useState(false);
   const [backups, setBackups] = useState(null); // COS 备份列表（null=加载中）
   const [cosBusy, setCosBusy] = useState(false);
+  const [orphans, setOrphans] = useState(null); // 孤儿图片扫描结果 {count, bytes} | null
+  const [gcBusy, setGcBusy] = useState(false);
   const load = useCallback(() => {
     setOverview(null);
     adminApi.overview().then(setOverview).catch(() => setOverview({ error: true }));
@@ -706,6 +799,32 @@ function DataPanel() {
     return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : key;
   };
 
+  async function scanOrphans() {
+    setGcBusy(true);
+    try {
+      setOrphans(await apiGet("/admin/orphan-images"));
+    } catch (e) {
+      message.error(e.message);
+    } finally {
+      setGcBusy(false);
+    }
+  }
+
+  async function cleanupOrphans() {
+    setGcBusy(true);
+    try {
+      const r = await apiPost("/admin/orphan-images/cleanup", {});
+      clientLog.add("ui", `孤儿图片清理：删除 ${r.deleted} 个（${r.freed_bytes}B）`);
+      message.success(`已清理 ${r.deleted} 个未引用图片`);
+      setOrphans(null);
+      load();
+    } catch (e) {
+      message.error(e.message);
+    } finally {
+      setGcBusy(false);
+    }
+  }
+
   return (
     <div>
       {overview?.error ? (
@@ -737,6 +856,29 @@ function DataPanel() {
               {cos.bucket_objects === null
                 ? "拉取失败（仅显库内数）"
                 : `${cos.bucket_objects} 个 · ${(cos.bucket_bytes / 1024 / 1024).toFixed(1)} MB`}
+            </span>
+          </div>
+        )}
+        {cos?.cos_set && (
+          <div className="settings-row static">
+            <span>未引用图片（孤儿）</span>
+            <span className="settings-value">
+              {orphans ? `${orphans.count} 个 · ${fmtBytes(orphans.bytes)}` : "未扫描"}{" "}
+              <button className="btn sm" onClick={scanOrphans} disabled={gcBusy}>
+                扫描
+              </button>{" "}
+              {orphans && orphans.count > 0 && (
+                <Popconfirm
+                  title={`确认删除 ${orphans.count} 个未引用图片？`}
+                  description="只清理 7 天前上传且任何笔记都未引用的对象，此操作不可恢复"
+                  onConfirm={cleanupOrphans}
+                  okText="删除"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
+                >
+                  <button className="btn sm danger">清理</button>
+                </Popconfirm>
+              )}
             </span>
           </div>
         )}

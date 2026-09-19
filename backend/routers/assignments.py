@@ -21,7 +21,7 @@ from models import (
     Student,
     Submission,
 )
-from rating import rating_for
+from rating import get_thresholds, rating_for
 from serializers import (
     GRADED_STATUSES,
     PROCESSED_STATUSES,
@@ -676,7 +676,7 @@ async def save_grading(
         total_weight = sum(q.score_weight for q in questions)
         checked_weight = sum(qmap[qid].score_weight for qid in checked_ids)
         score = round(100 * (total_weight - checked_weight) / total_weight, 2) if total_weight > 0 else 100.0
-        rating = body.rating_override or rating_for(score)
+        rating = body.rating_override or rating_for(score, await get_thresholds(db))
         rating_override = body.rating_override
     else:
         score = None

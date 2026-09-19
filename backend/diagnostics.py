@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import config
 from auth.models import InviteCode, User
 from auth.utils import get_login_blocked_count
+from rating import DEFAULT_THRESHOLDS, get_thresholds
 from database import DATABASE_PATH
 from llm_events_store import get_prices
 from models import (
@@ -39,7 +40,7 @@ from models import (
     Submission,
 )
 
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.10.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
 AGREEMENT_VERSION = "2026-09-19"
 _STARTED_AT = datetime.now(timezone.utc)
@@ -192,6 +193,10 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
             "ai_prices": prices,
             "database_file": os.path.basename(DATABASE_PATH),
             "agreement_version": AGREEMENT_VERSION,
+            # 分数线是否被自定义过（排查等级异常时先排除配置因素）
+            "rating_thresholds_custom": (
+                await get_thresholds(db) != DEFAULT_THRESHOLDS
+            ),
         },
         "data": {
             "db_size_mb": round(db_size / 1024 / 1024, 3),

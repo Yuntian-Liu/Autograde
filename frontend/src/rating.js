@@ -16,8 +16,9 @@ export const RATING_THRESHOLDS = [
 
 export const RATINGS = RATING_THRESHOLDS.map(([rating]) => rating);
 
-export function ratingFor(score) {
-  for (const [rating, min] of RATING_THRESHOLDS) {
+// thresholds 可传当前生效分数线（后端 settings 可覆盖）；不传用默认校准值
+export function ratingFor(score, thresholds = RATING_THRESHOLDS) {
+  for (const [rating, min] of thresholds) {
     if (score >= min) return rating;
   }
   return "F";
