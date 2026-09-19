@@ -17,24 +17,28 @@ import { apiGet } from "../api";
 import AppHeader from "../components/AppHeader";
 import PageSkeleton from "../components/PageSkeleton";
 import { fmtScore, scoreColorVar, scoreTone, seriesLabel } from "../meta";
+import { batchStatus, computeLeaderboard } from "../utils/leaderboard";
 
 const GRADED = new Set(["已批改", "缺作业"]);
 
-// 学生详情页：信息头 + 历次成绩趋势 + 薄弱板块 + 明细表
+// 学生详情页：信息头 + 历次成绩趋势 + 名次走势 + 薄弱板块 + 明细表
 export default function StudentDetail() {
   const { classId, studentId } = useParams();
   const [stats, setStats] = useState(null);
   const [classInfo, setClassInfo] = useState(null);
+  const [lb, setLb] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     Promise.all([
       apiGet(`/students/${studentId}/stats`),
       apiGet(`/classes/${classId}`),
+      apiGet(`/classes/${classId}/leaderboard`),
     ])
-      .then(([s, c]) => {
+      .then(([s, c, l]) => {
         setStats(s);
         setClassInfo(c);
+        setLb(l);
       })
       .catch((e) => setError(e.message));
   }, [classId, studentId]);
@@ -59,13 +63,36 @@ export default function StudentDetail() {
     [stats]
   );
 
+  // 班级排名（实时口径）与名次走势（历次·含提交率，按已完成批次逐个截断重算）
+  const sid = Number(studentId);
+  const liveRank = useMemo(() => {
+    if (!lb) return null;
+    const rows = computeLeaderboard(lb.batches, lb.students, { live: true });
+    const me = rows.find((r) => r.student_id === sid);
+    return me ? { rank: me.rank, total: rows.length } : null;
+  }, [lb, sid]);
+  const rankTrend = useMemo(() => {
+    if (!lb) return [];
+    const done = lb.batches.filter((b) => batchStatus(b) === "已完成");
+    return done.map((_, i) => {
+      const rows = computeLeaderboard(lb.batches, lb.students, {
+        live: false,
+        upto: i + 1,
+        weighted: true,
+      });
+      const me = rows.find((r) => r.student_id === sid);
+      // 当时无有效成绩的点置 null（断开）
+      return { label: `第 ${i + 1} 次`, rank: me && me.avg !== null ? me.rank : null };
+    });
+  }, [lb, sid]);
+
   if (error)
     return (
       <div className="page-enter">
         <div className="page-error">加载失败：{error}</div>
       </div>
     );
-  if (!stats || !classInfo)
+  if (!stats || !classInfo || !lb)
     return (
       <div className="page-enter">
         <PageSkeleton />
@@ -106,6 +133,14 @@ export default function StudentDetail() {
                 <div className="k">作业次数</div>
                 <div className="v">{stats.history.length}</div>
               </div>
+              {liveRank && (
+                <div className="stat">
+                  <div className="k">班级排名</div>
+                  <div className="v">
+                    第 {liveRank.rank} / {liveRank.total} 名
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -155,6 +190,38 @@ export default function StudentDetail() {
             </div>
           )}
         </section>
+
+        {/* 名次走势（历次·含提交率口径，仅已完成批次） */}
+        {rankTrend.length > 0 && (
+          <section className="block">
+            <div className="sec-title">名次走势</div>
+            <div style={{ width: "100%", height: 240 }}>
+              <ResponsiveContainer>
+                <LineChart data={rankTrend} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis
+                    reversed
+                    domain={[1, Math.max(1, lb.students.length)]}
+                    allowDecimals={false}
+                    tick={{ fontSize: 11 }}
+                    width={36}
+                  />
+                  <Tooltip formatter={(v) => [`第 ${v} 名`, "名次"]} />
+                  <Line
+                    type="monotone"
+                    dataKey="rank"
+                    name="名次"
+                    stroke="var(--accent)"
+                    strokeWidth={2}
+                    connectNulls={false}
+                    dot={{ r: 4, fill: "var(--accent)", strokeWidth: 0 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+        )}
 
         {/* 薄弱板块 */}
         <section className="block">

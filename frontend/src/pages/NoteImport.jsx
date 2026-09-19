@@ -4,7 +4,7 @@ import { App as AntApp, Input, Segmented, Select } from "antd";
 import { apiGet, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
 import { clientLog } from "../utils/clientLog";
-import { serializeEditor, studentNameFromTitle } from "../utils/noteFormat";
+import { serializeEditor, seriesFromTitle, studentNameFromTitle } from "../utils/noteFormat";
 import { useNotePaste } from "../utils/useNotePaste";
 
 // 批量导入：一张大表一次录入多份笔记。关联学生行落活跃区；历史行进归档区（带学生名/备注）。
@@ -20,6 +20,9 @@ const newRow = (mode = "link") => ({
   assignment_id: null,
   legacy_name: "",
   nameEdited: false, // 手动改过名字后不再自动提取（自动提取只填空白）
+  linkEdited: false, // 手动改过班级/学生后不再自动锁定
+  detectedName: "", // 标题抽出的学生名（link 行自动锁定用）
+  detectedSeries: "", // 标题反馈类型反推的系列（NG/WW，空=不限）
   title: "",
   touched: false, // 有任何内容即 true（末尾未触碰行渲染为占位样式）
   status: "idle", // idle | ok | fail
@@ -29,20 +32,30 @@ const newRow = (mode = "link") => ({
 
 function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetail, onChange, onRemove, registerEditor, onTouch, disabled }) {
   const editorRef = useRef(null);
-  // 归档行：从内容首行（标题格式「名字 + 单元进度 + 反馈类型」）自动提取学生名，手动改过则不再覆盖
-  const autoFillName = () => {
-    if (row.mode !== "legacy" || row.nameEdited) return;
+  // 内容首行标题自动识别：归档行抽学生名预填备注；关联行抽名字+系列供父级锁定班级/学生
+  // 手动改过（nameEdited/linkEdited）后不再自动覆盖
+  const autoDetect = () => {
     const ed = editorRef.current;
     if (!ed) return;
-    const name = studentNameFromTitle(ed.innerText || "");
-    if (name && name !== row.legacy_name) onChange({ ...row, legacy_name: name });
+    const text = ed.innerText || "";
+    if (row.mode === "legacy") {
+      if (row.nameEdited) return;
+      const name = studentNameFromTitle(text);
+      if (name && name !== row.legacy_name) onChange({ ...row, legacy_name: name });
+    } else if (!row.linkEdited) {
+      const name = studentNameFromTitle(text);
+      const series = seriesFromTitle(text);
+      if (name && (name !== row.detectedName || series !== row.detectedSeries)) {
+        onChange({ ...row, detectedName: name, detectedSeries: series });
+      }
+    }
   };
   const { onPaste, dndProps, uploading, migrating, dragOver } = useNotePaste({
     editorRef,
     noteId: null, // 未创建先贴图：tmp key，提交后后端对账
     onDirty: () => {
       onTouch();
-      autoFillName();
+      autoDetect();
     },
   });
   const detail = row.class_id ? classDetails[row.class_id] : null;
@@ -60,12 +73,16 @@ function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetai
           value={row.mode}
           disabled={disabled}
           onChange={(v) => {
-            // 切到归档时若名字还空着且没手动改过，立即从已贴内容提取一次
-            const name =
-              v === "legacy" && !row.nameEdited && !row.legacy_name
-                ? studentNameFromTitle(editorRef.current?.innerText || "")
-                : "";
-            onChange({ ...row, mode: v, ...(name ? { legacy_name: name } : {}) });
+            // 切到归档时若名字还空着且没手动改过，立即从已贴内容提取一次；切到关联同理先抽名字+系列
+            const text = editorRef.current?.innerText || "";
+            const name = studentNameFromTitle(text);
+            const extra = {};
+            if (v === "legacy" && !row.nameEdited && !row.legacy_name && name) extra.legacy_name = name;
+            if (v === "link" && !row.linkEdited && name) {
+              extra.detectedName = name;
+              extra.detectedSeries = seriesFromTitle(text);
+            }
+            onChange({ ...row, mode: v, ...extra });
           }}
           options={[
             { value: "link", label: "关联学生" },
@@ -83,7 +100,7 @@ function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetai
               value={row.class_id}
               options={classes.map((c) => ({ value: c.id, label: c.name }))}
               onChange={(v) => {
-                onChange({ ...row, class_id: v ?? null, student_id: null, assignment_id: null });
+                onChange({ ...row, class_id: v ?? null, student_id: null, assignment_id: null, linkEdited: true });
                 if (v) ensureClassDetail(v);
               }}
             />
@@ -95,7 +112,7 @@ function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetai
               disabled={disabled || !row.class_id}
               value={row.student_id}
               options={(detail?.students || []).map((s) => ({ value: s.id, label: s.name }))}
-              onChange={(v) => onChange({ ...row, student_id: v ?? null })}
+              onChange={(v) => onChange({ ...row, student_id: v ?? null, linkEdited: true })}
             />
             <Select
               size="small"
@@ -153,7 +170,7 @@ function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetai
         onPaste={onPaste}
         onInput={() => {
           onTouch();
-          autoFillName();
+          autoDetect();
         }}
         {...dndProps}
       />
@@ -184,6 +201,34 @@ export default function NoteImport() {
   }
 
   const patchRow = (key, next) => setRows((prev) => prev.map((r) => (r.key === key ? next : r)));
+
+  // 关联行自动锁定：detectedName + detectedSeries → 全班级范围精确匹配学生，唯一命中才自动选
+  // （同名多人不猜，保持手动）；classDetails 异步到位后本 effect 自动补解析
+  useEffect(() => {
+    for (const r of rows) {
+      if (r.mode !== "link" || r.linkEdited || !r.detectedName) continue;
+      if (r.class_id && r.student_id) continue;
+      const want = r.detectedName.trim().toLowerCase();
+      const matches = [];
+      let waiting = false;
+      for (const c of classes) {
+        if (r.detectedSeries && c.series !== r.detectedSeries) continue;
+        const d = classDetails[c.id];
+        if (!d) {
+          ensureClassDetail(c.id);
+          waiting = true;
+          continue;
+        }
+        for (const s of d.students || []) {
+          if (s.name.trim().toLowerCase() === want) matches.push({ c, s });
+        }
+      }
+      if (waiting) continue; // 数据没拉齐，等下一轮
+      if (matches.length === 1) {
+        patchRow(r.key, { ...r, class_id: matches[0].c.id, student_id: matches[0].s.id });
+      }
+    }
+  }, [rows, classDetails, classes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 表格始终留一行空行：最后一行有任何内容即在末尾补新空行；行带 touched 标记（末尾未触碰行渲染为占位样式）
   function touchRow(key) {

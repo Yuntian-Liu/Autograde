@@ -1,6 +1,7 @@
 import { IconChevronLeft } from "../components/icons";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { Segmented, Select } from "antd";
 import {
   Bar,
   BarChart,
@@ -16,17 +17,25 @@ import {
 import { apiGet } from "../api";
 import AppHeader from "../components/AppHeader";
 import PageSkeleton from "../components/PageSkeleton";
-import { seriesLabel } from "../meta";
+import { fmtScore, seriesLabel } from "../meta";
+import { batchStatus, computeLeaderboard } from "../utils/leaderboard";
 
-// 班级统计页：历次平均分趋势 + 提交率堆叠条 + 每题错误排行
+// 班级统计页：排行榜 + 历次平均分趋势 + 提交率堆叠条 + 每题错误排行
 export default function ClassStats() {
   const { id } = useParams();
   const [data, setData] = useState(null);
+  const [lb, setLb] = useState(null);
   const [error, setError] = useState(null);
+  const [mode, setMode] = useState("live"); // live 实时 / hist 历次
+  const [upto, setUpto] = useState(null); // 历次：截至第 N 次（已完成批次序号）
+  const [weighted, setWeighted] = useState(true); // 历次：含提交率 / 纯分数
 
   useEffect(() => {
-    apiGet(`/classes/${id}/stats`)
-      .then(setData)
+    Promise.all([apiGet(`/classes/${id}/stats`), apiGet(`/classes/${id}/leaderboard`)])
+      .then(([s, l]) => {
+        setData(s);
+        setLb(l);
+      })
       .catch((e) => setError(e.message));
   }, [id]);
 
@@ -36,7 +45,7 @@ export default function ClassStats() {
         <div className="page-error">加载失败：{error}</div>
       </div>
     );
-  if (!data)
+  if (!data || !lb)
     return (
       <div className="page-enter">
         <PageSkeleton />
@@ -61,6 +70,23 @@ export default function ClassStats() {
     count: e.count,
   }));
 
+  // 排行榜：实时 = 未开始以外的批次（永远含提交率）；历次 = 已完成批次前 N 个
+  const doneBatches = lb.batches.filter((b) => batchStatus(b) === "已完成");
+  const effUpto = upto ?? doneBatches.length;
+  const lbRows = computeLeaderboard(lb.batches, lb.students, {
+    live: mode === "live",
+    upto: effUpto,
+    weighted,
+  });
+  const lbEmpty = lbRows.length === 0 || lbRows[0].total === 0;
+  const maxScore = lbRows.length ? Math.max(...lbRows.map((r) => r.score)) : 0;
+  // 领奖台：金中银左铜右，一名一人（同分按批改先后顺延，见 leaderboard.js）；人不够时留空台阶
+  const MEDAL = { 1: "🥇", 2: "🥈", 3: "🥉" };
+  const podiumCols = [2, 1, 3].map((rank) => ({
+    rank,
+    player: lbRows.find((r) => r.rank === rank) || null,
+  }));
+
   return (
     <div className="page-enter">
       <AppHeader
@@ -75,6 +101,94 @@ export default function ClassStats() {
           <IconChevronLeft />返回班级
         </Link>
         <h1 style={{ marginTop: "var(--s3)" }}>{c.name} · 班级统计</h1>
+
+        {/* 排行榜 */}
+        <section className="block">
+          <div className="sec-title">排行榜</div>
+          <div className="lb-controls">
+            <Segmented
+              value={mode}
+              onChange={setMode}
+              options={[
+                { label: "实时排名", value: "live" },
+                { label: "历次排名", value: "hist" },
+              ]}
+            />
+            {mode === "hist" && (
+              <>
+                <Select
+                  value={effUpto || null}
+                  onChange={setUpto}
+                  style={{ width: 180 }}
+                  options={doneBatches.map((b, i) => ({
+                    value: i + 1,
+                    label: `第 ${i + 1} 次 · ${b.unit_label}`,
+                  }))}
+                />
+                <Segmented
+                  value={weighted ? "w" : "p"}
+                  onChange={(v) => setWeighted(v === "w")}
+                  options={[
+                    { label: "含提交率", value: "w" },
+                    { label: "纯分数", value: "p" },
+                  ]}
+                />
+              </>
+            )}
+          </div>
+          {lbEmpty ? (
+            <div className="row">暂无已批改的批次</div>
+          ) : (
+            <>
+              {/* 领奖台：金中银左铜右，台阶高度固定递减；一名一人，人不够留空台阶 */}
+              <div className="lb-podium">
+                {podiumCols.map(({ rank, player }) => (
+                  <div key={rank} className={`lb-step lb-s${rank}${player ? "" : " empty"}`}>
+                    <div className="lb-players">
+                      {player && (
+                        <Link
+                          className="lb-player"
+                          to={`/classes/${id}/students/${player.student_id}`}
+                        >
+                          <span className="lb-medal-emoji">{MEDAL[rank]}</span>
+                          <span className="lb-name">{player.name}</span>
+                          <span className="lb-score">{player.score.toFixed(2)}</span>
+                          <span className="lb-sub">
+                            均分 {fmtScore(player.avg)} · 交 {player.submitted}/{player.total}
+                          </span>
+                        </Link>
+                      )}
+                    </div>
+                    <div className="lb-base">
+                      <span className="lb-basenum">{rank}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* 第 4 名起：横条行 */}
+              {lbRows.filter((r) => r.rank > 3).map((r) => (
+                <Link
+                  className="lb-row"
+                  key={r.student_id}
+                  to={`/classes/${id}/students/${r.student_id}`}
+                >
+                  <span className="lb-rank">{r.rank}</span>
+                  <span className="lb-rowname">{r.name}</span>
+                  <span className="lb-bar">
+                    <span
+                      className="lb-fill"
+                      style={{ width: `${maxScore > 0 ? (r.score / maxScore) * 100 : 0}%` }}
+                    />
+                  </span>
+                  <span className="lb-rowscore">{r.score.toFixed(2)}</span>
+                  <span className="lb-rowsub">
+                    均分 {fmtScore(r.avg)} · 交 {r.submitted}/{r.total}
+                  </span>
+                </Link>
+              ))}
+            </>
+          )}
+        </section>
 
         {/* 历次平均分趋势 */}
         <section className="block">

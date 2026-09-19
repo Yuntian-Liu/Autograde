@@ -1,9 +1,10 @@
 import { IconChevronLeft } from "../components/icons";
-import { useEffect, useMemo, useState } from "react";
-import { Link, useBlocker, useParams, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { App as AntApp, Input, Modal, Select } from "antd";
 import { apiGet, apiPatch, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
+import Confetti from "../components/Confetti";
 import SaveStatus from "../components/SaveStatus";
 import QuestionEditor from "../components/QuestionEditor";
 import {
@@ -20,6 +21,7 @@ import {
 import { RATINGS, ratingFor } from "../rating";
 import { clientLog } from "../utils/clientLog";
 import { fp } from "../utils/contentfp";
+import { useAuth } from "../contexts/AuthContext";
 import {
   buildFeedbackDoc,
   collapseBlankLines,
@@ -43,12 +45,16 @@ const RATING_GROUP_ALIAS = { "A-": "A", "B+": "B", "B": "B", "B-": "B", "C+": "C
 export default function Grading() {
   const { assignmentId } = useParams();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { message, modal } = AntApp.useApp();
+  const { user } = useAuth();
 
   const [assignment, setAssignment] = useState(null);
   const [students, setStudents] = useState([]);
   const [error, setError] = useState(null);
   const [currentId, setCurrentId] = useState(null);
+  const [celebrate, setCelebrate] = useState(false); // 全班改完撒花（每次进页最多一次）
+  const celebratedRef = useRef(false);
   // 勾选与定稿内容只存前端内存，「保存批改」时才落库；初始值取已入库的错题记录
   const [checkedMap, setCheckedMap] = useState({});
   const [previewMap, setPreviewMap] = useState({}); // studentId -> 预习错题题号（1-5，不计分）
@@ -267,6 +273,26 @@ export default function Grading() {
   const processedCount = students.filter(
     (s) => s.submission && PROCESSED_STATUSES.has(s.submission.status)
   ).length;
+
+  // 全班改完撒花：仅当「本次保存」把处理数从 <总数 推到 =总数 时触发，每次进页最多一次
+  function maybeCelebrate(fresh) {
+    if (celebratedRef.current || !assignment) return;
+    const total = fresh.length;
+    if (total === 0) return;
+    const nowDone = fresh.filter((s) => s.submission && PROCESSED_STATUSES.has(s.submission.status)).length;
+    if (nowDone !== total || processedCount >= total) return;
+    celebratedRef.current = true;
+    setCelebrate(true);
+    clientLog.add("ui", `全班批改完成庆祝：${assignment.unit_label}（${total} 人）`);
+    modal.confirm({
+      title: "全班批改完成 🎉",
+      content: `${assignment.class ? `${seriesLabel(assignment.class.series)} ${assignment.class.name} · ` : ""}${assignment.unit_label}，全部 ${total} 份作业已处理。${user?.nickname || ""}老师辛苦了！`,
+      okText: "回到批次",
+      cancelText: "留在这里",
+      centered: true,
+      onOk: () => navigate(`/assignments/${assignment.slug || assignment.id}`),
+    });
+  }
 
   function setCheckedFor(studentId, updater) {
     setCheckedMap((prev) => ({ ...prev, [studentId]: updater(prev[studentId] || []) }));
@@ -571,6 +597,7 @@ export default function Grading() {
       });
       const fresh = await apiGet(`/assignments/${assignmentId}/students`);
       setStudents(fresh);
+      maybeCelebrate(fresh);
       // 快照回显：落库后预览立即显示存档原文；dirty 清除
       setSnapshotMap(Object.fromEntries(fresh.map((s) => [s.id, s.feedback_text ?? null])));
       setDirtyMap((prev) => ({ ...prev, [current.id]: false }));
@@ -628,6 +655,7 @@ export default function Grading() {
 
   return (
     <div className="page-enter">
+      {celebrate && <Confetti />}
       <AppHeader
         compact
         crumbs={[

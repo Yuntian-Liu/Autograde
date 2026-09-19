@@ -1,21 +1,27 @@
 import { IconChevronLeft } from "../components/icons";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useBlocker, useParams } from "react-router-dom";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useBlocker, useNavigate, useParams } from "react-router-dom";
 import { App as AntApp } from "antd";
 import { apiGet, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
+import Confetti from "../components/Confetti";
 import SaveStatus from "../components/SaveStatus";
 import PageSkeleton from "../components/PageSkeleton";
 import { STATUS_META, scoreTone, seriesLabel } from "../meta";
 import { ratingFor } from "../rating";
 import { clientLog } from "../utils/clientLog";
+import { useAuth } from "../contexts/AuthContext";
 import "../grading.css";
+
+const PROCESSED_STATUSES = new Set(["已批改", "缺作业", "未交"]); // 唯一未处理状态是「待批改」
 
 // 快捷批改：上半区答案速查（纯答案紧凑总览），下半区 学生×题目 标错矩阵
 // 只管录入——微调/预览文本/话术都在常规批改页做
 export default function QuickGrade() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { message, modal } = AntApp.useApp();
+  const { user } = useAuth();
 
   const [assignment, setAssignment] = useState(null);
   const [students, setStudents] = useState([]);
@@ -27,6 +33,8 @@ export default function QuickGrade() {
   const [savingAll, setSavingAll] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false); // 上次批量保存有失败（状态灯红灯）
   const [thresholds, setThresholds] = useState(null); // 生效分数线（null=用默认校准值）
+  const [celebrate, setCelebrate] = useState(false); // 全班改完撒花（每次进页最多一次）
+  const celebratedRef = useRef(false);
 
   const load = useCallback(() => {
     Promise.all([
@@ -108,6 +116,27 @@ export default function QuickGrade() {
     setDirtyMap((prev) => ({ ...prev, [sid]: true }));
   }
 
+  // 全班改完撒花：仅当本次保存把处理数从 <总数 推到 =总数 时触发，每次进页最多一次
+  function maybeCelebrate(fresh) {
+    if (celebratedRef.current || !assignment) return;
+    const total = fresh.length;
+    if (total === 0) return;
+    const nowDone = fresh.filter((s) => s.submission && PROCESSED_STATUSES.has(s.submission.status)).length;
+    const prevDone = students.filter((s) => s.submission && PROCESSED_STATUSES.has(s.submission.status)).length;
+    if (nowDone !== total || prevDone >= total) return;
+    celebratedRef.current = true;
+    setCelebrate(true);
+    clientLog.add("ui", `全班批改完成庆祝：${assignment.unit_label}（${total} 人）`);
+    modal.confirm({
+      title: "全班批改完成 🎉",
+      content: `${assignment.class ? `${seriesLabel(assignment.class.series)} ${assignment.class.name} · ` : ""}${assignment.unit_label}，全部 ${total} 份作业已处理。${user?.nickname || ""}老师辛苦了！`,
+      okText: "回到批次",
+      cancelText: "留在这里",
+      centered: true,
+      onOk: () => navigate(`/assignments/${assignment.slug || assignment.id}`),
+    });
+  }
+
   // 保存安全点：先拉该生现状取 notes/rating_override 透传（不清掉精修过的 note）；
   // PUT 落库成功后再重拉——状态灯/分数显示的是落库后的真值
   // final_text 传空串，后端跳过快照不覆盖已有反馈文本
@@ -126,6 +155,7 @@ export default function QuickGrade() {
     });
     const fresh = await apiGet(`/assignments/${id}/students`);
     setStudents(fresh);
+    maybeCelebrate(fresh);
     setDirtyMap((prev) => ({ ...prev, [sid]: false }));
   }
 
@@ -218,6 +248,7 @@ export default function QuickGrade() {
 
   return (
     <div className="page-enter">
+      {celebrate && <Confetti />}
       <AppHeader
         crumbs={[
           { label: "工作台", to: "/" },

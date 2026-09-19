@@ -355,6 +355,66 @@ async def create_assignment(
     return assignment_brief(a)
 
 
+@router.get("/{class_id}/leaderboard")
+async def class_leaderboard(
+    class_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict:
+    """排行榜成绩矩阵：全班学生 × 全部批次的提交状态与分数。
+    排名口径（实时/历次、含提交率/纯分数）全在前端算，后端只供数据。"""
+    c = await owned_class(db, class_id, user)
+
+    students = (
+        await db.execute(select(Student).where(Student.class_id == class_id).order_by(Student.id))
+    ).scalars().all()
+    assignments = (
+        await db.execute(
+            select(Assignment).where(Assignment.class_id == class_id).order_by(Assignment.lesson_no.asc())
+        )
+    ).scalars().all()
+
+    sub_rows = (
+        await db.execute(
+            select(
+                Submission.student_id,
+                Submission.assignment_id,
+                Submission.status,
+                Submission.score,
+                Submission.created_at,
+            )
+            .join(Assignment, Submission.assignment_id == Assignment.id)
+            .where(Assignment.class_id == class_id)
+        )
+    ).all()
+    # cells[student_id][assignment_id] = {status, score, graded_at}（graded_at 供同分时「先批完者优先」）
+    cells: dict[int, dict[int, dict]] = {}
+    graded_per_assignment: dict[int, int] = {}
+    for sid, aid, status, score, created in sub_rows:
+        cells.setdefault(sid, {})[aid] = {
+            "status": status,
+            "score": score,
+            "graded_at": created.isoformat() if created else None,
+        }
+        if status in PROCESSED_STATUSES:
+            graded_per_assignment[aid] = graded_per_assignment.get(aid, 0) + 1
+
+    total_students = len(students)
+    return {
+        "batches": [
+            {
+                "assignment_id": a.id,
+                "unit_label": a.unit_label,
+                "lesson_no": a.lesson_no,
+                "pending": total_students - graded_per_assignment.get(a.id, 0),
+                "total_students": total_students,
+            }
+            for a in assignments
+        ],
+        "students": [
+            {"student_id": s.id, "name": s.name, "cells": cells.get(s.id, {})} for s in students
+        ],
+    }
+
+
 @router.get("/{class_id}/stats")
 async def class_stats(
     class_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)

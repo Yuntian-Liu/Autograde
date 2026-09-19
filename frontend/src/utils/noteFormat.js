@@ -63,6 +63,18 @@ export function studentNameFromTitle(text) {
   return m ? m[1] : "";
 }
 
+// 标题末尾的反馈类型反推班级系列（与后端 feedback.py SERIES_FEEDBACK_TYPE 一致）：
+// 伴学手册反馈 → NG（厚中）、练习反馈 → WW（厚少）；识别不了返回空串（调用方应搜全部班级）
+const SERIES_BY_FEEDBACK = { 伴学手册反馈: "NG", 练习反馈: "WW" };
+export function seriesFromTitle(text) {
+  const firstLine = (text || "").split("\n").map((s) => s.trim()).find(Boolean) || "";
+  const clean = stripMarks(firstLine);
+  for (const [keyword, series] of Object.entries(SERIES_BY_FEEDBACK)) {
+    if (clean.includes(keyword)) return series;
+  }
+  return "";
+}
+
 // 编辑器 DOM → 存储格式：b/strong→**、i/em→*、mark→==，图片（含「图片未加载」占位）→占位符
 export function inlineText(node) {
   let out = "";

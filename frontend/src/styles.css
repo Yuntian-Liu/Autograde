@@ -1150,3 +1150,59 @@ mark.search-hit {
 
 /* 表单内警示（如关闭预习将清空答题卡） */
 .form-warn { font-size: var(--t-caption); color: var(--warning); }
+
+/* ---------- 班级排行榜（统计页）：领奖台 + 横条榜 ---------- */
+.lb-controls { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s4); }
+
+/* 领奖台：金中银左铜右，align-end 共基线，台阶固定高度递减 */
+.lb-podium { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3); align-items: end; margin: var(--s5) 0 var(--s4); }
+.lb-step { display: flex; flex-direction: column; justify-content: flex-end; min-width: 0; }
+.lb-players { display: flex; flex-direction: column; gap: var(--s2); margin-bottom: var(--s2); }
+.lb-player {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: var(--s3) var(--s2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: inherit;
+  text-decoration: none;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.lb-player:hover { background: var(--bg-soft); border-color: var(--line-strong); }
+.lb-medal-emoji { font-size: var(--t-brand); line-height: 1.2; }
+.lb-base {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+}
+.lb-s1 .lb-base { height: calc(var(--s8) * 2 + var(--s5)); background: var(--warning); }
+.lb-s2 .lb-base { height: calc(var(--s8) + var(--s6)); background: var(--ink-3); }
+.lb-s3 .lb-base { height: var(--s8); background: var(--danger); }
+.lb-basenum { font-family: var(--font-mono); font-size: var(--t-page); font-weight: 600; color: var(--surface); }
+.lb-step.empty .lb-base { background: var(--bg-soft); border: 1px dashed var(--line-strong); border-bottom: none; }
+.lb-step.empty .lb-basenum { color: var(--ink-3); }
+.lb-name { font-weight: 600; font-size: var(--t-strong); margin-top: var(--s1); }
+.lb-score { font-family: var(--font-mono); font-size: var(--t-hero); font-weight: 600; margin-top: var(--s1); }
+.lb-sub { font-size: var(--t-caption); color: var(--ink-2); margin-top: var(--s1); }
+
+.lb-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s2);
+  border-bottom: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+  transition: background var(--dur) var(--ease);
+}
+.lb-row:hover { background: var(--bg-soft); }
+.lb-rank { font-family: var(--font-mono); font-size: var(--t-caption); color: var(--ink-2); width: 3ch; text-align: right; flex: none; }
+.lb-rowname { font-weight: 500; width: 96px; flex: none; }
+.lb-bar { flex: 1; height: 6px; background: var(--accent-bg); border-radius: 999px; overflow: hidden; }
+.lb-fill { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.lb-rowscore { font-family: var(--font-mono); font-size: var(--t-strong); min-width: 6ch; text-align: right; flex: none; }
+.lb-rowsub { font-family: var(--font-mono); font-size: var(--t-micro); color: var(--ink-3); flex: none; }
