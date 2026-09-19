@@ -40,7 +40,7 @@ from models import (
     Submission,
 )
 
-APP_VERSION = "0.10.0"
+APP_VERSION = "0.11.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
 AGREEMENT_VERSION = "2026-09-19"
 _STARTED_AT = datetime.now(timezone.utc)
@@ -237,6 +237,22 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                 )
             ).scalar_one(),
             "submissions_by_status": submissions_by_status,
+            # 预习功能（V0.11.0）：答题卡已录的批次数 / 有预习错题登记的提交数（排查预习联动问题）
+            "preview_answered_assignments": (
+                await db.execute(
+                    select(func.count(Assignment.id))
+                    .join(Class, Assignment.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid, Assignment.preview_answers != "")
+                )
+            ).scalar_one(),
+            "preview_wrong_records": (
+                await db.execute(
+                    select(func.count(Submission.id))
+                    .join(Assignment, Submission.assignment_id == Assignment.id)
+                    .join(Class, Assignment.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid, Submission.preview_wrong != "")
+                )
+            ).scalar_one(),
             "phrases": await count(Phrase),  # 全局话术配置，非用户数据
             "llm_call_events": (
                 await db.execute(

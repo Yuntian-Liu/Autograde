@@ -67,6 +67,8 @@ class Assignment(Base):
     has_preview: Mapped[bool] = mapped_column(Boolean, default=False)  # 仅 lesson_type=Day 时有意义
     preview_unit_no: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 预习单元号
     preview_half: Mapped[str] = mapped_column(String(1), default="")  # 预习上下册：A / B
+    # 预习答案答题卡（JSON 数组 5 个 A/B/C/D，空串 = 未录入）；纯对答案用，不算分不出解析
+    preview_answers: Mapped[str] = mapped_column(Text, default="")
     lesson_no: Mapped[int] = mapped_column(Integer)  # 第几次课
     class_time: Mapped[str] = mapped_column(String(32), default="")  # 本次上课时间，如 2026-09-12 14:00
     content: Mapped[str] = mapped_column(String(128), default="")  # 作业内容，如「伴学手册」
@@ -125,6 +127,8 @@ class Submission(Base):
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     rating: Mapped[str] = mapped_column(String(4), default="")
     rating_override: Mapped[str] = mapped_column(String(4), default="")
+    # 预习错题题号（JSON 数组，如 [1,3]）；不算分，仅驱动「预习有错题」话术计数
+    preview_wrong: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 

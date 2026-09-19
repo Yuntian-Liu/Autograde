@@ -1,6 +1,6 @@
 import { IconChevronLeft } from "../components/icons";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useBlocker, useParams } from "react-router-dom";
 import { App as AntApp } from "antd";
 import { apiGet, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
@@ -15,12 +15,13 @@ import "../grading.css";
 // 只管录入——微调/预览文本/话术都在常规批改页做
 export default function QuickGrade() {
   const { id } = useParams();
-  const { message } = AntApp.useApp();
+  const { message, modal } = AntApp.useApp();
 
   const [assignment, setAssignment] = useState(null);
   const [students, setStudents] = useState([]);
   const [error, setError] = useState(null);
   const [wrongMap, setWrongMap] = useState({}); // studentId -> Set(questionId) 标错
+  const [previewWrongMap, setPreviewWrongMap] = useState({}); // studentId -> Set(预习题号1-5) 标错（不计分）
   const [dirtyMap, setDirtyMap] = useState({}); // studentId -> bool
   const [savingIds, setSavingIds] = useState(new Set());
   const [savingAll, setSavingAll] = useState(false);
@@ -39,8 +40,13 @@ export default function QuickGrade() {
         if (Array.isArray(t) && t.length) setThresholds(t.map((x) => [x.rating, x.min]));
         // 已批改学生的已记录错题预填进矩阵
         const wrong = {};
-        for (const stu of s) wrong[stu.id] = new Set(stu.error_question_ids);
+        const previewWrong = {};
+        for (const stu of s) {
+          wrong[stu.id] = new Set(stu.error_question_ids);
+          previewWrong[stu.id] = new Set(stu.submission?.preview_wrong || []);
+        }
         setWrongMap(wrong);
+        setPreviewWrongMap(previewWrong);
         setDirtyMap({});
       })
       .catch((e) => setError(e.message));
@@ -60,6 +66,9 @@ export default function QuickGrade() {
     [flatQuestions]
   );
   const totalWeight = assignment?.total_weight || 0;
+  // 预习答题卡：has_preview 且 5 题答案录齐才开放预习列
+  const previewAnswers = assignment?.preview_answers || [];
+  const previewReady = Boolean(assignment?.has_preview) && previewAnswers.length === 5;
 
   // 十字准线：悬停格子的行（学生）/列（题目）高亮轨道，防止行多时看错列
   const [hover, setHover] = useState({ row: null, col: null });
@@ -89,6 +98,16 @@ export default function QuickGrade() {
     setDirtyMap((prev) => ({ ...prev, [sid]: true }));
   }
 
+  function togglePreviewCell(sid, seq) {
+    setPreviewWrongMap((prev) => {
+      const next = new Set(prev[sid] || []);
+      if (next.has(seq)) next.delete(seq);
+      else next.add(seq);
+      return { ...prev, [sid]: next };
+    });
+    setDirtyMap((prev) => ({ ...prev, [sid]: true }));
+  }
+
   // 保存安全点：先拉该生现状取 notes/rating_override 透传（不清掉精修过的 note）；
   // PUT 落库成功后再重拉——状态灯/分数显示的是落库后的真值
   // final_text 传空串，后端跳过快照不覆盖已有反馈文本
@@ -103,6 +122,7 @@ export default function QuickGrade() {
       rating_override: sub?.rating_override || "",
       notes: st?.error_notes || {},
       final_text: "",
+      preview_wrong: [...(previewWrongMap[sid] || [])].sort((a, b) => a - b),
     });
     const fresh = await apiGet(`/assignments/${id}/students`);
     setStudents(fresh);
@@ -149,6 +169,37 @@ export default function QuickGrade() {
     }
   }
 
+  // 防丢保护：任何学生有未保存改动（含预习格）时，所有离开路径都要确认
+  const blocking = Object.values(dirtyMap).some(Boolean);
+
+  // ① 页面内导航拦截（返回批次/面包屑/任意路由跳转；useBlocker 需 data router）
+  const blocker = useBlocker(blocking);
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    modal.confirm({
+      title: "有未保存的修改",
+      content: "确定离开？未保存的修改将丢失。",
+      okText: "离开",
+      cancelText: "继续批改",
+      centered: true,
+      okButtonProps: { danger: true },
+      onOk: () => blocker.proceed(),
+      onCancel: () => blocker.reset(),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocker.state]);
+
+  // ② 浏览器关标签/刷新拦截（无未保存改动/卸载时移除监听）
+  useEffect(() => {
+    if (!blocking) return;
+    const handler = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [blocking]);
+
   if (error)
     return (
       <div className="page-enter">
@@ -189,6 +240,27 @@ export default function QuickGrade() {
           <div className="sec-title">答案速查</div>
           {assignment.sections.length === 0 && <div className="row">题库待录入</div>}
           <div className="qa-grid">
+            {assignment.has_preview && (
+              <div className="qa-sec">
+                <div className="qa-sec-name">
+                  预习 · {assignment.unit_progress?.split("&")[1] || "Preview"}
+                </div>
+                {previewReady ? (
+                  <div className="qa-chips">
+                    {previewAnswers.map((ans, i) => (
+                      <span className="qa-chip" key={i}>
+                        <b>{i + 1}</b>
+                        <span className="qa-ans">{ans}</span>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <Link className="row" to={`/assignments/${assignment.slug || assignment.id}`}>
+                    预习答案未录入
+                  </Link>
+                )}
+              </div>
+            )}
             {assignment.sections.map((sec) => (
               <div className="qa-sec" key={sec.section}>
                 <div className="qa-sec-name">{sec.section}</div>
@@ -209,7 +281,7 @@ export default function QuickGrade() {
         </section>
 
         {/* 下半区：学生 × 题目 标错矩阵 */}
-        {assignment.sections.length > 0 && (
+        {(assignment.sections.length > 0 || previewReady) && (
           <section className="block">
             <div className="sec-title sec-title-row">
               标错矩阵
@@ -242,6 +314,14 @@ export default function QuickGrade() {
                         </th>
                       </Fragment>
                     ))}
+                    {previewReady && (
+                      <Fragment>
+                        <th className="qg-gap" />
+                        <th className="qg-seclab" colSpan={5}>
+                          预习
+                        </th>
+                      </Fragment>
+                    )}
                     <th className="qg-right qg-scorecol">分数</th>
                     <th className="qg-right qg-ratingcol">等级</th>
                     <th className="qg-right qg-savecol" />
@@ -258,6 +338,16 @@ export default function QuickGrade() {
                         ))}
                       </Fragment>
                     ))}
+                    {previewReady && (
+                      <Fragment>
+                        <th className="qg-gap" />
+                        {[1, 2, 3, 4, 5].map((seq) => (
+                          <th key={seq} className={hover.col === `p${seq}` ? "qg-colhead" : undefined}>
+                            {seq}
+                          </th>
+                        ))}
+                      </Fragment>
+                    )}
                     <th className="qg-right qg-scorecol" />
                     <th className="qg-right qg-ratingcol" />
                     <th className="qg-right qg-savecol" />
@@ -297,6 +387,25 @@ export default function QuickGrade() {
                             })}
                           </Fragment>
                         ))}
+                        {previewReady && (
+                          <Fragment>
+                            <td className="qg-gap" />
+                            {[1, 2, 3, 4, 5].map((seq) => {
+                              const colHot = hover.col === `p${seq}`;
+                              const cellCls = colHot && rowHot ? "qg-cross" : colHot ? "qg-colcell" : rowHot ? "qg-rowcell" : "";
+                              return (
+                                <td key={seq} className={cellCls || undefined}>
+                                  <button
+                                    type="button"
+                                    className={(previewWrongMap[s.id] || new Set()).has(seq) ? "qg-cell on" : "qg-cell"}
+                                    onClick={() => togglePreviewCell(s.id, seq)}
+                                    onMouseEnter={() => setHover({ row: s.id, col: `p${seq}` })}
+                                  />
+                                </td>
+                              );
+                            })}
+                          </Fragment>
+                        )}
                         <td
                           className={`qg-right qg-scorecol qg-score ${scoreTone(score)} ${rowHot ? "qg-rowhead" : ""}`}
                         >

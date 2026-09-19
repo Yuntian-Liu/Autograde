@@ -1,6 +1,6 @@
 import { IconChevronLeft } from "../components/icons";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useBlocker, useParams, useSearchParams } from "react-router-dom";
 import { App as AntApp, Input, Modal, Select } from "antd";
 import { apiGet, apiPatch, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
@@ -19,7 +19,7 @@ import {
 } from "../meta";
 import { RATINGS, ratingFor } from "../rating";
 import { clientLog } from "../utils/clientLog";
-import { fp } from "../utils/fingerprint";
+import { fp } from "../utils/contentfp";
 import {
   buildFeedbackDoc,
   collapseBlankLines,
@@ -51,6 +51,7 @@ export default function Grading() {
   const [currentId, setCurrentId] = useState(null);
   // 勾选与定稿内容只存前端内存，「保存批改」时才落库；初始值取已入库的错题记录
   const [checkedMap, setCheckedMap] = useState({});
+  const [previewMap, setPreviewMap] = useState({}); // studentId -> 预习错题题号（1-5，不计分）
   const [notesMap, setNotesMap] = useState({});
   const [ratingOverrides, setRatingOverrides] = useState({});
   const [statusDrafts, setStatusDrafts] = useState({});
@@ -94,14 +95,32 @@ export default function Grading() {
         const checked = {};
         const notes = {};
         const snapshots = {};
+        const preview = {};
         for (const stu of s) {
           checked[stu.id] = [...stu.error_question_ids];
           notes[stu.id] = { ...stu.error_notes };
           snapshots[stu.id] = stu.feedback_text ?? null;
+          preview[stu.id] = [...(stu.submission?.preview_wrong || [])];
         }
         setCheckedMap(checked);
         setNotesMap(notes);
         setSnapshotMap(snapshots);
+        setPreviewMap(preview);
+        // 预习错题已入库的学生：「预习有错题」话术自动勾上并按错数填 N（可手动取消/改数）
+        const pvPhrase = p.find((x) => x.category === "Issue 模板" && x.name === PREVIEW_ERROR_PHRASE);
+        if (pvPhrase) {
+          const initIssues = {};
+          const initParams = {};
+          for (const stu of s) {
+            const n = preview[stu.id].length;
+            if (n > 0) {
+              initIssues[stu.id] = [pvPhrase.id];
+              initParams[stu.id] = { [pvPhrase.id]: n };
+            }
+          }
+          setIssuesMap(initIssues);
+          setIssueParams(initParams);
+        }
         setDirtyMap({}); // 重新加载 = 与库内一致，全部干净
         const firstTodo = s.find((stu) => !stu.submission || stu.submission.status === "待批改");
         // 支持 ?student= 定位（题库答错名单跳来）；无参数或找不到回退原逻辑
@@ -127,6 +146,10 @@ export default function Grading() {
   const checkedIds = current ? checkedMap[current.id] || [] : [];
   const checkedSet = useMemo(() => new Set(checkedIds), [checkedIds]);
   const currentNotes = current ? notesMap[current.id] || {} : {};
+  // 预习：答题卡答案 + 当前学生预习错题集合（不计分，仅驱动「预习有错题」计数）
+  const previewAnswers = assignment?.preview_answers || [];
+  const previewChecked = current ? previewMap[current.id] || [] : [];
+  const previewSet = useMemo(() => new Set(previewChecked), [previewChecked]);
 
   // 存量快照剥离旧问候语：首行与任一「问候语·*」话术逐字匹配才剥（连同其后空行），
   // 误伤面为零；问候语不再进快照（见 saveGrading），此逻辑只为兼容 V0.2.0 前的存量
@@ -204,6 +227,37 @@ export default function Grading() {
     const list = ratingPhrases.filter((p) => p.name === ratingGroup);
     if (list.length) setRatingPickId(list[Math.floor(Math.random() * list.length)].id);
   }, [ratingGroup, currentId, ratingPhrases]);
+
+  // 防丢保护：任何学生有未保存改动（含预习勾选）时，所有离开路径都要确认
+  const blocking = Object.values(dirtyMap).some(Boolean);
+
+  // ① 页面内导航拦截（返回批次/面包屑/任意路由跳转；useBlocker 需 data router）
+  const blocker = useBlocker(blocking);
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    modal.confirm({
+      title: "有未保存的修改",
+      content: "确定离开？未保存的修改将丢失。",
+      okText: "离开",
+      cancelText: "继续批改",
+      centered: true,
+      okButtonProps: { danger: true },
+      onOk: () => blocker.proceed(),
+      onCancel: () => blocker.reset(),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocker.state]);
+
+  // ② 浏览器关标签/刷新拦截（无未保存改动/卸载时移除监听）
+  useEffect(() => {
+    if (!blocking) return;
+    const handler = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [blocking]);
   const urging = phrases.find((p) => p.category === "催交")?.content || "";
   const greetingList = phrases.filter((p) => p.category === `问候语·${slot}`);
   const greeting =
@@ -255,6 +309,33 @@ export default function Grading() {
     if (!current) return;
     setRatingOverrides((prev) => ({ ...prev, [current.id]: r }));
     markDirty();
+  }
+
+  // 预习错题勾选：记录 + 联动「预习有错题」话术（照评级「自动预填 + 勾选变化回落」范式）
+  // n>0 自动勾上话术并按 n 填计数（清掉手动改的 N）；n=0 自动取消勾选
+  function togglePreview(seq) {
+    if (!current) return;
+    const next = [...(previewSet.has(seq) ? previewChecked.filter((x) => x !== seq) : [...previewChecked, seq])].sort(
+      (a, b) => a - b
+    );
+    setPreviewMap((prev) => ({ ...prev, [current.id]: next }));
+    markDirty();
+    const phrase = issuePhrases.find((p) => p.name === PREVIEW_ERROR_PHRASE);
+    if (!phrase) return;
+    const n = next.length;
+    setIssuesMap((prev) => {
+      const ids = prev[current.id] || [];
+      const has = ids.includes(phrase.id);
+      if (n > 0 && !has) return { ...prev, [current.id]: [...ids, phrase.id] };
+      if (n === 0 && has) return { ...prev, [current.id]: ids.filter((x) => x !== phrase.id) };
+      return prev;
+    });
+    setIssueParams((prev) => {
+      const mine = { ...(prev[current.id] || {}) };
+      if (n > 0) mine[phrase.id] = n;
+      else delete mine[phrase.id];
+      return { ...prev, [current.id]: mine };
+    });
   }
 
   function saveNote(qid, note) {
@@ -486,6 +567,7 @@ export default function Grading() {
         notes: currentNotes,
         final_text: finalText,
         used_phrase_ids: usedIds,
+        preview_wrong: previewChecked,
       });
       const fresh = await apiGet(`/assignments/${assignmentId}/students`);
       setStudents(fresh);
@@ -496,6 +578,7 @@ export default function Grading() {
       if (me) {
         setCheckedMap((prev) => ({ ...prev, [me.id]: [...me.error_question_ids] }));
         setNotesMap((prev) => ({ ...prev, [me.id]: { ...me.error_notes } }));
+        setPreviewMap((prev) => ({ ...prev, [me.id]: [...(me.submission?.preview_wrong || [])] }));
         setStatusDrafts((prev) => ({ ...prev, [me.id]: me.submission?.status || statusDraft }));
       }
       clientLog.add(
@@ -789,6 +872,34 @@ export default function Grading() {
                         </span>
                       );
                     })}
+                  </div>
+                </div>
+              )}
+
+              {assignment.has_preview && (
+                <div className="group">
+                  <div className="group-head">
+                    <span className="gname">
+                      预习 · {assignment.unit_progress?.split("&")[1] || "Preview"}
+                    </span>
+                    <span className="gmeta">5 题 · 不计分</span>
+                  </div>
+                  <div className="chips">
+                    {previewAnswers.length === 5 ? (
+                      [1, 2, 3, 4, 5].map((seq) => (
+                        <span
+                          key={seq}
+                          className={previewSet.has(seq) ? "chip on" : "chip"}
+                          onClick={() => togglePreview(seq)}
+                        >
+                          {seq}·{previewAnswers[seq - 1]}
+                        </span>
+                      ))
+                    ) : (
+                      <Link className="chip text" to={`/assignments/${assignment.slug || assignment.id}`}>
+                        预习答案未录入
+                      </Link>
+                    )}
                   </div>
                 </div>
               )}

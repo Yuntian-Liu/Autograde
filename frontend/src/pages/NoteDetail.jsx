@@ -7,7 +7,7 @@ import SaveStatus from "../components/SaveStatus";
 import PageSkeleton from "../components/PageSkeleton";
 import { fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
-import { fp } from "../utils/fingerprint";
+import { fp } from "../utils/contentfp";
 import { useNotePaste } from "../utils/useNotePaste";
 import { contentToHtml, serializeEditor, stripMarks } from "../utils/noteFormat";
 import { IconBold, IconHighlight, IconItalic } from "../components/icons";

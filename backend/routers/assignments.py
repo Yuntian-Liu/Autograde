@@ -281,6 +281,7 @@ class AssignmentPatch(BaseModel):
     has_preview: bool | None = None
     preview_unit_no: int | None = None
     preview_half: str | None = None
+    preview_answers: list[str] | None = None  # 预习答题卡：恰好 5 个 A/B/C/D
     lesson_no: int | None = None
     class_time: str | None = None
     content: str | None = None
@@ -310,8 +311,25 @@ async def update_assignment(
     )
     if error:
         raise HTTPException(status_code=400, detail=error)
+    if body.preview_answers is not None:
+        if not a.has_preview:
+            raise HTTPException(status_code=400, detail="该批次无预习，不能录入预习答案")
+        answers = [str(x).strip().upper() for x in body.preview_answers]
+        if len(answers) != 5 or any(x not in ("A", "B", "C", "D") for x in answers):
+            raise HTTPException(status_code=400, detail="预习答案须为恰好 5 个 A/B/C/D")
+        a.preview_answers = json.dumps(answers, ensure_ascii=False)
     if not a.has_preview:
         a.preview_half = ""
+        if a.preview_answers:
+            # 关掉预习：答题卡与该批次所有学生的预习错题一并失效
+            a.preview_answers = ""
+            subs = (
+                await db.execute(
+                    select(Submission).where(Submission.assignment_id == assignment_id)
+                )
+            ).scalars().all()
+            for sub in subs:
+                sub.preview_wrong = ""
     sync_unit_label(a)
     await db.commit()
     return assignment_brief(a)
@@ -601,6 +619,7 @@ class GradingIn(BaseModel):
     notes: dict[int, str] = {}  # question_id → 该题定稿内容（manual 人工填充 / ai_expand 定稿）
     final_text: str = ""
     used_phrase_ids: list[int] = []  # 本次用到的话术（问候/评级/Issue），驱动 use_count 越用越聪明
+    preview_wrong: list[int] = []  # 预习错题题号（1-5，不算分）
 
 
 @router.put("/{assignment_id}/students/{student_id}/grading")
@@ -650,6 +669,7 @@ async def save_grading(
             sub.score = None
             sub.rating = ""
             sub.rating_override = ""
+            sub.preview_wrong = ""
             await db.execute(
                 delete(FeedbackSnapshot).where(
                     FeedbackSnapshot.student_id == student_id,
@@ -670,6 +690,14 @@ async def save_grading(
     unknown = [qid for qid in checked_ids if qid not in qmap]
     if unknown:
         raise HTTPException(status_code=400, detail=f"题目不属于本批次：{unknown}")
+
+    # 预习错题：纯登记不算分；题号限定 1-5，仅预习批次可提交
+    preview_wrong = sorted(set(body.preview_wrong))
+    if preview_wrong:
+        if not a.has_preview:
+            raise HTTPException(status_code=400, detail="该批次无预习，不能登记预习错题")
+        if any(not isinstance(n, int) or n < 1 or n > 5 for n in preview_wrong):
+            raise HTTPException(status_code=400, detail="预习错题题号须在 1-5 之间")
 
     # 后端复算：总分 100 按权重归一化，扣勾选错题权重
     if body.status in GRADED_STATUSES:
@@ -699,6 +727,7 @@ async def save_grading(
         sub.score = score
         sub.rating = rating
         sub.rating_override = rating_override
+        sub.preview_wrong = json.dumps(preview_wrong)
 
         # 错题记录：先删该学生该批次旧记录，再插新
         await db.execute(

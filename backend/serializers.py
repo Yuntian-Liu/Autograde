@@ -47,6 +47,17 @@ def parse_options(raw: str) -> list[str]:
         return []
 
 
+def parse_int_list(raw: str) -> list[int]:
+    """submissions.preview_wrong 存 JSON 题号数组，输出时解析成 int 列表；非法或空一律 []。"""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        return [int(x) for x in data] if isinstance(data, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
 def class_brief(c: Class) -> dict:
     return {
         "id": c.id,
@@ -71,6 +82,7 @@ def assignment_brief(a: Assignment) -> dict:
         "has_preview": a.has_preview,
         "preview_unit_no": a.preview_unit_no,
         "preview_half": a.preview_half,
+        "preview_answers": parse_options(a.preview_answers),
         "unit_progress": unit_progress(a),
         "lesson_no": a.lesson_no,
         "class_time": a.class_time,
@@ -104,6 +116,7 @@ def submission_brief(sub: Submission) -> dict:
         "score": sub.score,
         "rating": sub.rating,
         "rating_override": sub.rating_override,
+        "preview_wrong": parse_int_list(sub.preview_wrong),
     }
 
 

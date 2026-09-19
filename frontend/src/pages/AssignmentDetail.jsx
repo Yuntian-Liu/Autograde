@@ -8,6 +8,7 @@ import QuestionCard from "../components/QuestionCard";
 import QuestionEditModal from "../components/QuestionEdit";
 import { AiEntryModal, ManualEntryModal } from "../components/QuestionEntry";
 import PageSkeleton from "../components/PageSkeleton";
+import PreviewEntry from "../components/PreviewEntry";
 import { STATUS_META, deadlineText, fmtScore, modeLabel, ratingTone, scoreTone, seriesLabel } from "../meta";
 import { IconChevronLeft, IconGrip } from "../components/icons";
 import { clientLog } from "../utils/clientLog";
@@ -64,6 +65,7 @@ export default function AssignmentDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false); // 预习答题卡
   const [editingQuestion, setEditingQuestion] = useState(null);
   const [addSection, setAddSection] = useState(null); // 板块级「加题」预填板块名
   const [activeSection, setActiveSection] = useState(null); // 题库目录选中板块
@@ -227,6 +229,11 @@ export default function AssignmentDetail() {
           <button className="btn" onClick={() => setManualOpen(true)}>
             录题
           </button>
+          {assignment.has_preview && (
+            <button className="btn" onClick={() => setPreviewOpen(true)}>
+              预习答案{(assignment.preview_answers || []).length === 5 ? "（已录）" : ""}
+            </button>
+          )}
           {assignment.question_count > 0 && (
             <Link className="btn" to={`/assignments/${assignment.slug || assignment.id}/edit`}>
               整批编辑
@@ -274,6 +281,23 @@ export default function AssignmentDetail() {
 
         <section className="block">
           <div className="sec-title">题库</div>
+          {assignment.has_preview && (
+            <div className="qa-sec" style={{ marginBottom: "var(--s3)" }}>
+              <div className="qa-sec-name">预习 · {assignment.unit_progress?.split("&")[1] || "Preview"}</div>
+              {(assignment.preview_answers || []).length === 5 ? (
+                <div className="qa-chips">
+                  {assignment.preview_answers.map((ans, i) => (
+                    <span className="qa-chip" key={i}>
+                      <b>{i + 1}</b>
+                      <span className="qa-ans">{ans}</span>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="row">预习答案未录入，点上方「预习答案」登记</div>
+              )}
+            </div>
+          )}
           {currentSec ? (
             <div className="qbank-layout">
               {/* 左：板块目录（sticky，拖住 ≡ 手柄上下拖动排序） */}
@@ -401,6 +425,12 @@ export default function AssignmentDetail() {
         assignmentId={assignment.id}
         sections={sectionNames}
         existingCount={assignment.question_count}
+        onSaved={reload}
+      />
+      <PreviewEntry
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        assignment={assignment}
         onSaved={reload}
       />
       <QuestionEditModal

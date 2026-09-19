@@ -1127,3 +1127,26 @@ mark.search-hit {
   padding: 0 1px;
   border-radius: 2px;
 }
+
+/* ---------- 预习答题卡（PreviewEntry） ---------- */
+.pv-row { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) 0; }
+.pv-row + .pv-row { border-top: 1px solid var(--line); }
+.pv-seq { font-size: var(--t-caption); color: var(--ink-2); width: 3.5em; flex: none; }
+.pv-opts { display: flex; gap: var(--s2); }
+.pv-opt {
+  width: 40px;
+  padding: var(--s1) 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.pv-opt:hover { border-color: var(--accent); color: var(--accent); }
+.pv-opt.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+
+/* 表单内警示（如关闭预习将清空答题卡） */
+.form-warn { font-size: var(--t-caption); color: var(--warning); }
