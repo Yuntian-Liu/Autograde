@@ -10,6 +10,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* 全站选中文本：主题色块替代浏览器默认蓝底 */
+::selection {
+  background: var(--accent-line);
+  color: var(--ink);
+}
+
 /* ---------- 顶栏 ---------- */
 .app-header {
   height: 54px;

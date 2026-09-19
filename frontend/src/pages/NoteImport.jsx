@@ -4,7 +4,7 @@ import { App as AntApp, Input, Segmented, Select } from "antd";
 import { apiGet, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
 import { clientLog } from "../utils/clientLog";
-import { serializeEditor, seriesFromTitle, studentNameFromTitle } from "../utils/noteFormat";
+import { serializeEditor, seriesFromTitle, studentNameFromTitle, unitFromTitle } from "../utils/noteFormat";
 import { useNotePaste } from "../utils/useNotePaste";
 
 // 批量导入：一张大表一次录入多份笔记。关联学生行落活跃区；历史行进归档区（带学生名/备注）。
@@ -23,6 +23,7 @@ const newRow = (mode = "link") => ({
   linkEdited: false, // 手动改过班级/学生后不再自动锁定
   detectedName: "", // 标题抽出的学生名（link 行自动锁定用）
   detectedSeries: "", // 标题反馈类型反推的系列（NG/WW，空=不限）
+  detectedUnit: "", // 标题抽出的单元进度（归一化，自动锁批次用）
   title: "",
   touched: false, // 有任何内容即 true（末尾未触碰行渲染为占位样式）
   status: "idle", // idle | ok | fail
@@ -45,8 +46,9 @@ function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetai
     } else if (!row.linkEdited) {
       const name = studentNameFromTitle(text);
       const series = seriesFromTitle(text);
-      if (name && (name !== row.detectedName || series !== row.detectedSeries)) {
-        onChange({ ...row, detectedName: name, detectedSeries: series });
+      const unit = unitFromTitle(text);
+      if (name && (name !== row.detectedName || series !== row.detectedSeries || unit !== row.detectedUnit)) {
+        onChange({ ...row, detectedName: name, detectedSeries: series, detectedUnit: unit });
       }
     }
   };
@@ -81,6 +83,7 @@ function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetai
             if (v === "link" && !row.linkEdited && name) {
               extra.detectedName = name;
               extra.detectedSeries = seriesFromTitle(text);
+              extra.detectedUnit = unitFromTitle(text);
             }
             onChange({ ...row, mode: v, ...extra });
           }}
@@ -122,7 +125,7 @@ function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetai
               disabled={disabled || !row.class_id}
               value={row.assignment_id}
               options={(detail?.assignments || []).map((a) => ({ value: a.id, label: a.unit_label }))}
-              onChange={(v) => onChange({ ...row, assignment_id: v ?? null })}
+              onChange={(v) => onChange({ ...row, assignment_id: v ?? null, linkEdited: true })}
             />
           </>
         ) : (
@@ -203,29 +206,49 @@ export default function NoteImport() {
   const patchRow = (key, next) => setRows((prev) => prev.map((r) => (r.key === key ? next : r)));
 
   // 关联行自动锁定：detectedName + detectedSeries → 全班级范围精确匹配学生，唯一命中才自动选
-  // （同名多人不猜，保持手动）；classDetails 异步到位后本 effect 自动补解析
+  // （同名多人不猜，保持手动）；学生锁定后再按 detectedUnit 在该班批次里锁批次（唯一命中才选）；
+  // classDetails 异步到位后本 effect 自动补解析
   useEffect(() => {
     for (const r of rows) {
       if (r.mode !== "link" || r.linkEdited || !r.detectedName) continue;
-      if (r.class_id && r.student_id) continue;
-      const want = r.detectedName.trim().toLowerCase();
-      const matches = [];
-      let waiting = false;
-      for (const c of classes) {
-        if (r.detectedSeries && c.series !== r.detectedSeries) continue;
-        const d = classDetails[c.id];
+      let classId = r.class_id;
+      let studentId = r.student_id;
+      if (!classId || !studentId) {
+        const want = r.detectedName.trim().toLowerCase();
+        const matches = [];
+        let waiting = false;
+        for (const c of classes) {
+          if (r.detectedSeries && c.series !== r.detectedSeries) continue;
+          const d = classDetails[c.id];
+          if (!d) {
+            ensureClassDetail(c.id);
+            waiting = true;
+            continue;
+          }
+          for (const s of d.students || []) {
+            if (s.name.trim().toLowerCase() === want) matches.push({ c, s });
+          }
+        }
+        if (waiting) continue; // 数据没拉齐，等下一轮
+        if (matches.length !== 1) continue; // 查无此人/同名多人不猜
+        classId = matches[0].c.id;
+        studentId = matches[0].s.id;
+      }
+      // 批次：单元进度在已锁定班级内唯一命中才自动选
+      let assignmentId = r.assignment_id;
+      if (classId && !assignmentId && r.detectedUnit) {
+        const d = classDetails[classId];
         if (!d) {
-          ensureClassDetail(c.id);
-          waiting = true;
+          ensureClassDetail(classId);
           continue;
         }
-        for (const s of d.students || []) {
-          if (s.name.trim().toLowerCase() === want) matches.push({ c, s });
-        }
+        const am = (d.assignments || []).filter(
+          (x) => (x.unit_label || "").replace(/\s+/g, "") === r.detectedUnit
+        );
+        if (am.length === 1) assignmentId = am[0].id;
       }
-      if (waiting) continue; // 数据没拉齐，等下一轮
-      if (matches.length === 1) {
-        patchRow(r.key, { ...r, class_id: matches[0].c.id, student_id: matches[0].s.id });
+      if (classId !== r.class_id || studentId !== r.student_id || assignmentId !== r.assignment_id) {
+        patchRow(r.key, { ...r, class_id: classId, student_id: studentId, assignment_id: assignmentId });
       }
     }
   }, [rows, classDetails, classes]); // eslint-disable-line react-hooks/exhaustive-deps

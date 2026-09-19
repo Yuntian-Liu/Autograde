@@ -75,6 +75,13 @@ export function seriesFromTitle(text) {
   return "";
 }
 
+// 标题中的单元进度（如 U7L1 / U7Day3&U8A Preview）→ 归一化（去空白）后与批次 unit_label 比对
+export function unitFromTitle(text) {
+  const firstLine = (text || "").split("\n").map((s) => s.trim()).find(Boolean) || "";
+  const m = stripMarks(firstLine).replace(/\s+/g, "").match(/U\d+(?:L|Day)\d+(?:&U\d+[AB]Preview)?/);
+  return m ? m[0] : "";
+}
+
 // 编辑器 DOM → 存储格式：b/strong→**、i/em→*、mark→==，图片（含「图片未加载」占位）→占位符
 export function inlineText(node) {
   let out = "";
@@ -113,21 +120,42 @@ export function serializeEditor(root) {
 }
 
 // 清洗式粘贴：只保留 b/strong/i/em/mark 四种格式，其余标签剥掉；
+// 微信笔记等来源的格式常写在 inline style 上（span style="font-weight:700"），一并识别；
 // 图片不在这里处理（走迁移通道），块级标签转换行
 export function sanitizePastedHtml(html) {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const BLOCKS = new Set(["DIV", "P", "LI", "TR", "H1", "H2", "H3", "H4", "H5", "H6"]);
+  // inline style 识别：font-weight bold/600+ → 加粗；font-style italic → 倾斜；
+  // span 级 background-color（非白/透明）→ 高亮
+  const styleOf = (n) => (n.getAttribute?.("style") || "").toLowerCase();
+  const isBold = (n) => /font-weight\s*:\s*(bold|bolder|[6-9]\d\d)\b/.test(styleOf(n));
+  const isItalic = (n) => /font-style\s*:\s*italic/.test(styleOf(n));
+  const isMarked = (n) => {
+    if (n.nodeName !== "SPAN") return false;
+    const m = styleOf(n).match(/background-color\s*:\s*([^;]+)/);
+    if (!m) return false;
+    const c = m[1].replace(/\s+/g, "");
+    return c !== "#fff" && c !== "#ffffff" && c !== "transparent" && !c.startsWith("rgba(0,0,0,0");
+  };
+  const wrap = (tag, inner) => `<${tag}>${inner}</${tag}>`;
   const walk = (node) => {
     let out = "";
     for (const n of node.childNodes) {
       if (n.nodeType === Node.TEXT_NODE) out += escapeHtml(n.textContent);
-      else if (n.nodeName === "B" || n.nodeName === "STRONG") out += `<b>${walk(n)}</b>`;
-      else if (n.nodeName === "I" || n.nodeName === "EM") out += `<i>${walk(n)}</i>`;
-      else if (n.nodeName === "MARK") out += `<mark>${walk(n)}</mark>`;
+      else if (n.nodeName === "B" || n.nodeName === "STRONG") out += wrap("b", walk(n));
+      else if (n.nodeName === "I" || n.nodeName === "EM") out += wrap("i", walk(n));
+      else if (n.nodeName === "MARK") out += wrap("mark", walk(n));
       else if (n.nodeName === "IMG") continue; // 图片走迁移通道
       else if (n.nodeName === "BR") out += "\n";
       else if (BLOCKS.has(n.nodeName)) out += `${walk(n)}\n`;
-      else out += walk(n); // 其余标签剥壳留内容
+      else {
+        // 剥壳留内容，inline style 格式在剥壳时转成白名单标签
+        let inner = walk(n);
+        if (isMarked(n)) inner = wrap("mark", inner);
+        if (isBold(n)) inner = wrap("b", inner);
+        if (isItalic(n)) inner = wrap("i", inner);
+        out += inner;
+      }
     }
     return out;
   };
