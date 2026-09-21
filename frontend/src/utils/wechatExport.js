@@ -1,5 +1,6 @@
 // 笔记 → 微信笔记一键复制：text/html 进剪贴板，图片以 data URI 内联（微信解析器认这个形态，实测通过）。
-// 两个形态适配：mark 标签微信不认，导出时转 span+背景色；图片不压缩（原图本就来自微信，体积已被验证可行）。
+// 形态适配（均真机实测）：mark 标签微信不认 → 转 span+背景色；**微信只认 PNG 的 data URI，JPEG 会被静默丢弃**
+// → 非 PNG 图片一律 canvas 解码重编码为 PNG（无损，体积膨胀但 17MB 实测可通过）。
 import { contentToHtml, stripMarks } from "./noteFormat";
 
 const WX_MARK_OPEN = '<span style="background-color:rgb(255,224,122)">';
@@ -11,6 +12,19 @@ function blobToDataUri(blob) {
     fr.onerror = reject;
     fr.readAsDataURL(blob);
   });
+}
+
+// 微信只收 PNG data URI：非 PNG 的用 canvas 转一道（JPEG/WebP 通吃；解码失败抛错由调用方计入失败）
+async function toPngDataUri(blob) {
+  if (blob.type === "image/png") return blobToDataUri(blob);
+  const bmp = await createImageBitmap(blob);
+  const cv = document.createElement("canvas");
+  cv.width = bmp.width;
+  cv.height = bmp.height;
+  cv.getContext("2d").drawImage(bmp, 0, 0);
+  const png = await new Promise((res) => cv.toBlob(res, "image/png"));
+  if (!png) throw new Error("PNG 转码失败");
+  return blobToDataUri(png);
 }
 
 // note: 详情接口的完整对象（content + image_urls）；onProgress(done, total) 报图片进度
@@ -29,7 +43,7 @@ export async function copyNoteToWechat(note, { onProgress } = {}) {
     try {
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(String(resp.status));
-      dataUris[keys[i]] = await blobToDataUri(await resp.blob());
+      dataUris[keys[i]] = await toPngDataUri(await resp.blob());
     } catch {
       failed++;
     }

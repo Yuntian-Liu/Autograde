@@ -41,7 +41,7 @@ from models import (
     Submission,
 )
 
-APP_VERSION = "0.14.0"
+APP_VERSION = "0.14.1"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
 AGREEMENT_VERSION = "2026-09-19"
 _STARTED_AT = datetime.now(timezone.utc)
