@@ -107,6 +107,14 @@ const collapseLines = (text) =>
     .join("\n")
     .replace(/\n{2,}/g, "\n");
 
+// 顶层元素自身的格式壳：inlineText 只看子节点，b/i/mark 裸落在顶层时壳要在这里补回来
+function wrapOwnTag(node, inner) {
+  if (node.nodeName === "B" || node.nodeName === "STRONG") return `**${inner}**`;
+  if (node.nodeName === "I" || node.nodeName === "EM") return `*${inner}*`;
+  if (node.nodeName === "MARK") return `==${inner}==`;
+  return inner;
+}
+
 export function serializeEditor(root) {
   const lines = [];
   for (const child of root.childNodes) {
@@ -114,14 +122,15 @@ export function serializeEditor(root) {
     // 顶层图片/占位也要收：insertHTML 拆块后内容可能落在顶层裸节点（不在 div 内），漏收即丢图
     else if (child.nodeName === "IMG") lines.push(child.dataset?.key ? `[[img:${child.dataset.key}]]` : "");
     else if (child.nodeName === "SPAN" && child.dataset?.key) lines.push(`[[img:${child.dataset.key}]]`);
-    else lines.push(inlineText(child));
+    else lines.push(wrapOwnTag(child, inlineText(child)));
   }
   return collapseLines(lines.join("\n")).trim();
 }
 
 // 清洗式粘贴：只保留 b/strong/i/em/mark 四种格式，其余标签剥掉；
 // 微信笔记等来源的格式常写在 inline style 上（span style="font-weight:700"），一并识别；
-// 图片不在这里处理（走迁移通道），块级标签转换行
+// 图片不在这里处理（走迁移通道），块级标签转换行；
+// 输出逐行包 div，与编辑器「一行一 div」结构对齐——裸内联节点落顶层会被拆行、丢格式壳
 export function sanitizePastedHtml(html) {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const BLOCKS = new Set(["DIV", "P", "LI", "TR", "H1", "H2", "H3", "H4", "H5", "H6"]);
@@ -159,5 +168,9 @@ export function sanitizePastedHtml(html) {
     }
     return out;
   };
-  return collapseLines(walk(doc.body)).replace(/^\n+|\n+$/g, "");
+  const text = collapseLines(walk(doc.body)).replace(/^\n+|\n+$/g, "");
+  return text
+    .split("\n")
+    .map((l) => `<div>${l || "<br>"}</div>`)
+    .join("");
 }
