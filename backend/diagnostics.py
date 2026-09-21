@@ -41,7 +41,7 @@ from models import (
     Submission,
 )
 
-APP_VERSION = "0.13.0"
+APP_VERSION = "0.14.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
 AGREEMENT_VERSION = "2026-09-19"
 _STARTED_AT = datetime.now(timezone.utc)
@@ -181,6 +181,32 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
         ).scalars().all()
         code_seq_counters = {r.key: int(r.value or 0) for r in seq_rows}
 
+    # 备份健康（admin 专属；平台级信息）：份数 + 最新备份年龄——「备份是不是没跑」的直接证据，
+    # 不用翻日志尾段找。拉取失败也如实上报（失败本身就是信号）
+    backup_health = None
+    if user.is_admin:
+        from cos_store import cos_enabled as _cos_ok, list_objects_meta as _list_bk
+
+        if not _cos_ok():
+            backup_health = {"cos_set": False}
+        else:
+            try:
+                bk = await _list_bk("backups/")
+                newest = max((o["modified"] for o in bk), default=None)
+                age_h = None
+                if newest:
+                    age_h = round(
+                        (
+                            datetime.now(timezone.utc)
+                            - datetime.fromisoformat(newest.replace("Z", "+00:00"))
+                        ).total_seconds()
+                        / 3600,
+                        1,
+                    )
+                backup_health = {"count": len(bk), "newest_age_hours": age_h}
+            except Exception:
+                backup_health = {"error": "备份列表拉取失败"}
+
     return {
         "app": {
             "version": APP_VERSION,
@@ -255,6 +281,7 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                 )
             ).scalar_one(),
             "code_seq_counters": code_seq_counters,  # None = 非 admin 导出（全站计数器不发给普通用户）
+            "backup_health": backup_health,  # None = 非 admin；{cos_set:False} 或 {count, newest_age_hours} 或 {error}
             "submissions": (
                 await db.execute(
                     select(func.count(Submission.id))

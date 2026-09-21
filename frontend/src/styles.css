@@ -1071,7 +1071,12 @@ a.qg-name:hover { color: var(--accent); }
   font-size: var(--t-micro);
   color: var(--ink-3);
   margin-top: var(--s2);
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
 }
+.note-card-meta .meta-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-wx-copy { flex: none; }
 
 /* 笔记详情：标题衬线大字 + 阅读态正文 */
 .note-title {

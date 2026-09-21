@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     attach_log_buffer()  # 服务端日志环形缓冲（诊断导出用）
     logging.getLogger("autograde").warning("启动完成 version=%s", APP_VERSION)
-    # 每日自动备份（仅生产；本地开发不打扰）：最新备份超 24h 即补一份
+    # 每日自动备份（仅生产；本地开发不打扰）：启动补空白期，之后对齐每天北京时间 04:00
     if config.IS_PROD:
         from backup import maybe_daily_backup
 
@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Autograde", version="0.13.0", lifespan=lifespan)
+app = FastAPI(title="Autograde", version="0.14.0", lifespan=lifespan)
 
 # GZip：JS/CSS/JSON 压缩传输（1.8MB bundle → 约 450KB）
 from fastapi.middleware.gzip import GZipMiddleware

@@ -7,6 +7,7 @@ import PageSkeleton from "../components/PageSkeleton";
 import { fmtBytes, fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
 import { renderNoteInline } from "../utils/noteFormat";
+import { copyNoteToWechat } from "../utils/wechatExport";
 
 // 笔记库：活跃/归档双区；搜索（学生名/标题/归档备注）+ 班级筛选 + 时间倒序卡片；新建可选关联，全不选即游离笔记
 // 搜索命中关键词在标题/摘要/关联行里主题色高亮
@@ -99,10 +100,33 @@ export default function Notes() {
     }
   }
 
-  // 时间筛选在前端内存过滤（数据量小；created_at 是 ISO 串，日期部分可直接字典序比较）
+  // 列表卡片一键复制到微信：卡片整行是 Link，按钮拦冒泡；列表无正文，现场拉详情再组装
+  async function copyOne(e, n) {
+    e.preventDefault();
+    e.stopPropagation();
+    const key = `wx-${n.id}`;
+    try {
+      if (n.image_count > 0)
+        message.loading({ content: `正在准备图片 0/${n.image_count}…`, key, duration: 0 });
+      const full = await apiGet(`/notes/${n.id}`);
+      const r = await copyNoteToWechat(full, {
+        onProgress: (d, t) => message.loading({ content: `正在准备图片 ${d}/${t}…`, key, duration: 0 }),
+      });
+      clientLog.add("ui", `复制到微信（列表）：笔记 #${n.id}（图 ${r.total - r.failed}/${r.total}）`);
+      message.success({
+        content: r.failed ? `已复制，${r.failed} 张图拉取失败未带上` : "已复制，去微信笔记粘贴吧",
+        key,
+      });
+    } catch (e) {
+      clientLog.add("ui", `复制到微信失败（列表）：笔记 #${n.id} ${e?.message || e}`);
+      message.error({ content: "复制失败，请检查剪贴板权限", key });
+    }
+  }
+
+  // 时间筛选在前端内存过滤（数据量小）；created_at 是 UTC 裸串，先过 fmtTime 转东八区再取日期，避免临界日错位
   const shown = (notes || []).filter((n) => {
     if (!range || !range[0] || !range[1]) return true;
-    const day = (n.created_at || "").slice(0, 10);
+    const day = (fmtTime(n.created_at) || "").slice(0, 10);
     return day >= range[0].format("YYYY-MM-DD") && day <= range[1].format("YYYY-MM-DD");
   });
 
@@ -189,22 +213,32 @@ export default function Notes() {
                 />
               )}
               <div className="note-card-meta">
-                <Hi
-                  text={
-                    archived
-                      ? n.legacy_name
-                        ? `归档 · ${n.legacy_name}`
-                        : "归档"
-                      : n.class_name
-                        ? [n.class_name, n.student_name, n.assignment_label].filter(Boolean).join(" · ")
-                        : "历史记录"
-                  }
-                  kw={kw}
-                />
-                {" · "}
-                {n.image_count > 0 ? `${n.image_count} 图 · ${fmtBytes(n.image_size)}` : "纯文本"}
-                {" · "}
-                {(fmtTime(n.updated_at) || "").slice(0, 10)}
+                <span className="meta-text">
+                  <Hi
+                    text={
+                      archived
+                        ? n.legacy_name
+                          ? `归档 · ${n.legacy_name}`
+                          : "归档"
+                        : n.class_name
+                          ? [n.class_name, n.student_name, n.assignment_label].filter(Boolean).join(" · ")
+                          : "历史记录"
+                    }
+                    kw={kw}
+                  />
+                  {" · "}
+                  {n.image_count > 0 ? `${n.image_count} 图 · ${fmtBytes(n.image_size)}` : "纯文本"}
+                  {" · "}
+                  {(fmtTime(n.updated_at) || "").slice(0, 10)}
+                </span>
+                <button
+                  type="button"
+                  className="btn sm note-wx-copy"
+                  title="复制到微信笔记（含格式与图片）"
+                  onClick={(e) => copyOne(e, n)}
+                >
+                  复制到微信
+                </button>
               </div>
             </Link>
           ))}

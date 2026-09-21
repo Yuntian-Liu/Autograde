@@ -862,7 +862,8 @@ function DataPanel() {
   const bucketMismatch = bucketPulled && Math.abs(cos.bucket_bytes - cos.db_bytes) > 1024 * 1024;
 
   // 最新备份新鲜度（东八区时间戳在 key 里，本机同时区直接构造）：≤24h 绿、≤72h 黄、更久红
-  const latestBackupKey = backups?.[0]?.key || null;
+  const backupItems = backups?.items || [];
+  const latestBackupKey = backupItems[0]?.key || null;
   const backupAgeHours = (() => {
     const m = latestBackupKey?.match(/autograde-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})\.db$/);
     if (!m) return null;
@@ -994,10 +995,20 @@ function DataPanel() {
         </div>
         <div className="row">
           <span>
-            每日自动备份（最新备份超 <span className="tone-mid">24 小时</span>自动补一份，保留最近 <span className="tone-mid">30 份</span>）。恢复为手动操作：下载备份文件，停服替换数据库后重启。
+            每天北京时间 <span className="tone-accent">04:00</span> 自动备份一次（低峰期；启动时若没有备份或最新备份超{" "}
+            <span className="tone-mid">24 小时</span>会先补一份），保留最近 <span className="tone-mid">30 天</span>，过期自动清理。恢复为手动操作：下载备份文件，停服替换数据库后重启。
           </span>
         </div>
-        {backups !== null && backups.length > 0 && (
+        {backups?.last_backup && (
+          <div className="settings-row static">
+            <span>上次备份（本次运行）</span>
+            <span className={`settings-value ${backups.last_backup.ok ? "tone-good" : "tone-bad"}`}>
+              {backups.last_backup.ok ? "成功" : "失败"} · {backups.last_backup.time} ·{" "}
+              {backups.last_backup.manual ? "手动" : "自动"}
+            </span>
+          </div>
+        )}
+        {backupItems.length > 0 && (
           <div className="settings-row static">
             <span>最新备份</span>
             <span className={`settings-value ${backupTone}`}>
@@ -1008,14 +1019,22 @@ function DataPanel() {
         )}
         {backups === null ? (
           <div className="row">加载中…</div>
-        ) : backups.length === 0 ? (
+        ) : backupItems.length === 0 ? (
           <div className="row">暂无备份</div>
         ) : (
-          backups.map((b) => (
+          backupItems.map((b) => (
             <div className="settings-row static" key={b.key}>
-              <span>{fmtBackupKey(b.key)}</span>
+              <span>
+                {fmtBackupKey(b.key)}{" "}
+                <span className={b.mode === "手动" ? "tone-good" : "tone-accent"}>{b.mode}</span>
+              </span>
               <span className="settings-value">
                 {fmtBytes(b.size)} ·{" "}
+                {b.days_left !== null && b.days_left !== undefined && (
+                  <span className={b.days_left <= 3 ? "tone-bad" : b.days_left <= 7 ? "tone-mid" : "tone-good"}>
+                    {b.days_left <= 0 ? "今日清理" : `剩余 ${b.days_left} 天`}
+                  </span>
+                )}{" "}
                 <button className="btn sm" onClick={() => downloadCosBackup(b.key)}>
                   下载
                 </button>

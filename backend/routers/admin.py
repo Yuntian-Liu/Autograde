@@ -61,7 +61,7 @@ async def overview(
         "graded": graded,
         "db_size_mb": round(db_size / 1024 / 1024, 2),
         "ai_cost_today_yuan": round(float(today_cost), 6),
-        "version": "0.13.0",
+        "version": "0.14.0",
     }
 
 
@@ -231,27 +231,28 @@ async def backup_download(admin: User = Depends(get_admin_user)) -> FileResponse
 
 @router.post("/backups", status_code=201)
 async def backup_now(admin: User = Depends(get_admin_user)) -> dict:
-    """立即快照上传到 COS backups/ 目录。"""
+    """立即快照上传到 COS backups/ 目录（记为手动触发）。"""
     from backup import create_backup
     from cos_store import cos_enabled
 
     if not cos_enabled():
         raise HTTPException(status_code=503, detail="对象存储未配置")
     try:
-        return await create_backup()
+        return await create_backup(manual=True)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/backups")
-async def backups_list(admin: User = Depends(get_admin_user)) -> list[dict]:
-    """COS 备份列表（新的在前）；未配置 COS 返回空。"""
-    from backup import list_backups
+async def backups_list(admin: User = Depends(get_admin_user)) -> dict:
+    """COS 备份列表（新的在前，带 自动/手动 标记）+ 上次备份结果；未配置 COS 返回空列表。"""
+    from backup import get_last_backup, list_backups
     from cos_store import cos_enabled
 
-    if not cos_enabled():
-        return []
-    return await list_backups()
+    return {
+        "items": (await list_backups()) if cos_enabled() else [],
+        "last_backup": get_last_backup(),
+    }
 
 
 @router.get("/backups/download")

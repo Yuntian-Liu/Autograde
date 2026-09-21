@@ -9,6 +9,7 @@ import { fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
 import { fp } from "../utils/contentfp";
 import { useNotePaste } from "../utils/useNotePaste";
+import { copyNoteToWechat } from "../utils/wechatExport";
 import { contentToHtml, serializeEditor, stripMarks, studentNameFromTitle } from "../utils/noteFormat";
 import { IconBold, IconHighlight, IconItalic } from "../components/icons";
 
@@ -189,6 +190,26 @@ export default function NoteDetail() {
     }
   }
 
+  // 一键复制到微信笔记：HTML 内联 data URI 图片；有图时进度提示，失败的图剔除后提示
+  async function copyToWechat() {
+    const key = "wx-copy";
+    const imgCount = (note.content.match(/\[\[img:/g) || []).length;
+    if (imgCount > 0) message.loading({ content: `正在准备图片 0/${imgCount}…`, key, duration: 0 });
+    try {
+      const r = await copyNoteToWechat(note, {
+        onProgress: (d, t) => message.loading({ content: `正在准备图片 ${d}/${t}…`, key, duration: 0 }),
+      });
+      clientLog.add("ui", `复制到微信：笔记 #${id}（图 ${r.total - r.failed}/${r.total}）`);
+      message.success({
+        content: r.failed ? `已复制，${r.failed} 张图拉取失败未带上` : "已复制，去微信笔记粘贴吧",
+        key,
+      });
+    } catch (e) {
+      clientLog.add("ui", `复制到微信失败：笔记 #${id} ${e?.message || e}`);
+      message.error({ content: "复制失败，请检查剪贴板权限", key });
+    }
+  }
+
   // 阅读态图片点击 → 新开标签页看原图（签名 URL 直达，浏览器原生支持右键复制/另存）
   function onReaderClick(e) {
     const img = e.target.closest?.("img[data-key]");
@@ -361,6 +382,9 @@ export default function NoteDetail() {
               </button>
               <button className="btn" onClick={copyContent}>
                 复制全文
+              </button>
+              <button className="btn" onClick={copyToWechat}>
+                复制到微信
               </button>
               {(note.image_urls && Object.keys(note.image_urls).length > 0) && (
                 <button className="btn" onClick={downloadAllImages}>

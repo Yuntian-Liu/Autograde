@@ -87,9 +87,13 @@ export function fmtBytes(bytes) {
 }
 
 // 时间戳统一转 Asia/Shanghai 显示（后端存 UTC）；无效/空值原样返回
+// 后端时间戳是 UTC 墙钟的裸串（无 Z/偏移，可能空格分隔）——一律按 UTC 解析再转东八区，
+// 否则浏览器把裸串当本地时间解析，显示出来的就是 UTC（慢 8 小时的元凶）
 export function fmtTime(iso) {
   if (!iso) return iso;
-  const d = new Date(iso);
+  let s = String(iso).trim();
+  if (!/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)) s = s.replace(" ", "T") + "Z";
+  const d = new Date(s);
   if (Number.isNaN(d.getTime())) return iso;
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("zh-CN", {
