@@ -35,12 +35,18 @@ async def init_db() -> None:
         await conn.run_sync(_ensure_columns)
     from builtin_phrases import ensure_builtin_rating_phrases
     from slug_ids import backfill_slugs
+    from codes import backfill_codes
 
     await ensure_builtin_rating_phrases()
     async with SessionLocal() as session:
         n = await backfill_slugs(session)
         if n:
             logger.info("批次短码回填：%d 条", n)
+        n_cls, n_student, n_assignment = await backfill_codes(session)
+        if n_cls or n_student or n_assignment:
+            logger.info(
+                "业务编码回填：班级 %d / 学生 %d / 批次 %d", n_cls, n_student, n_assignment
+            )
 
 
 def _ensure_columns(conn) -> None:

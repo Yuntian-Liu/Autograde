@@ -65,6 +65,7 @@ def class_brief(c: Class) -> dict:
         "series": c.series,
         "level": c.level,
         "term": c.term,
+        "cohort": c.cohort,
         "schedule": c.schedule,
         "feedback_type": feedback_type(c.series),
     }
@@ -74,6 +75,7 @@ def assignment_brief(a: Assignment) -> dict:
     return {
         "id": a.id,
         "slug": a.slug,
+        "code": a.code,
         "class_id": a.class_id,
         "unit_label": a.unit_label,
         "unit_no": a.unit_no,
@@ -106,7 +108,7 @@ def question_brief(q: Question) -> dict:
 
 
 def student_brief(s: Student) -> dict:
-    return {"id": s.id, "name": s.name, "class_id": s.class_id, "note": s.note}
+    return {"id": s.id, "name": s.name, "class_id": s.class_id, "note": s.note, "code": s.code}
 
 
 def submission_brief(sub: Submission) -> dict:

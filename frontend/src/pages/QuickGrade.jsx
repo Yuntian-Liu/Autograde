@@ -396,7 +396,7 @@ export default function QuickGrade() {
                         <td className={rowHot ? "qg-stucol qg-rowhead" : "qg-stucol"}>
                           <span className="qg-stu">
                             <span className={`state ${state}`} />
-                            <Link className="qg-name" to={`/grading/${id}?student=${s.id}`} title="进入标准批改（定位该生）">{s.name}</Link>
+                            <Link className="qg-name" to={`/grading/${id}?student=${s.id}`} title={`${s.code ? `${s.code} · ` : ""}进入标准批改（定位该生）`}>{s.name}</Link>
                           </span>
                         </td>
                         {assignment.sections.map((sec, si) => (

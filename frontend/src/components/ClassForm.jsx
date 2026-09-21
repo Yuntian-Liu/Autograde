@@ -23,6 +23,20 @@ function parseSchedule(raw) {
   };
 }
 
+// 届别默认值：按当前月份猜学期（与后端 codes.default_cohort 同规则；1-2 月归冬）
+const SEASON_OPTIONS = [
+  { value: "01", label: "春季" },
+  { value: "02", label: "夏季" },
+  { value: "03", label: "秋季" },
+  { value: "04", label: "冬季" },
+];
+function defaultCohort() {
+  const now = new Date();
+  const m = now.getMonth() + 1;
+  const season = m >= 3 && m <= 6 ? "01" : m >= 7 && m <= 8 ? "02" : m >= 9 ? "03" : "04";
+  return { year: now.getFullYear(), season };
+}
+
 // 班级创建/编辑：series WW=厚少 / NG=厚中；册 A=U1-6 上册 / B=U7-12 下册
 export default function ClassForm({ open, onClose, classInfo, onSaved }) {
   const { message } = AntApp.useApp();
@@ -32,6 +46,8 @@ export default function ClassForm({ open, onClose, classInfo, onSaved }) {
   const [series, setSeries] = useState("WW");
   const [level, setLevel] = useState(1);
   const [term, setTerm] = useState("A");
+  const [cohortYear, setCohortYear] = useState(2026);
+  const [cohortSeason, setCohortSeason] = useState("03");
   const [day, setDay] = useState("周六");
   const [time, setTime] = useState("14:00");
   const [saving, setSaving] = useState(false);
@@ -42,6 +58,11 @@ export default function ClassForm({ open, onClose, classInfo, onSaved }) {
     setSeries(classInfo?.series || "WW");
     setLevel(classInfo?.level ?? 1);
     setTerm(classInfo?.term || "A");
+    // 编辑时拆已有 cohort；新建/缺省按当前学期猜
+    const m = /^(\d{4})(0[1-4])$/.exec(classInfo?.cohort || "");
+    const fallback = defaultCohort();
+    setCohortYear(m ? Number(m[1]) : fallback.year);
+    setCohortSeason(m ? m[2] : fallback.season);
     const parsed = parseSchedule(classInfo?.schedule);
     setDay(parsed.day);
     setTime(parsed.time);
@@ -55,6 +76,7 @@ export default function ClassForm({ open, onClose, classInfo, onSaved }) {
       series,
       level,
       term,
+      cohort: `${cohortYear}${cohortSeason}`,
       schedule: `${day} ${time}`,
     };
     setSaving(true);
@@ -110,6 +132,17 @@ export default function ClassForm({ open, onClose, classInfo, onSaved }) {
             { value: "B", label: "B（下册 U7-12）" },
           ]}
         />
+        <span className="flab">届别</span>
+        <div className="schedule-pick">
+          <Select
+            value={cohortYear}
+            onChange={setCohortYear}
+            options={[cohortYear - 1, cohortYear, cohortYear + 1, cohortYear + 2]
+              .filter((y, i, arr) => arr.indexOf(y) === i)
+              .map((y) => ({ value: y, label: `${y} 年` }))}
+          />
+          <Select value={cohortSeason} onChange={setCohortSeason} options={SEASON_OPTIONS} />
+        </div>
         <span className="flab">上课时间</span>
         <div className="schedule-pick">
           <Select value={day} onChange={setDay} options={WEEKDAY_OPTIONS} />

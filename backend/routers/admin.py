@@ -61,7 +61,62 @@ async def overview(
         "graded": graded,
         "db_size_mb": round(db_size / 1024 / 1024, 2),
         "ai_cost_today_yuan": round(float(today_cost), 6),
-        "version": "0.12.2",
+        "version": "0.13.0",
+    }
+
+
+# ---- 编码速查 ----
+
+
+@router.get("/lookup")
+async def lookup_by_code(
+    code: str = "",
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """业务编码速查：一个码定位实体。只回最小信息（类型/归属者/班级链/创建时间），
+    不展示业务内容本体——报障定位用，隐私收敛。"""
+    from codes import parse_code
+
+    parsed = parse_code(code)
+    if parsed is None:
+        raise HTTPException(status_code=400, detail="编码结构或校验位不匹配，请核对是否抄错")
+    kind, canonical = parsed["kind"], parsed["canonical"]
+
+    async def owner_info(cls: Class) -> tuple[int, str]:
+        u = (await db.execute(select(User).where(User.uid == cls.owner_uid))).scalar_one_or_none()
+        return cls.owner_uid, (u.nickname if u else "")
+
+    if kind == "S":
+        s = (await db.execute(select(Student).where(Student.code == canonical))).scalar_one_or_none()
+        if s is None:
+            raise HTTPException(status_code=404, detail="编码不存在或对应数据已删除")
+        cls = await db.get(Class, s.class_id)
+        uid, nickname = await owner_info(cls)
+        return {
+            "type": "student",
+            "code": s.code,
+            "label": s.name,
+            "class_name": cls.name,
+            "owner_uid": uid,
+            "owner_nickname": nickname,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "web_path": f"/classes/{cls.id}",
+        }
+    a = (await db.execute(select(Assignment).where(Assignment.code == canonical))).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(status_code=404, detail="编码不存在或对应数据已删除")
+    cls = await db.get(Class, a.class_id)
+    uid, nickname = await owner_info(cls)
+    return {
+        "type": "assignment",
+        "code": a.code,
+        "label": a.unit_label,
+        "class_name": cls.name,
+        "owner_uid": uid,
+        "owner_nickname": nickname,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+        "web_path": f"/assignments/{a.slug or a.id}",
     }
 
 

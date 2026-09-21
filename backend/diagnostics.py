@@ -36,11 +36,12 @@ from models import (
     NoteImage,
     Phrase,
     Question,
+    Setting,
     Student,
     Submission,
 )
 
-APP_VERSION = "0.12.2"
+APP_VERSION = "0.13.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
 AGREEMENT_VERSION = "2026-09-19"
 _STARTED_AT = datetime.now(timezone.utc)
@@ -167,6 +168,19 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
     ).all()
     llm_by_feature = {feature: n for feature, n in llm_feature_rows}
 
+    # 编码序号计数器是全站总量（平台规模信息，隐私收敛）：仅 admin 的导出包带当前值；
+    # seq > 有码数 = 删号退役（正常），seq < 有码数 = 计数器被重置（bug）
+    code_seq_counters = None
+    if user.is_admin:
+        seq_rows = (
+            await db.execute(
+                select(Setting).where(
+                    Setting.key.in_(("code_seq_student", "code_seq_assignment"))
+                )
+            )
+        ).scalars().all()
+        code_seq_counters = {r.key: int(r.value or 0) for r in seq_rows}
+
     return {
         "app": {
             "version": APP_VERSION,
@@ -203,6 +217,44 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
             "classes": await count_classes(),
             "students": await count_owned(Student, Student.class_id),
             "assignments": await count_owned(Assignment, Assignment.class_id),
+            # 业务编码健康（V0.13.0）：缺码数应恒为 0——非 0 即发码/回填断链；
+            # 无届别班级数同理（cohort 空 = 编码前缀来源缺失）
+            "codes_students": (
+                await db.execute(
+                    select(func.count(Student.id))
+                    .join(Class, Student.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid, Student.code != "")
+                )
+            ).scalar_one(),
+            "codes_assignments": (
+                await db.execute(
+                    select(func.count(Assignment.id))
+                    .join(Class, Assignment.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid, Assignment.code != "")
+                )
+            ).scalar_one(),
+            "codes_missing_students": (
+                await db.execute(
+                    select(func.count(Student.id))
+                    .join(Class, Student.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid, Student.code == "")
+                )
+            ).scalar_one(),
+            "codes_missing_assignments": (
+                await db.execute(
+                    select(func.count(Assignment.id))
+                    .join(Class, Assignment.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid, Assignment.code == "")
+                )
+            ).scalar_one(),
+            "classes_without_cohort": (
+                await db.execute(
+                    select(func.count(Class.id)).where(
+                        Class.owner_uid == user.uid, Class.cohort == ""
+                    )
+                )
+            ).scalar_one(),
+            "code_seq_counters": code_seq_counters,  # None = 非 admin 导出（全站计数器不发给普通用户）
             "submissions": (
                 await db.execute(
                     select(func.count(Submission.id))

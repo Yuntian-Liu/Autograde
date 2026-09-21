@@ -4,6 +4,7 @@ import { Link, useBlocker, useNavigate, useParams, useSearchParams } from "react
 import { App as AntApp, Input, Modal, Select } from "antd";
 import { apiGet, apiPatch, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
+import CodeChip from "../components/CodeChip";
 import Confetti from "../components/Confetti";
 import SaveStatus from "../components/SaveStatus";
 import QuestionEditor from "../components/QuestionEditor";
@@ -702,6 +703,7 @@ export default function Grading() {
                 key={s.id}
                 className={s.id === currentId ? "stu active" : "stu"}
                 onClick={() => setCurrentId(s.id)}
+                title={s.code || undefined}
               >
                 <span className={`state ${state}`} />
                 <span className="name">{s.name}</span>
@@ -737,10 +739,13 @@ export default function Grading() {
             <>
               <div className="stu-panel">
                 <div className="stu-info">
-                  <h1>{current.name}</h1>
+                  <h1>
+                    {current.name} <CodeChip code={current.code} />
+                  </h1>
                   <div className="stu-meta">
                     {c ? `${seriesLabel(c.series)} ${c.name}` : ""} · {assignment.unit_label}{" "}
-                    {assignment.content} · 第 {assignment.lesson_no} 次课 · #{assignment.id}
+                    {assignment.content} · 第 {assignment.lesson_no} 次课 ·{" "}
+                    <CodeChip code={assignment.code} />
                   </div>
                   <div className="stu-stats">
                     <div className="stat">

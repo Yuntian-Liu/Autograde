@@ -6,6 +6,7 @@ import { apiDelete, apiGet, apiPatch, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
 import AssignmentForm from "../components/AssignmentForm";
 import ClassForm from "../components/ClassForm";
+import CodeChip from "../components/CodeChip";
 import PageSkeleton from "../components/PageSkeleton";
 import { classMeta, seriesLabel } from "../meta";
 
@@ -162,7 +163,8 @@ export default function ClassDetail() {
                 {a.unit_label} {a.content}
                 <span>
                   第 {a.lesson_no} 次课{a.class_time ? ` · ${a.class_time}` : ""}
-                </span>
+                </span>{" "}
+                <CodeChip code={a.code} />
               </span>
               <span className="mono">
                 {a.graded_count} / {a.total_students}
@@ -180,12 +182,24 @@ export default function ClassDetail() {
               导入名单
             </button>
           </div>
+          {data.students.length > 0 && (
+            <div className="row stu-grid head">
+              <span />
+              <span>编码</span>
+              <span>备注</span>
+              <span />
+              <span />
+            </div>
+          )}
           {data.students.map((s) => (
-            <div className="row" key={s.id}>
-              <Link className="row-name row-link" to={`/classes/${id}/students/${s.id}`}>
+            <div className="row stu-grid" key={s.id}>
+              <Link className="row-link c-name" title={s.name} to={`/classes/${id}/students/${s.id}`}>
                 {s.name}
-                {s.note && <span>{s.note}</span>}
               </Link>
+              <CodeChip code={s.code} />
+              <span className="c-note" title={s.note || undefined}>
+                {s.note}
+              </span>
               <button
                 className="btn"
                 onClick={() => {

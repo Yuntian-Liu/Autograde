@@ -69,6 +69,61 @@ export default function Admin() {
 }
 
 /* ---------- 总览 ---------- */
+function LookupCard() {
+  const [code, setCode] = useState("");
+  const [result, setResult] = useState(null); // {ok, data} | {ok:false, error}
+  const [busy, setBusy] = useState(false);
+
+  async function search() {
+    if (!code.trim() || busy) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      setResult({ ok: true, data: await adminApi.lookup(code.trim()) });
+    } catch (e) {
+      setResult({ ok: false, error: e.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="block">
+      <div className="sec-title">编码速查</div>
+      <div className="notes-toolbar">
+        <Input
+          placeholder="输入业务编码，如 202603-W51-S00042-7"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          onPressEnter={search}
+          style={{ flex: 1, minWidth: 240 }}
+        />
+        <button className="btn primary" onClick={search} disabled={busy}>
+          {busy ? "查询中…" : "查询"}
+        </button>
+      </div>
+      {result?.ok && (
+        <div className="settings-row static" style={{ marginTop: "var(--s2)" }}>
+          <span>
+            {result.data.type === "student" ? "学生" : "批次"} · {result.data.label}（
+            {result.data.class_name}）
+          </span>
+          <span className="settings-value">
+            归属 UID {result.data.owner_uid}
+            {result.data.owner_nickname ? `（${result.data.owner_nickname}）` : ""} ·{" "}
+            <Link to={result.data.web_path}>跳转</Link>
+          </span>
+        </div>
+      )}
+      {result && !result.ok && (
+        <div className="settings-row static" style={{ marginTop: "var(--s2)" }}>
+          <span className="tone-bad">{result.error}</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function OverviewPanel() {
   const [data, setData] = useState(null);
   const load = useCallback(() => {
@@ -81,15 +136,18 @@ function OverviewPanel() {
   if (!data) return <div className="admin-loading">加载中…</div>;
   if (data.error) return <PanelError onRetry={load} />;
   return (
-    <div className="metric-grid">
-      <Metric label="用户" value={data.users} />
-      <Metric label="班级" value={data.classes} />
-      <Metric label="批次" value={data.assignments} />
-      <Metric label="学生" value={data.students} />
-      <Metric label="已批改提交" value={data.graded} tone="good" />
-      <Metric label="今日 AI 成本" value={`¥${Number(data.ai_cost_today_yuan).toFixed(4)}`} tone="accent" sub={data.ai_cost_today_yuan > 1 ? "偏高，留意用量" : ""} danger={data.ai_cost_today_yuan > 1} />
-      <Metric label="数据库" value={`${data.db_size_mb} MB`} />
-      <Metric label="版本" value={data.version} />
+    <div>
+      <div className="metric-grid">
+        <Metric label="用户" value={data.users} />
+        <Metric label="班级" value={data.classes} />
+        <Metric label="批次" value={data.assignments} />
+        <Metric label="学生" value={data.students} />
+        <Metric label="已批改提交" value={data.graded} tone="good" />
+        <Metric label="今日 AI 成本" value={`¥${Number(data.ai_cost_today_yuan).toFixed(4)}`} tone="accent" sub={data.ai_cost_today_yuan > 1 ? "偏高，留意用量" : ""} danger={data.ai_cost_today_yuan > 1} />
+        <Metric label="数据库" value={`${data.db_size_mb} MB`} />
+        <Metric label="版本" value={data.version} />
+      </div>
+      <LookupCard />
     </div>
   );
 }

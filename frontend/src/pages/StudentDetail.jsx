@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { apiGet } from "../api";
 import AppHeader from "../components/AppHeader";
+import CodeChip from "../components/CodeChip";
 import PageSkeleton from "../components/PageSkeleton";
 import { fmtScore, scoreColorVar, scoreTone, seriesLabel } from "../meta";
 import { batchStatus, computeLeaderboard } from "../utils/leaderboard";
@@ -119,7 +120,10 @@ export default function StudentDetail() {
         <div className="stu-panel sd-head">
           <div className="stu-info">
             <h1>{s.name}</h1>
-            {s.note && <div className="stu-meta">{s.note}</div>}
+            <div className="stu-meta" style={{ display: "flex", gap: "var(--s2)", alignItems: "center" }}>
+              <CodeChip code={s.code} />
+              {s.note && <span>{s.note}</span>}
+            </div>
             <div className="stu-stats">
               <div className="stat">
                 <div className="k">近 5 次平均</div>

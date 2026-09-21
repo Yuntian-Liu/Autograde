@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from access import owned_class
+from codes import default_cohort, issue_code, validate_cohort
 from slug_ids import unique_slug
 from auth.dependencies import get_current_user
 from auth.models import User
@@ -37,6 +38,7 @@ class ClassCreate(BaseModel):
     level: int
     term: str  # A / B
     schedule: str = ""
+    cohort: str = ""  # 届别（如 202603=2026秋）；空 = 按当前时间自动推导
 
 
 class ClassPatch(BaseModel):
@@ -45,6 +47,8 @@ class ClassPatch(BaseModel):
     level: int | None = None
     term: str | None = None
     schedule: str | None = None
+    # 届别可改：只影响今后新发的编码前缀，已发码终身不变（身份证逻辑）
+    cohort: str | None = None
 
 
 def _validate_class_fields(series: str, term: str) -> str | None:
@@ -199,12 +203,16 @@ async def create_class(
     ).scalar_one()
     if exists:
         raise HTTPException(status_code=400, detail=f"班级名已存在：{name}")
+    cohort = body.cohort.strip() or default_cohort()
+    if not validate_cohort(cohort):
+        raise HTTPException(status_code=400, detail="届别格式应为「年+学期」，如 202603（01春/02夏/03秋/04冬）")
     c = Class(
         name=name,
         series=body.series,
         level=body.level,
         term=body.term,
         schedule=body.schedule.strip(),
+        cohort=cohort,
         owner_uid=user.uid,
     )
     db.add(c)
@@ -247,6 +255,11 @@ async def update_class(
         c.level = body.level
     if body.schedule is not None:
         c.schedule = body.schedule.strip()
+    if body.cohort is not None:
+        cohort = body.cohort.strip()
+        if not validate_cohort(cohort):
+            raise HTTPException(status_code=400, detail="届别格式应为「年+学期」，如 202603（01春/02夏/03秋/04冬）")
+        c.cohort = cohort  # 只影响今后发码前缀；已发码终身不变
     await db.commit()
     return class_brief(c)
 
@@ -279,8 +292,9 @@ async def import_students(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """名单一键导入：逐行 trim、去空、输入内去重、与现有学生重名跳过。"""
-    await owned_class(db, class_id, user)
+    """名单一键导入：逐行 trim、去空、输入内去重、与现有学生重名跳过。
+    编码在同一事务内连续取号——整批导入的学生码连号。"""
+    c = await owned_class(db, class_id, user)
     existing = set(
         (
             await db.execute(select(Student.name).where(Student.class_id == class_id))
@@ -297,7 +311,7 @@ async def import_students(
             skipped.append(name)
             continue
         seen.add(name)
-        s = Student(name=name, class_id=class_id)
+        s = Student(name=name, class_id=class_id, code=await issue_code(db, "S", c))
         db.add(s)
         added.append(s)
     await db.commit()
@@ -311,11 +325,11 @@ async def create_student(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    await owned_class(db, class_id, user)
+    c = await owned_class(db, class_id, user)
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="学生姓名不能为空")
-    s = Student(name=name, class_id=class_id, note=body.note)
+    s = Student(name=name, class_id=class_id, note=body.note, code=await issue_code(db, "S", c))
     db.add(s)
     await db.commit()
     return student_brief(s)
@@ -348,6 +362,7 @@ async def create_assignment(
         content=body.content,
         status=body.status,
         slug=await unique_slug(db),
+        code=await issue_code(db, "A", c),
     )
     sync_unit_label(a)
     db.add(a)

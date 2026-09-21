@@ -133,6 +133,7 @@ export const authApi = {
 // ---- 管理后台 ----
 export const adminApi = {
   overview: () => apiGet("/admin/overview"),
+  lookup: (code) => apiGet(`/admin/lookup?code=${encodeURIComponent(code)}`),
   aiUsage: (window) => apiGet(`/admin/ai-usage?window=${encodeURIComponent(window)}`),
   getPrices: () => apiGet("/admin/ai-prices"),
   setPrices: (prices) => apiPut("/admin/ai-prices", prices),

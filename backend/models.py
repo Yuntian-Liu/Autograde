@@ -26,6 +26,8 @@ class Class(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     # 多租户唯一锚点：所有业务数据经此归属到用户；默认 100000 = 首个注册用户（旧库自愈回填值）
     owner_uid: Mapped[int] = mapped_column(Integer, default=100000)
+    # 届别（年+学期，如 202603=2026秋）：建班人工选定，学生/批次编码的前缀来源；可改，只影响今后发码
+    cohort: Mapped[str] = mapped_column(String(8), default="")
     # 同名校验按 owner 维度在应用层做（多租户下两位老师可各有一个 WW5A）
     name: Mapped[str] = mapped_column(String(32))  # 如 WW5A / NG3B
     series: Mapped[str] = mapped_column(String(8))  # WW / NG
@@ -45,6 +47,8 @@ class Student(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(64))
+    # 全局业务编码（身份证逻辑：发出即终身不变、删号不复用）；仅创建路径发码
+    code: Mapped[str] = mapped_column(String(24), default="", index=True)
     class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"))
     note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
@@ -77,6 +81,8 @@ class Assignment(Base):
     section_order: Mapped[str] = mapped_column(Text, default="")
     # 对外短码（URL 用，不可枚举 + 防手误；主键仍为自增 int，slug 为空时前端回落 id）；启动自愈回填
     slug: Mapped[str] = mapped_column(String(16), default="", index=True)
+    # 全局业务编码（人读有意义 + 校验位；发码即终身不变）；仅创建路径发码，不进 URL（可枚举）
+    code: Mapped[str] = mapped_column(String(24), default="", index=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     class_: Mapped[Class] = relationship(back_populates="assignments")

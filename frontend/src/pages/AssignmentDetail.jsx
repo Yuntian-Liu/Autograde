@@ -9,6 +9,7 @@ import QuestionEditModal from "../components/QuestionEdit";
 import { AiEntryModal, ManualEntryModal } from "../components/QuestionEntry";
 import PageSkeleton from "../components/PageSkeleton";
 import PreviewEntry from "../components/PreviewEntry";
+import CodeChip from "../components/CodeChip";
 import { STATUS_META, deadlineText, fmtScore, modeLabel, ratingTone, scoreTone, seriesLabel } from "../meta";
 import { IconChevronLeft, IconGrip } from "../components/icons";
 import { clientLog } from "../utils/clientLog";
@@ -17,6 +18,10 @@ function StatusDot({ status }) {
   const meta = STATUS_META[status] || STATUS_META["待批改"];
   return <span className={`state ${meta.state}`} />;
 }
+
+// 提交状态胶囊（分数左侧固定列，四态统一胶囊格式，列才能对齐）
+const STATUS_PILL = { 已批改: "ok", 待批改: "todo", 缺作业: "lack", 未交: "miss" };
+const STATUS_PILL_TEXT = { 已批改: "正常", 待批改: "待批", 缺作业: "缺项", 未交: "未交" };
 
 // 逐题正确率（已批改学生口径）：「正确率」小字标签 + 收紧的数字胶囊；点击弹答错名单，可点进常规批改页并选中该生
 function RateCapsule({ q, assignmentId }) {
@@ -159,15 +164,6 @@ export default function AssignmentDetail() {
     }
   }
 
-  async function copyId(text) {
-    try {
-      await navigator.clipboard.writeText(text);
-      message.success(`已复制 ${text}`);
-    } catch {
-      message.error("复制失败，请检查浏览器剪贴板权限");
-    }
-  }
-
   if (error)
     return (
       <div className="page-enter">
@@ -208,13 +204,7 @@ export default function AssignmentDetail() {
           {assignment.class_time ? ` · ${assignment.class_time}` : ""} · {assignment.status}
           {deadlineText(assignment.class_time) ? ` · ${deadlineText(assignment.class_time)}` : ""}
           {" · "}
-          <span
-            className="mono id-chip"
-            title="点击复制批次 ID"
-            onClick={() => copyId(String(assignment.id))}
-          >
-            #{assignment.id}
-          </span>
+          <CodeChip code={assignment.code} />
         </div>
         <div className="btn-row" style={{ marginTop: "var(--s4)" }}>
           <Link className="btn primary" to={`/grading/${assignment.slug || assignment.id}`}>
@@ -262,11 +252,16 @@ export default function AssignmentDetail() {
             const sub = s.submission;
             const status = sub ? sub.status : "待批改";
             return (
-              <div className="row" key={s.id}>
+              <div className="row stu-grid-6" key={s.id}>
                 <StatusDot status={status} />
-                <span className="row-name">{s.name}</span>
-                {status === "缺作业" && <span className="tag-lack">缺项</span>}
-                {status === "未交" && <span className="tag-miss">未交</span>}
+                <span className="c-name" title={s.name}>
+                  {s.name}
+                </span>
+                <CodeChip code={s.code} />
+                <span />
+                <span className={`tag-pill ${STATUS_PILL[status] || "todo"}`}>
+                  {STATUS_PILL_TEXT[status] || "待批"}
+                </span>
                 <span className={`mono score-col ${sub && sub.score !== null ? scoreTone(sub.score) : ""}`}>
                   {sub && sub.score !== null ? fmtScore(sub.score) : "—"}
                 </span>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useBlocker } from "react-router-dom";
 import { App as AntApp, Input, Segmented, Select } from "antd";
 import { apiGet, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
@@ -31,7 +31,7 @@ const newRow = (mode = "link") => ({
   error: "",
 });
 
-function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetail, onChange, onRemove, registerEditor, onTouch, disabled }) {
+function ImportRow({ row, index, collapsed, summary, onExpand, onFocusRow, isPlaceholder, classes, classDetails, ensureClassDetail, onChange, onRemove, registerEditor, onTouch, disabled }) {
   const editorRef = useRef(null);
   // 内容首行标题自动识别：归档行抽学生名预填备注；关联行抽名字+系列供父级锁定班级/学生
   // 手动改过（nameEdited/linkEdited）后不再自动覆盖
@@ -56,6 +56,7 @@ function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetai
     editorRef,
     noteId: null, // 未创建先贴图：tmp key，提交后后端对账
     onDirty: () => {
+      onFocusRow(); // 粘贴进本行也算焦点落到本行（右键粘贴不触发 focus）
       onTouch();
       autoDetect();
     },
@@ -68,133 +69,186 @@ function ImportRow({ row, isPlaceholder, classes, classDetails, ensureClassDetai
   };
 
   return (
-    <div className={`import-row ${row.status}${isPlaceholder ? " placeholder" : ""}`}>
-      <div className="import-row-head">
-        <Segmented
-          size="small"
-          value={row.mode}
-          disabled={disabled}
-          onChange={(v) => {
-            // 切到归档时若名字还空着且没手动改过，立即从已贴内容提取一次；切到关联同理先抽名字+系列
-            const text = editorRef.current?.innerText || "";
-            const name = studentNameFromTitle(text);
-            const extra = {};
-            if (v === "legacy" && !row.nameEdited && !row.legacy_name && name) extra.legacy_name = name;
-            if (v === "link" && !row.linkEdited && name) {
-              extra.detectedName = name;
-              extra.detectedSeries = seriesFromTitle(text);
-              extra.detectedUnit = unitFromTitle(text);
-            }
-            onChange({ ...row, mode: v, ...extra });
-          }}
-          options={[
-            { value: "link", label: "关联学生" },
-            { value: "legacy", label: "历史归档" },
-          ]}
-        />
-        {row.mode === "link" ? (
-          <>
-            <Select
+    <div className={`import-row ${row.status}${isPlaceholder ? " placeholder" : ""}${collapsed ? " collapsed" : ""}`}>
+      {collapsed ? (
+        // 折叠态：一行摘要（编号 + 首行 + 状态），点击展开；下方编辑器 display:none 保 DOM 不丢内容
+        <div className="import-row-summary" onClick={onExpand}>
+          <span className="row-seq">#{index + 1}</span>
+          <span className="summary-text">{summary || "（无内容）"}</span>
+          {row.status === "ok" && <span className="ok">已导入</span>}
+          {row.status === "fail" && <span className="fail">{row.error}</span>}
+          {row.status === "idle" && (
+            <span className="hint">{row.mode === "legacy" ? "归档" : "关联"} · 点击展开</span>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="import-row-head">
+            <span className="row-seq">#{index + 1}</span>
+            <Segmented
               size="small"
-              style={{ minWidth: 130 }}
-              placeholder="班级"
-              allowClear
+              value={row.mode}
               disabled={disabled}
-              value={row.class_id}
-              options={classes.map((c) => ({ value: c.id, label: c.name }))}
               onChange={(v) => {
-                onChange({ ...row, class_id: v ?? null, student_id: null, assignment_id: null, linkEdited: true });
-                if (v) ensureClassDetail(v);
+                // 切到归档时若名字还空着且没手动改过，立即从已贴内容提取一次；切到关联同理先抽名字+系列
+                const text = editorRef.current?.innerText || "";
+                const name = studentNameFromTitle(text);
+                const extra = {};
+                if (v === "legacy" && !row.nameEdited && !row.legacy_name && name) extra.legacy_name = name;
+                if (v === "link" && !row.linkEdited && name) {
+                  extra.detectedName = name;
+                  extra.detectedSeries = seriesFromTitle(text);
+                  extra.detectedUnit = unitFromTitle(text);
+                }
+                onChange({ ...row, mode: v, ...extra });
               }}
+              options={[
+                { value: "link", label: "关联学生" },
+                { value: "legacy", label: "历史归档" },
+              ]}
             />
-            <Select
-              size="small"
-              style={{ minWidth: 120 }}
-              placeholder="学生"
-              allowClear
-              disabled={disabled || !row.class_id}
-              value={row.student_id}
-              options={(detail?.students || []).map((s) => ({ value: s.id, label: s.name }))}
-              onChange={(v) => onChange({ ...row, student_id: v ?? null, linkEdited: true })}
-            />
-            <Select
-              size="small"
-              style={{ minWidth: 150 }}
-              placeholder="批次（可空）"
-              allowClear
-              disabled={disabled || !row.class_id}
-              value={row.assignment_id}
-              options={(detail?.assignments || []).map((a) => ({ value: a.id, label: a.unit_label }))}
-              onChange={(v) => onChange({ ...row, assignment_id: v ?? null, linkEdited: true })}
-            />
-          </>
-        ) : (
+            {row.mode === "link" ? (
+              <>
+                <Select
+                  size="small"
+                  style={{ minWidth: 130 }}
+                  placeholder="班级"
+                  allowClear
+                  disabled={disabled}
+                  value={row.class_id}
+                  options={classes.map((c) => ({ value: c.id, label: c.name }))}
+                  onChange={(v) => {
+                    onChange({ ...row, class_id: v ?? null, student_id: null, assignment_id: null, linkEdited: true });
+                    if (v) ensureClassDetail(v);
+                  }}
+                />
+                <Select
+                  size="small"
+                  style={{ minWidth: 120 }}
+                  placeholder="学生"
+                  allowClear
+                  disabled={disabled || !row.class_id}
+                  value={row.student_id}
+                  options={(detail?.students || []).map((s) => ({ value: s.id, label: s.name }))}
+                  onChange={(v) => onChange({ ...row, student_id: v ?? null, linkEdited: true })}
+                />
+                <Select
+                  size="small"
+                  style={{ minWidth: 150 }}
+                  placeholder="批次（可空）"
+                  allowClear
+                  disabled={disabled || !row.class_id}
+                  value={row.assignment_id}
+                  options={(detail?.assignments || []).map((a) => ({ value: a.id, label: a.unit_label }))}
+                  onChange={(v) => onChange({ ...row, assignment_id: v ?? null, linkEdited: true })}
+                />
+              </>
+            ) : (
+              <Input
+                size="small"
+                style={{ maxWidth: 220 }}
+                placeholder="学生名 / 备注（可空，归档可搜）"
+                disabled={disabled}
+                value={row.legacy_name}
+                maxLength={64}
+                onChange={(e) => onChange({ ...row, legacy_name: e.target.value, nameEdited: true })}
+              />
+            )}
+            <span className="import-row-status">
+              {row.status === "ok" && (
+                <span className="ok">
+                  已导入 · <Link to={`/notes/${row.noteId}`}>查看</Link>
+                </span>
+              )}
+              {row.status === "fail" && <span className="fail">{row.error}</span>}
+            </span>
+            <button
+              type="button"
+              className="btn danger sm"
+              disabled={disabled}
+              onClick={onRemove}
+              title="删除该行"
+            >
+              删除
+            </button>
+          </div>
           <Input
             size="small"
-            style={{ maxWidth: 220 }}
-            placeholder="学生名 / 备注（可空，归档可搜）"
+            placeholder="标题（可空，留空取正文首行）"
             disabled={disabled}
-            value={row.legacy_name}
-            maxLength={64}
-            onChange={(e) => onChange({ ...row, legacy_name: e.target.value, nameEdited: true })}
+            value={row.title}
+            maxLength={128}
+            onChange={(e) => onChange({ ...row, title: e.target.value })}
           />
-        )}
-        <span className="import-row-status">
-          {row.status === "ok" && (
-            <span className="ok">
-              已导入 · <Link to={`/notes/${row.noteId}`}>查看</Link>
-            </span>
-          )}
-          {row.status === "fail" && <span className="fail">{row.error}</span>}
-        </span>
-        <button
-          type="button"
-          className="btn danger sm"
-          disabled={disabled}
-          onClick={onRemove}
-          title="删除该行"
-        >
-          删除
-        </button>
-      </div>
-      <Input
-        size="small"
-        placeholder="标题（可空，留空取正文首行）"
-        disabled={disabled}
-        value={row.title}
-        maxLength={128}
-        onChange={(e) => onChange({ ...row, title: e.target.value })}
-      />
-      <div
-        ref={setEditorEl}
-        className={dragOver ? "note-editor mini drag-over" : "note-editor mini"}
-        contentEditable={!disabled}
-        suppressContentEditableWarning
-        onPaste={onPaste}
-        onInput={() => {
-          onTouch();
-          autoDetect();
-        }}
-        {...dndProps}
-      />
-      {(uploading > 0 || migrating) && (
-        <div className="page-meta">{migrating || "图片上传中…"}</div>
+        </>
       )}
+      {/* 编辑器常驻（折叠仅视觉隐藏）：contentEditable 内容在 DOM 里，卸载即丢 */}
+      <div className="editor-wrap" style={collapsed ? { display: "none" } : undefined}>
+        <div
+          ref={setEditorEl}
+          className={dragOver ? "note-editor mini drag-over" : "note-editor mini"}
+          contentEditable={!disabled && !collapsed}
+          suppressContentEditableWarning
+          onPaste={onPaste}
+          onFocus={onFocusRow}
+          onInput={() => {
+            onTouch();
+            autoDetect();
+          }}
+          {...dndProps}
+        />
+        {(uploading > 0 || migrating) && (
+          <div className="page-meta">{migrating || "图片上传中…"}</div>
+        )}
+      </div>
     </div>
   );
 }
 
 export default function NoteImport() {
-  const { message } = AntApp.useApp();
+  const { message, modal } = AntApp.useApp();
   const [rows, setRows] = useState([newRow()]);
   const [classes, setClasses] = useState([]);
   const [classDetails, setClassDetails] = useState({}); // classId → {students, assignments}（行间共享缓存）
   const [submitting, setSubmitting] = useState(false);
+  // 折叠时机：只在焦点落到另一行（点击/粘贴进别的行）时才收起上一行——
+  // 绝不在「自动续行」瞬间切，否则正在输入的编辑器被 display:none，后续按键丢失
+  const [activeKey, setActiveKey] = useState(null); // 当前展开编辑的行；其余已填行折叠成摘要
   const editorsRef = useRef({}); // row.key → 编辑器 DOM
 
   useEffect(() => {
     apiGet("/classes").then(setClasses).catch(() => {});
   }, []);
+
+  const okCount = rows.filter((r) => r.status === "ok").length;
+  const filledCount = rows.filter((r) => r.touched).length;
+
+  // 防丢：有已填但未导入的行时，离开页面二次确认（路由拦截 + 关标签/刷新）
+  const blocking = filledCount > okCount;
+  const blocker = useBlocker(blocking);
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    modal.confirm({
+      title: "有未导入的内容",
+      content: "确定离开？已填写但未导入的行将丢失。",
+      okText: "离开",
+      cancelText: "继续录入",
+      centered: true,
+      okButtonProps: { danger: true },
+      onOk: () => blocker.proceed(),
+      onCancel: () => blocker.reset(),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocker.state]);
+  useEffect(() => {
+    if (!blocking) return;
+    const handler = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [blocking]);
 
   function ensureClassDetail(classId) {
     if (classDetails[classId]) return;
@@ -320,7 +374,18 @@ export default function NoteImport() {
     }
   }
 
-  const okCount = rows.filter((r) => r.status === "ok").length;
+  // 折叠摘要 = 身份标识（谁 + 第几单元），不取正文：优先手动标题，其次从首行抽名字+单元进度
+  const rowSummary = (r) => {
+    if (r.title.trim()) return r.title.trim();
+    const ed = editorsRef.current[r.key];
+    const text = ed?.innerText || "";
+    const name =
+      (r.mode === "legacy" ? r.legacy_name : r.detectedName) || studentNameFromTitle(text);
+    const unit = r.detectedUnit || unitFromTitle(text);
+    if (name && unit) return `${name} · ${unit}`;
+    if (name) return name;
+    return (text.split("\n").find((l) => l.trim()) || "").trim().slice(0, 30);
+  };
 
   return (
     <div className="page-enter">
@@ -333,7 +398,7 @@ export default function NoteImport() {
           批量导入笔记
         </h1>
         <p className="page-meta" style={{ marginTop: "var(--s1)" }}>
-          每行一篇：关联学生落活跃区，历史归档落归档区。内容支持直接粘贴图文；最后一行开始填写后会自动补新行。
+          每行一篇：关联学生落活跃区，历史归档落归档区。内容支持直接粘贴图文；最后一行开始填写后会自动补新行，已填行自动折叠成摘要（点击可展开）。
         </p>
 
         <div style={{ marginTop: "var(--s4)", display: "grid", gap: "var(--s3)" }}>
@@ -341,6 +406,11 @@ export default function NoteImport() {
             <ImportRow
               key={r.key}
               row={r}
+              index={i}
+              collapsed={r.touched && r.key !== activeKey}
+              summary={rowSummary(r)}
+              onExpand={() => setActiveKey(r.key)}
+              onFocusRow={() => setActiveKey(r.key)}
               isPlaceholder={i === rows.length - 1 && !r.touched && r.status === "idle"}
               classes={classes}
               classDetails={classDetails}
@@ -377,6 +447,27 @@ export default function NoteImport() {
             {submitting ? "导入中…" : `全部导入${okCount ? `（已成功 ${okCount} 行不重交）` : ""}`}
           </button>
         </div>
+
+        {/* 悬浮操作条：长表单滚到下面也能提交/回顶部/返回（回顶部纯滚动，不碰表单内容） */}
+        {filledCount > 0 && (
+          <div className="import-dock">
+            <span className="dock-info">
+              已填 {filledCount} 篇{okCount > 0 ? ` · 已导入 ${okCount}` : ""}
+            </span>
+            <button className="btn primary sm" disabled={submitting} onClick={submitAll}>
+              {submitting ? "导入中…" : "全部导入"}
+            </button>
+            <button
+              className="btn sm"
+              onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+            >
+              回顶部
+            </button>
+            <Link className="btn sm" to="/notes">
+              返回笔记库
+            </Link>
+          </div>
+        )}
       </div>
     </div>
   );
