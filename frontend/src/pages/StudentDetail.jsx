@@ -1,6 +1,6 @@
 import { IconChevronLeft } from "../components/icons";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   CartesianGrid,
   Line,
@@ -14,10 +14,12 @@ import {
   Cell,
 } from "recharts";
 import { apiGet } from "../api";
+import AbilityReportModal from "../components/AbilityReportModal";
 import AppHeader from "../components/AppHeader";
 import CodeChip from "../components/CodeChip";
 import PageSkeleton from "../components/PageSkeleton";
-import { fmtScore, scoreColorVar, scoreTone, seriesLabel } from "../meta";
+import { fmtScore, fmtTime, scoreColorVar, scoreTone, seriesLabel } from "../meta";
+import { rangeLabel } from "../utils/ability";
 import { batchStatus, computeLeaderboard } from "../utils/leaderboard";
 
 const GRADED = new Set(["已批改", "缺作业"]);
@@ -25,21 +27,30 @@ const GRADED = new Set(["已批改", "缺作业"]);
 // 学生详情页：信息头 + 历次成绩趋势 + 名次走势 + 薄弱板块 + 明细表
 export default function StudentDetail() {
   const { classId, studentId } = useParams();
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [classInfo, setClassInfo] = useState(null);
   const [lb, setLb] = useState(null);
+  const [reports, setReports] = useState(null);
+  const [reportOpen, setReportOpen] = useState(false);
   const [error, setError] = useState(null);
+
+  function loadReports() {
+    return apiGet(`/students/${studentId}/ability-reports`).then(setReports);
+  }
 
   useEffect(() => {
     Promise.all([
       apiGet(`/students/${studentId}/stats`),
       apiGet(`/classes/${classId}`),
       apiGet(`/classes/${classId}/leaderboard`),
+      apiGet(`/students/${studentId}/ability-reports`),
     ])
-      .then(([s, c, l]) => {
+      .then(([s, c, l, r]) => {
         setStats(s);
         setClassInfo(c);
         setLb(l);
+        setReports(r);
       })
       .catch((e) => setError(e.message));
   }, [classId, studentId]);
@@ -251,6 +262,41 @@ export default function StudentDetail() {
           )}
         </section>
 
+        {/* 能力报告（V0.15.0）：历次报告列表 + 生成入口 */}
+        <section className="block">
+          <div className="sec-title-row">
+            <div className="sec-title">能力报告</div>
+            <button className="btn primary" onClick={() => setReportOpen(true)}>
+              生成能力报告
+            </button>
+          </div>
+          {!reports || reports.length === 0 ? (
+            <div className="row">暂无报告</div>
+          ) : (
+            reports.map((r) => {
+              const vals = Object.values(r.scores || {});
+              const avg = vals.length
+                ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2)
+                : null;
+              return (
+                <Link
+                  className="row"
+                  key={r.id}
+                  to={`/classes/${classInfo.id}/students/${studentId}/reports/${r.id}`}
+                >
+                  <span className="row-name">
+                    {fmtTime(r.created_at)}
+                    <span>
+                      {rangeLabel(r)} · {r.assignment_count} 次作业
+                    </span>
+                  </span>
+                  {avg !== null && <span className="mono">六维均值 {avg}</span>}
+                </Link>
+              );
+            })
+          )}
+        </section>
+
         {/* 历次作业明细 */}
         <section className="block">
           <div className="sec-title">历次作业</div>
@@ -271,6 +317,15 @@ export default function StudentDetail() {
           ))}
         </section>
       </div>
+
+      <AbilityReportModal
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        studentId={studentId}
+        onSaved={(saved) =>
+          navigate(`/classes/${classInfo.id}/students/${studentId}/reports/${saved.id}`)
+        }
+      />
     </div>
   );
 }

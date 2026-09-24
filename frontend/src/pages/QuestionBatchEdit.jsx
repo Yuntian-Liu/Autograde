@@ -109,7 +109,7 @@ export default function QuestionBatchEdit() {
           { label: "整批编辑" },
         ]}
       />
-      <div className="wrap">
+      <div className="wrap wrap-wide">
         <Link className="back" to={`/assignments/${id}`}>
           <IconChevronLeft />返回批次
         </Link>

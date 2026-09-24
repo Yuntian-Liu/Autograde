@@ -59,6 +59,7 @@ async def _run_parse_job(job_id: str, raw_text: str, uid: int, assignment_id: in
     usage = None
     finish_reason = None
     text_chars = 0
+    metrics: dict = {}
     try:
         async for event in parse_questions_stream(raw_text):
             if event["type"] == "progress":
@@ -67,6 +68,7 @@ async def _run_parse_job(job_id: str, raw_text: str, uid: int, assignment_id: in
                 usage = event.get("usage")
                 finish_reason = event.get("finish_reason")
                 text_chars = event.get("text_chars", 0)
+                metrics = event.get("metrics") or {}
                 job["status"] = "done"
                 job["data"] = event["data"]
     except APITimeoutError:
@@ -95,6 +97,10 @@ async def _run_parse_job(job_id: str, raw_text: str, uid: int, assignment_id: in
             finish_reason=finish_reason,
             is_empty=text_chars == 0,
             assignment_id=assignment_id,
+            cache_hit_tokens=(usage or {}).get("cache_hit_tokens", 0),
+            cache_miss_tokens=(usage or {}).get("cache_miss_tokens", 0),
+            reasoning_tokens=(usage or {}).get("reasoning_tokens", 0),
+            **{k: metrics.get(k, 0) for k in ("ttft_ms", "think_ms", "total_ms")},
         )
 
 
@@ -162,9 +168,11 @@ async def draft_explanation_api(
     text = ""
     usage = None
     finish_reason = None
+    metrics: dict = {}
     try:
         result = await draft_explanation(q, body.error_description)
         text, usage, finish_reason = result["text"], result["usage"], result["finish_reason"]
+        metrics = result.get("metrics") or {}
     except AIUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     except APITimeoutError as e:
@@ -179,5 +187,9 @@ async def draft_explanation_api(
             finish_reason=finish_reason,
             is_empty=not text.strip(),
             assignment_id=q.assignment_id,
+            cache_hit_tokens=(usage or {}).get("cache_hit_tokens", 0),
+            cache_miss_tokens=(usage or {}).get("cache_miss_tokens", 0),
+            reasoning_tokens=(usage or {}).get("reasoning_tokens", 0),
+            **{k: metrics.get(k, 0) for k in ("ttft_ms", "think_ms", "total_ms")},
         )
     return {"draft": text}

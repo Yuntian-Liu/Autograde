@@ -9,7 +9,7 @@ from access import owned_student
 from auth.dependencies import get_current_user
 from auth.models import User
 from database import get_db
-from models import Assignment, ErrorRecord, FeedbackSnapshot, Question, Student, Submission
+from models import AbilityReport, Assignment, ErrorRecord, FeedbackSnapshot, Question, Student, Submission
 from serializers import student_brief
 router = APIRouter(prefix="/api/students", tags=["students"])
 
@@ -43,10 +43,11 @@ async def delete_student(
     student_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ) -> None:
     s = await owned_student(db, student_id, user)
-    # 连同该学生的批改数据一起清理，避免孤儿行
+    # 连同该学生的批改数据一起清理，避免孤儿行（含能力报告存档，隐私政策承诺连带删除）
     await db.execute(delete(ErrorRecord).where(ErrorRecord.student_id == student_id))
     await db.execute(delete(Submission).where(Submission.student_id == student_id))
     await db.execute(delete(FeedbackSnapshot).where(FeedbackSnapshot.student_id == student_id))
+    await db.execute(delete(AbilityReport).where(AbilityReport.student_id == student_id))
     await db.delete(s)
     await db.commit()
 

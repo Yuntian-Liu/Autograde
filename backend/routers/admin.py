@@ -17,7 +17,15 @@ from auth.dependencies import get_admin_user
 from auth.models import InviteCode, User
 from auth.utils import generate_invite_code, get_login_blocked_count, get_login_blocked_events
 from database import DATABASE_PATH, get_db
-from llm_events_store import DEFAULT_PRICES, ai_usage_stats, get_prices, set_prices
+from llm_events_store import (
+    DEFAULT_PRICES,
+    ai_usage_stats,
+    get_prices,
+    llm_call_detail,
+    llm_calls_list,
+    llm_health,
+    set_prices,
+)
 from models import Assignment, Class, LlmCallEvent, Student, Submission
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -61,7 +69,7 @@ async def overview(
         "graded": graded,
         "db_size_mb": round(db_size / 1024 / 1024, 2),
         "ai_cost_today_yuan": round(float(today_cost), 6),
-        "version": "0.14.1",
+        "version": "0.15.0",
     }
 
 
@@ -134,6 +142,45 @@ async def ai_usage(
     return await ai_usage_stats(db, window)
 
 
+# ---- 模型调用监控（健康 + 调用明细 + 消费单详情）----
+
+
+@router.get("/llm-health")
+async def llm_health_api(
+    window: str = "24h",
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    if window not in ("24h", "7d"):
+        raise HTTPException(status_code=400, detail="window 仅支持 24h/7d")
+    return await llm_health(db, window)
+
+
+@router.get("/llm-calls")
+async def llm_calls_api(
+    window: str = "7d",
+    feature: str = "",
+    limit: int = 100,
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    if window not in ("today", "7d", "30d", "all"):
+        raise HTTPException(status_code=400, detail="window 仅支持 today/7d/30d/all")
+    return await llm_calls_list(db, window, feature.strip(), limit)
+
+
+@router.get("/llm-calls/{call_id}")
+async def llm_call_detail_api(
+    call_id: int,
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    detail = await llm_call_detail(db, call_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="调用记录不存在")
+    return detail
+
+
 @router.get("/ai-prices")
 async def read_prices(admin: User = Depends(get_admin_user), db=Depends(get_db)) -> dict:
     prices = await get_prices(db)
@@ -141,7 +188,7 @@ async def read_prices(admin: User = Depends(get_admin_user), db=Depends(get_db))
 
 
 class PricesIn(BaseModel):
-    # 峰价三元组（缓存命中价暂不参与结算，仅留存配置）
+    # 峰价三元组（缓存命中价参与结算：命中部分按此价计费）
     price_input: float = Field(..., ge=0)
     price_cache_hit: float = Field(..., ge=0)
     price_output: float = Field(..., ge=0)

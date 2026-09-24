@@ -48,7 +48,7 @@ export default function Admin() {
   return (
     <div className="page-enter">
       <AppHeader crumbs={[{ label: "工作台", to: "/" }, { label: "管理后台" }]} />
-      <div className="wrap">
+      <div className="wrap wrap-wide">
         <Link className="back" to="/"><IconChevronLeft />工作台</Link>
         <h1 style={{ marginTop: "var(--s3)" }}>管理后台</h1>
         <Tabs
@@ -56,6 +56,7 @@ export default function Admin() {
           items={[
             { key: "overview", label: "总览", children: <OverviewPanel /> },
             { key: "ai", label: "AI 用量", children: <AiPanel /> },
+            { key: "llm", label: "模型调用", children: <LlmPanel /> },
             { key: "phrases", label: "话术", children: <PhrasesPanel /> },
             { key: "rating", label: "评级", children: <RatingPanel /> },
             { key: "invites", label: "邀请码", children: <InvitesPanel /> },
@@ -172,6 +173,12 @@ function validateWindows(windows) {
   }
   return null;
 }
+
+const FEATURE_LABELS = {
+  parse_questions: "AI 录题",
+  draft_explanation: "讲解起草",
+  ability_report: "能力报告",
+};
 
 function TierTag({ tier }) {
   if (tier === "peak") return <span className="tier-peak">峰</span>;
@@ -307,7 +314,8 @@ function AiPanel() {
           columns={[
             { title: "时间", dataIndex: "created_at", width: 170,
               render: (v) => (v ? fmtTime(v) : "—") },
-            { title: "功能", dataIndex: "feature", width: 130 },
+            { title: "功能", dataIndex: "feature", width: 130,
+              render: (v) => FEATURE_LABELS[v] || v },
             { title: "峰谷", dataIndex: "price_tier", width: 60,
               render: (v) => <TierTag tier={v} /> },
             { title: "输入", dataIndex: "prompt_tokens", width: 90 },
@@ -396,6 +404,223 @@ function AiPanel() {
         </div>
         <p className="login-hint">改价只影响之后的调用；历史成本按调用当时的单价结算，不回溯。</p>
       </Modal>
+    </div>
+  );
+}
+
+/* ---------- 模型调用（健康监控 + 调用明细 + 消费单） ---------- */
+
+function fmtMs(ms) {
+  if (!ms) return "—";
+  if (ms < 1000) return `${ms} ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)} 秒`;
+  return `${Math.floor(ms / 60000)} 分 ${Math.round((ms % 60000) / 1000)} 秒`;
+}
+
+function CallStatus({ r }) {
+  if (!r.finish_reason) return <span className="tone-bad">调用异常</span>;
+  if (r.is_empty) return <span className="tone-mid">空回答</span>;
+  if (r.finish_reason === "parse_error") return <span className="tone-mid">解析失败</span>;
+  return <span className="tone-good">正常</span>;
+}
+
+function cacheRate(r) {
+  const sum = (r.cache_hit_tokens || 0) + (r.cache_miss_tokens || 0);
+  if (!sum) return "—";
+  return `${Math.round(((r.cache_hit_tokens || 0) / sum) * 100)}%`;
+}
+
+// 消费单弹窗：单次调用的完整明细（延迟/ tokens 拆分 / 发票式成本还原）
+function CallReceiptModal({ detail, onClose }) {
+  if (!detail) return null;
+  const lines = [
+    { name: "输入·未命中", tokens: detail.cache_miss_tokens || 0, unit: detail.unit_input },
+    { name: "输入·缓存命中", tokens: detail.cache_hit_tokens || 0, unit: detail.unit_cache_hit },
+    { name: "输出", tokens: detail.completion_tokens || 0, unit: detail.unit_output },
+  ];
+  const answerMs = detail.total_ms && detail.think_ms ? detail.total_ms - detail.think_ms : 0;
+  return (
+    <Modal open onCancel={onClose} footer={null} width={520} title="调用详情 · 消费单">
+      <div className="receipt">
+        <div className="receipt-head">
+          <div className="receipt-title">
+            {detail.context ? detail.context.label : FEATURE_LABELS[detail.feature] || detail.feature}
+            {detail.context?.code && <span className="receipt-code">{detail.context.code}</span>}
+          </div>
+          <div className="receipt-meta">
+            {detail.model} · {fmtTime(detail.created_at)} · <TierTag tier={detail.price_tier} />
+          </div>
+        </div>
+
+        <div className="receipt-sec">
+          <div className="receipt-sec-t">延迟</div>
+          <div className="receipt-grid">
+            <div><span>首字延迟</span><b>{fmtMs(detail.ttft_ms)}</b></div>
+            <div><span>思考时间</span><b>{fmtMs(detail.think_ms)}</b></div>
+            <div><span>回答时间</span><b>{fmtMs(answerMs)}</b></div>
+            <div><span>总时长</span><b>{fmtMs(detail.total_ms)}</b></div>
+          </div>
+        </div>
+
+        <div className="receipt-sec">
+          <div className="receipt-sec-t">tokens</div>
+          <div className="receipt-grid">
+            <div><span>输入</span><b>{(detail.prompt_tokens || 0).toLocaleString()}</b></div>
+            <div><span>输出</span><b>{(detail.completion_tokens || 0).toLocaleString()}</b></div>
+            <div><span>思考</span><b>{detail.reasoning_tokens ? detail.reasoning_tokens.toLocaleString() : "—"}</b></div>
+            <div><span>缓存命中率</span><b>{cacheRate(detail)}</b></div>
+          </div>
+        </div>
+
+        <div className="receipt-sec">
+          <div className="receipt-sec-t">费用明细（单价：元/百万 tokens）</div>
+          <div className="receipt-bill">
+            {lines.map((l) => (
+              <div className="receipt-bill-row" key={l.name}>
+                <span>{l.name}</span>
+                <span className="receipt-bill-calc">
+                  {l.tokens.toLocaleString()} × ¥{Number(l.unit || 0).toFixed(2)}
+                </span>
+                <span className="receipt-bill-sum">
+                  ¥{((l.tokens * (l.unit || 0)) / 1e6).toFixed(6)}
+                </span>
+              </div>
+            ))}
+            <div className="receipt-bill-total">
+              <span>合计</span>
+              <span className="receipt-total-v">¥{Number(detail.cost_yuan || 0).toFixed(6)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="receipt-status">
+          状态：<CallStatus r={detail} />
+          {detail.reasoning_tokens > 0 && (
+            <span className="receipt-note">（思考 {detail.reasoning_tokens.toLocaleString()} tokens 计入输出计费）</span>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function LlmPanel() {
+  const [hwin, setHwin] = useState("24h");
+  const [health, setHealth] = useState(null);
+  const [win, setWin] = useState("7d");
+  const [feature, setFeature] = useState("");
+  const [calls, setCalls] = useState(null);
+  const [detail, setDetail] = useState(null);
+
+  const loadHealth = useCallback(() => {
+    setHealth(null);
+    adminApi.llmHealth(hwin).then(setHealth).catch(() => setHealth({ error: true }));
+  }, [hwin]);
+  const loadCalls = useCallback(() => {
+    setCalls(null);
+    adminApi.llmCalls(win, feature).then(setCalls).catch(() => setCalls({ error: true }));
+  }, [win, feature]);
+  useEffect(() => { loadHealth(); }, [loadHealth]);
+  useEffect(() => { loadCalls(); }, [loadCalls]);
+
+  async function openDetail(id) {
+    try {
+      setDetail(await adminApi.llmCallDetail(id));
+    } catch {
+      /* 行内状态已可见，详情拉取失败静默 */
+    }
+  }
+
+  const hr = health && !health.error ? health.healthy_rate : null;
+  return (
+    <div>
+      {/* 健康卡 */}
+      <div className="admin-toolbar">
+        <Segmented
+          options={[{ label: "24 小时", value: "24h" }, { label: "7 天", value: "7d" }]}
+          value={hwin}
+          onChange={setHwin}
+        />
+      </div>
+      {!health ? (
+        <div className="admin-loading">加载中…</div>
+      ) : health.error ? (
+        <PanelError onRetry={loadHealth} />
+      ) : (
+        <div className="metric-grid">
+          <Metric
+            label="正常率"
+            value={hr === null ? "—" : `${hr}%`}
+            tone={hr === 100 ? "good" : hr !== null && hr < 97 ? "warn" : undefined}
+            danger={hr !== null && hr < 97}
+            sub={`调用 ${health.total} · 空回答 ${health.empty} · 异常 ${health.failed}`}
+          />
+          <Metric label="平均首字延迟" value={fmtMs(health.avg_ttft_ms)} />
+          <Metric label="平均总时长" value={fmtMs(health.avg_total_ms)} />
+          <Metric
+            label="缓存命中率"
+            value={health.cache_hit_rate === null ? "—" : `${health.cache_hit_rate}%`}
+            tone="accent"
+          />
+        </div>
+      )}
+
+      {/* 调用明细 */}
+      <div className="admin-toolbar" style={{ marginTop: "var(--s5)" }}>
+        <Segmented options={WINDOWS} value={win} onChange={setWin} />
+        <Select
+          size="small"
+          value={feature}
+          style={{ width: 130 }}
+          onChange={setFeature}
+          options={[
+            { value: "", label: "全部功能" },
+            { value: "parse_questions", label: "AI 录题" },
+            { value: "draft_explanation", label: "讲解起草" },
+            { value: "ability_report", label: "能力报告" },
+          ]}
+        />
+      </div>
+      {!calls ? (
+        <div className="admin-loading">加载中…</div>
+      ) : calls.error ? (
+        <PanelError onRetry={loadCalls} />
+      ) : (
+        <Table
+          size="small"
+          rowKey="id"
+          pagination={{ pageSize: 20 }}
+          dataSource={calls}
+          onRow={(r) => ({ onClick: () => openDetail(r.id), style: { cursor: "pointer" } })}
+          columns={[
+            { title: "时间", dataIndex: "created_at", width: 150,
+              render: (v) => (v ? fmtTime(v) : "—") },
+            { title: "功能", dataIndex: "feature", width: 100,
+              render: (v) => FEATURE_LABELS[v] || v },
+            { title: "业务对象", width: 200, render: (_, r) =>
+              r.context ? (
+                <span>
+                  {r.context.label}
+                  {r.context.code && <span className="receipt-code">{r.context.code}</span>}
+                </span>
+              ) : (
+                "—"
+              ) },
+            { title: "tokens", width: 110, render: (_, r) =>
+              ((r.prompt_tokens || 0) + (r.completion_tokens || 0)).toLocaleString() },
+            { title: "缓存命中", width: 90, render: (_, r) => cacheRate(r) },
+            { title: "首字延迟", dataIndex: "ttft_ms", width: 90, render: fmtMs },
+            { title: "总时长", dataIndex: "total_ms", width: 90, render: fmtMs },
+            { title: "峰谷", dataIndex: "price_tier", width: 60,
+              render: (v) => <TierTag tier={v} /> },
+            { title: "成本", dataIndex: "cost_yuan", width: 100,
+              render: (v) => `¥${Number(v).toFixed(4)}` },
+            { title: "状态", width: 90, render: (_, r) => <CallStatus r={r} /> },
+          ]}
+        />
+      )}
+
+      {detail && <CallReceiptModal detail={detail} onClose={() => setDetail(null)} />}
     </div>
   );
 }

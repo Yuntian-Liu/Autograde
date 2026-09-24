@@ -309,7 +309,7 @@ export default function NoteDetail() {
   return (
     <div className="page-enter">
       <AppHeader crumbs={[{ label: "工作台", to: "/" }, { label: "笔记库", to: "/notes" }, { label: note.title }]} />
-      <div className="wrap">
+      <div className="wrap wrap-narrow">
         <Link className="back" to="/notes">
           ← 笔记库
         </Link>

@@ -11,11 +11,11 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import case, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import SessionLocal
-from models import Assignment, Class, LlmCallEvent, Setting
+from models import Assignment, Class, LlmCallEvent, Setting, Student
 
 logger = logging.getLogger(__name__)
 
@@ -84,15 +84,45 @@ def price_tier_at(dt: datetime, prices: dict) -> str:
     return "offpeak"
 
 
-def estimate_cost(prompt_tokens: int, completion_tokens: int, prices: dict, tier: str = "peak") -> float:
-    """成本 = (输入×输入价 + 输出×输出价) / 1e6，按峰/谷取价，保留 6 位。"""
+def estimate_cost(
+    prompt_tokens: int,
+    completion_tokens: int,
+    prices: dict,
+    tier: str = "peak",
+    cache_hit: int = 0,
+    cache_miss: int = 0,
+) -> float:
+    """成本 = (未命中×输入价 + 命中×缓存命中价 + 输出×输出价) / 1e6，按峰/谷取价，保留 6 位。
+    无缓存拆分时兜底：全部输入按未命中计（不多算不少算）。"""
     if tier == "offpeak":
         p_in = float(prices.get("offpeak_input", 0) or 0)
         p_out = float(prices.get("offpeak_output", 0) or 0)
+        p_hit = float(prices.get("offpeak_cache_hit", 0) or 0)
     else:
         p_in = float(prices.get("price_input", 0) or 0)
         p_out = float(prices.get("price_output", 0) or 0)
-    return round(((prompt_tokens or 0) * p_in + (completion_tokens or 0) * p_out) / 1e6, 6)
+        p_hit = float(prices.get("price_cache_hit", 0) or 0)
+    if not cache_hit and not cache_miss:
+        cache_miss = prompt_tokens or 0
+    return round(
+        ((cache_miss or 0) * p_in + (cache_hit or 0) * p_hit + (completion_tokens or 0) * p_out) / 1e6,
+        6,
+    )
+
+
+def unit_prices(prices: dict, tier: str) -> tuple[float, float, float]:
+    """取峰/谷三单价（输入/输出/缓存命中），供结算快照写入。"""
+    if tier == "offpeak":
+        return (
+            float(prices.get("offpeak_input", 0) or 0),
+            float(prices.get("offpeak_output", 0) or 0),
+            float(prices.get("offpeak_cache_hit", 0) or 0),
+        )
+    return (
+        float(prices.get("price_input", 0) or 0),
+        float(prices.get("price_output", 0) or 0),
+        float(prices.get("price_cache_hit", 0) or 0),
+    )
 
 
 async def _get_setting(db: AsyncSession, key: str) -> Setting | None:
@@ -140,31 +170,59 @@ async def record_llm_call(
     finish_reason: str | None,
     is_empty: bool,
     assignment_id: int | None = None,
-) -> None:
-    """埋点一条 AI 调用；按调用时刻判峰谷并结算成本；独立 session，失败静默（只日志）。"""
+    student_id: int | None = None,
+    cache_hit_tokens: int = 0,
+    cache_miss_tokens: int = 0,
+    reasoning_tokens: int = 0,
+    ttft_ms: int = 0,
+    think_ms: int = 0,
+    total_ms: int = 0,
+) -> dict | None:
+    """埋点一条 AI 调用；按调用时刻判峰谷并结算成本（含缓存命中拆分）；
+    单价快照同行写入（发票原则）；独立 session，失败静默（只日志）。
+    返回结算结果（cost/tier）供业务层展示，失败返回 None。"""
     try:
         async with SessionLocal() as db:
             prices = await get_prices(db)
             tier = price_tier_at(datetime.now(timezone.utc), prices)
+            u_in, u_out, u_hit = unit_prices(prices, tier)
+            cost = estimate_cost(
+                prompt_tokens or 0,
+                completion_tokens or 0,
+                prices,
+                tier,
+                cache_hit=cache_hit_tokens or 0,
+                cache_miss=cache_miss_tokens or 0,
+            )
             db.add(
                 LlmCallEvent(
                     uid=uid,
                     feature=feature,
                     assignment_id=assignment_id,
+                    student_id=student_id,
                     model=model,
                     prompt_tokens=prompt_tokens or 0,
                     completion_tokens=completion_tokens or 0,
-                    cost_yuan=estimate_cost(
-                        prompt_tokens or 0, completion_tokens or 0, prices, tier
-                    ),
+                    cache_hit_tokens=cache_hit_tokens or 0,
+                    cache_miss_tokens=cache_miss_tokens or 0,
+                    reasoning_tokens=reasoning_tokens or 0,
+                    ttft_ms=ttft_ms or 0,
+                    think_ms=think_ms or 0,
+                    total_ms=total_ms or 0,
+                    cost_yuan=cost,
                     price_tier=tier,
+                    unit_input=u_in,
+                    unit_output=u_out,
+                    unit_cache_hit=u_hit,
                     finish_reason=finish_reason,
                     is_empty=is_empty,
                 )
             )
             await db.commit()
+            return {"cost_yuan": cost, "price_tier": tier}
     except Exception as e:  # noqa: BLE001 埋点绝不阻断主流程
         logger.warning("llm 埋点失败: %s", str(e)[:200])
+        return None
 
 
 def _window_start(window: str) -> datetime | None:
@@ -328,3 +386,162 @@ async def ai_usage_stats(db: AsyncSession, window: str = "7d") -> dict:
         "by_day": by_day,
         "recent": recent,
     }
+
+
+_HEALTH_WINDOWS = {"24h": timedelta(hours=24), "7d": timedelta(days=7)}
+
+
+async def llm_health(db: AsyncSession, window: str = "24h") -> dict:
+    """模型健康：正常率（stop 且非空，互斥口径）/ 空回答 / 异常 / 平均延迟 / 缓存命中率。
+    SQLite 对 Boolean 求和会被 SQLAlchemy 按 Boolean 解码——必须 case 转 Integer。"""
+    delta = _HEALTH_WINDOWS.get(window, timedelta(hours=24))
+    start = datetime.now(timezone.utc) - delta
+    cond = [LlmCallEvent.created_at >= start]
+
+    row = (
+        await db.execute(
+            select(
+                func.count(LlmCallEvent.id),
+                func.sum(
+                    case(
+                        (and_(LlmCallEvent.finish_reason == "stop", LlmCallEvent.is_empty.is_(False)), 1),
+                        else_=0,
+                    )
+                ),
+                func.sum(case((LlmCallEvent.is_empty.is_(True), 1), else_=0)),
+                func.sum(case((LlmCallEvent.finish_reason.is_(None), 1), else_=0)),
+                func.avg(case((LlmCallEvent.ttft_ms > 0, LlmCallEvent.ttft_ms), else_=None)),
+                func.avg(case((LlmCallEvent.total_ms > 0, LlmCallEvent.total_ms), else_=None)),
+                func.coalesce(func.sum(LlmCallEvent.cache_hit_tokens), 0),
+                func.coalesce(func.sum(LlmCallEvent.cache_miss_tokens), 0),
+            ).where(*cond)
+        )
+    ).one()
+    total, healthy, empty, failed, avg_ttft, avg_total, hit, miss = row
+    total = total or 0
+    healthy = int(healthy or 0)
+
+    by_feature = [
+        {"feature": f, "total": t, "healthy": int(h or 0), "empty": int(e or 0), "failed": int(x or 0)}
+        for f, t, h, e, x in (
+            await db.execute(
+                select(
+                    LlmCallEvent.feature,
+                    func.count(LlmCallEvent.id),
+                    func.sum(
+                        case(
+                            (and_(LlmCallEvent.finish_reason == "stop", LlmCallEvent.is_empty.is_(False)), 1),
+                            else_=0,
+                        )
+                    ),
+                    func.sum(case((LlmCallEvent.is_empty.is_(True), 1), else_=0)),
+                    func.sum(case((LlmCallEvent.finish_reason.is_(None), 1), else_=0)),
+                )
+                .where(*cond)
+                .group_by(LlmCallEvent.feature)
+            )
+        ).all()
+    ]
+
+    hit, miss = int(hit or 0), int(miss or 0)
+    return {
+        "window": window,
+        "total": total,
+        "healthy": healthy,
+        "healthy_rate": round(healthy / total * 100, 1) if total else None,
+        "empty": int(empty or 0),
+        "failed": int(failed or 0),
+        "avg_ttft_ms": int(avg_ttft) if avg_ttft else None,
+        "avg_total_ms": int(avg_total) if avg_total else None,
+        "cache_hit_rate": round(hit / (hit + miss) * 100, 1) if (hit + miss) else None,
+        "by_feature": by_feature,
+    }
+
+
+def _event_out(e: LlmCallEvent, ctx: dict | None = None) -> dict:
+    return {
+        "id": e.id,
+        "created_at": e.created_at.isoformat() if e.created_at else None,
+        "feature": e.feature,
+        "model": e.model,
+        "context": ctx or None,
+        "prompt_tokens": e.prompt_tokens,
+        "completion_tokens": e.completion_tokens,
+        "cache_hit_tokens": e.cache_hit_tokens,
+        "cache_miss_tokens": e.cache_miss_tokens,
+        "reasoning_tokens": e.reasoning_tokens,
+        "ttft_ms": e.ttft_ms,
+        "think_ms": e.think_ms,
+        "total_ms": e.total_ms,
+        "cost_yuan": e.cost_yuan,
+        "price_tier": e.price_tier or "",
+        "finish_reason": e.finish_reason,
+        "is_empty": e.is_empty,
+    }
+
+
+async def _resolve_contexts(db: AsyncSession, events: list[LlmCallEvent]) -> dict[int, dict]:
+    """批量解析业务上下文：assignment_id → 班级+unit_label+批次码；student_id → 学生名+学生码。"""
+    ctx: dict[int, dict] = {}
+    aids = {e.assignment_id for e in events if e.assignment_id}
+    sids = {e.student_id for e in events if e.student_id}
+    amap: dict[int, dict] = {}
+    if aids:
+        rows = (
+            await db.execute(
+                select(Assignment, Class)
+                .join(Class, Assignment.class_id == Class.id)
+                .where(Assignment.id.in_(aids))
+            )
+        ).all()
+        for a, c in rows:
+            amap[a.id] = {"kind": "assignment", "label": f"{c.name} {a.unit_label}", "code": a.code or ""}
+    smap: dict[int, dict] = {}
+    if sids:
+        for s in (await db.execute(select(Student).where(Student.id.in_(sids)))).scalars().all():
+            smap[s.id] = {"kind": "student", "label": s.name, "code": s.code or ""}
+    out: dict[int, dict] = {}
+    for e in events:
+        if e.assignment_id and e.assignment_id in amap:
+            out[e.id] = amap[e.assignment_id]
+        elif e.student_id and e.student_id in smap:
+            out[e.id] = smap[e.student_id]
+    return out
+
+
+async def llm_calls_list(
+    db: AsyncSession, window: str = "7d", feature: str = "", limit: int = 100
+) -> list[dict]:
+    """调用明细列表（时间倒序），带业务上下文（名字+编号）。"""
+    start = _window_start(window)
+    cond = []
+    if start is not None:
+        cond.append(LlmCallEvent.created_at >= start)
+    if feature:
+        cond.append(LlmCallEvent.feature == feature)
+    events = (
+        await db.execute(
+            select(LlmCallEvent)
+            .where(*cond)
+            .order_by(LlmCallEvent.id.desc())
+            .limit(min(limit, 500))
+        )
+    ).scalars().all()
+    ctxs = await _resolve_contexts(db, events)
+    return [_event_out(e, ctxs.get(e.id)) for e in events]
+
+
+async def llm_call_detail(db: AsyncSession, call_id: int) -> dict | None:
+    """单次调用详情（消费单）：含结算单价快照，改价后仍能精确还原发票行。"""
+    e = await db.get(LlmCallEvent, call_id)
+    if e is None:
+        return None
+    ctxs = await _resolve_contexts(db, [e])
+    out = _event_out(e, ctxs.get(e.id))
+    out["unit_input"] = e.unit_input
+    out["unit_output"] = e.unit_output
+    out["unit_cache_hit"] = e.unit_cache_hit
+    out["uid"] = e.uid
+    out["assignment_id"] = e.assignment_id
+    out["student_id"] = e.student_id
+    return out

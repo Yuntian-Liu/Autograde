@@ -135,6 +135,10 @@ export const adminApi = {
   overview: () => apiGet("/admin/overview"),
   lookup: (code) => apiGet(`/admin/lookup?code=${encodeURIComponent(code)}`),
   aiUsage: (window) => apiGet(`/admin/ai-usage?window=${encodeURIComponent(window)}`),
+  llmHealth: (window) => apiGet(`/admin/llm-health?window=${encodeURIComponent(window)}`),
+  llmCalls: (window, feature = "") =>
+    apiGet(`/admin/llm-calls?window=${encodeURIComponent(window)}&feature=${encodeURIComponent(feature)}`),
+  llmCallDetail: (id) => apiGet(`/admin/llm-calls/${id}`),
   getPrices: () => apiGet("/admin/ai-prices"),
   setPrices: (prices) => apiPut("/admin/ai-prices", prices),
   security: () => apiGet("/admin/security-status"),

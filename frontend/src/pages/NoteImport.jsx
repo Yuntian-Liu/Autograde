@@ -390,7 +390,7 @@ export default function NoteImport() {
   return (
     <div className="page-enter">
       <AppHeader crumbs={[{ label: "工作台", to: "/" }, { label: "笔记库", to: "/notes" }, { label: "批量导入" }]} />
-      <div className="wrap">
+      <div className="wrap wrap-wide">
         <Link className="back" to="/notes">
           ← 笔记库
         </Link>

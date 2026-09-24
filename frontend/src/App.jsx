@@ -4,6 +4,7 @@ import Dashboard from "./pages/Dashboard";
 import ClassDetail from "./pages/ClassDetail";
 import ClassStats from "./pages/ClassStats";
 import StudentDetail from "./pages/StudentDetail";
+import ReportDetail from "./pages/ReportDetail";
 import AssignmentDetail from "./pages/AssignmentDetail";
 import Grading from "./pages/Grading";
 import QuestionBatchEdit from "./pages/QuestionBatchEdit";
@@ -37,6 +38,20 @@ function RequireAuth({ children, adminOnly = false }) {
   return children;
 }
 
+// 壳层宽度路由映射：表格/工作台型页面放宽，阅读型收窄，全屏页不约束。
+// 宽度由持久壳层 .shell 承载并过渡（max-width 480ms），页面切换不生硬跳变。
+function shellWidthClass(pathname) {
+  if (pathname.startsWith("/grading") || pathname.startsWith("/login")) return "w-fluid";
+  if (pathname.startsWith("/admin")) return "w-wide";
+  if (pathname === "/notes/import") return "w-wide";
+  if (/^\/notes\/\d+/.test(pathname)) return "w-narrow";
+  if (/^\/classes\/\d+\/stats/.test(pathname)) return "w-wide";
+  if (/^\/classes\/\d+\/students\/\d+\/reports\//.test(pathname)) return "w-narrow";
+  if (/^\/assignments\/[^/]+\/(edit|quick)/.test(pathname)) return "w-wide";
+  if (/^\/assignments\//.test(pathname)) return "w-wide";
+  return "w-default";
+}
+
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -61,6 +76,9 @@ export default function App() {
     <>
       {/* 登录后更新提醒：版本更新 + 协议变更（未登录不弹，注册时已同意） */}
       {user && <UpdateModals />}
+      {/* 持久壳层承载页面宽度：路由切换时 max-width 丝滑过渡（照 Stellaris），
+          页面自身 .wrap 不再各自跳宽 */}
+      <div className={`shell ${shellWidthClass(location.pathname)}`}>
       <Routes>
       <Route path="/login" element={<Login />} />
       <Route
@@ -92,6 +110,14 @@ export default function App() {
         element={
           <RequireAuth>
             <StudentDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/classes/:classId/students/:studentId/reports/:reportId"
+        element={
+          <RequireAuth>
+            <ReportDetail />
           </RequireAuth>
         }
       />
@@ -170,6 +196,7 @@ export default function App() {
       {/* 兜底：未知路径回工作台 */}
       <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </div>
     </>
   );
 }

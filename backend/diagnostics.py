@@ -14,9 +14,9 @@ import platform
 import re
 import sys
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import config
@@ -26,6 +26,7 @@ from rating import DEFAULT_THRESHOLDS, get_thresholds
 from database import DATABASE_PATH
 from llm_events_store import get_prices
 from models import (
+    AbilityReport,
     Assignment,
     Class,
     ClientEvent,
@@ -41,9 +42,9 @@ from models import (
     Submission,
 )
 
-APP_VERSION = "0.14.1"
+APP_VERSION = "0.15.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
-AGREEMENT_VERSION = "2026-09-19"
+AGREEMENT_VERSION = "2026-09-24"
 _STARTED_AT = datetime.now(timezone.utc)
 
 MAX_LOG_ENTRIES = 500
@@ -113,9 +114,17 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
             "id": e.id,
             "feature": e.feature,
             "assignment_id": e.assignment_id,
+            "student_id": e.student_id,
             "model": e.model,
             "prompt_tokens": e.prompt_tokens,
             "completion_tokens": e.completion_tokens,
+            # 缓存拆分与延迟（V0.15.0）：模型慢/超时/成本异常排查的直接证据
+            "cache_hit_tokens": e.cache_hit_tokens,
+            "cache_miss_tokens": e.cache_miss_tokens,
+            "reasoning_tokens": e.reasoning_tokens,
+            "ttft_ms": e.ttft_ms,
+            "think_ms": e.think_ms,
+            "total_ms": e.total_ms,
             "cost_yuan": e.cost_yuan,
             "price_tier": e.price_tier,
             "finish_reason": e.finish_reason,
@@ -167,6 +176,39 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
         )
     ).all()
     llm_by_feature = {feature: n for feature, n in llm_feature_rows}
+
+    # LLM 24h 健康聚合（V0.15.0）：「模型是不是出问题了」类报障的直接证据——
+    # 正常率/空回答/异常/平均延迟/缓存命中率，只看诊断包不用登管理后台
+    llm24_start = datetime.now(timezone.utc) - timedelta(hours=24)
+    t24, h24, e24, f24, ttft24, total24, hit24, miss24 = (
+        await db.execute(
+            select(
+                func.count(LlmCallEvent.id),
+                func.sum(
+                    case(
+                        (and_(LlmCallEvent.finish_reason == "stop", LlmCallEvent.is_empty.is_(False)), 1),
+                        else_=0,
+                    )
+                ),
+                func.sum(case((LlmCallEvent.is_empty.is_(True), 1), else_=0)),
+                func.sum(case((LlmCallEvent.finish_reason.is_(None), 1), else_=0)),
+                func.avg(case((LlmCallEvent.ttft_ms > 0, LlmCallEvent.ttft_ms), else_=None)),
+                func.avg(case((LlmCallEvent.total_ms > 0, LlmCallEvent.total_ms), else_=None)),
+                func.coalesce(func.sum(LlmCallEvent.cache_hit_tokens), 0),
+                func.coalesce(func.sum(LlmCallEvent.cache_miss_tokens), 0),
+            ).where(LlmCallEvent.uid == user.uid, LlmCallEvent.created_at >= llm24_start)
+        )
+    ).one()
+    hit24, miss24 = int(hit24 or 0), int(miss24 or 0)
+    llm_health_24h = {
+        "total": t24 or 0,
+        "healthy_rate": round(int(h24 or 0) / t24 * 100, 1) if t24 else None,
+        "empty": int(e24 or 0),
+        "failed": int(f24 or 0),
+        "avg_ttft_ms": int(ttft24) if ttft24 else None,
+        "avg_total_ms": int(total24) if total24 else None,
+        "cache_hit_rate": round(hit24 / (hit24 + miss24) * 100, 1) if (hit24 + miss24) else None,
+    }
 
     # 编码序号计数器是全站总量（平台规模信息，隐私收敛）：仅 admin 的导出包带当前值；
     # seq > 有码数 = 删号退役（正常），seq < 有码数 = 计数器被重置（bug）
@@ -315,6 +357,15 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                     .where(Class.owner_uid == user.uid)
                 )
             ).scalar_one(),
+            # 能力报告（V0.15.0）：存档数 + 生成失败排查配合 llm feature=ability_report 看
+            "ability_reports": (
+                await db.execute(
+                    select(func.count(AbilityReport.id))
+                    .join(Student, AbilityReport.student_id == Student.id)
+                    .join(Class, Student.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid)
+                )
+            ).scalar_one(),
             "submissions_by_status": submissions_by_status,
             # 预习功能（V0.11.0）：答题卡已录的批次数 / 有预习错题登记的提交数（排查预习联动问题）
             "preview_answered_assignments": (
@@ -339,6 +390,7 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                 )
             ).scalar_one(),
             "llm_call_events_by_feature": llm_by_feature,
+            "llm_health_24h": llm_health_24h,
             "notes": (
                 await db.execute(select(func.count(Note.id)).where(Note.owner_uid == user.uid))
             ).scalar_one(),

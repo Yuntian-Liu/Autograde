@@ -192,7 +192,7 @@ export default function AssignmentDetail() {
           { label: `${assignment.unit_label} ${assignment.content}`.trim() },
         ]}
       />
-      <div className="wrap">
+      <div className="wrap wrap-wide">
         <Link className="back" to={c ? `/classes/${c.id}` : "/"}>
           <IconChevronLeft />{c ? `${seriesLabel(c.series)} ${c.name}` : "返回"}
         </Link>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Modal } from "antd";
 import { AGREEMENT_VERSION, getLatestUpdate } from "../legal/changelog";
+import AgreementModal from "./AgreementModal";
 import { IconDoc, IconHistory } from "./icons";
 
 // 登录后更新提醒（机制自 Stellaris 移植，UI 按 Autograde 令牌重做）
@@ -12,9 +12,9 @@ const UPDATE_KEY = "autograde_last_seen_version";
 const AGREEMENT_KEY = "autograde_last_seen_agreement";
 
 export default function UpdateModals() {
-  const navigate = useNavigate();
   const [updateInfo, setUpdateInfo] = useState(null);
   const [showAgreement, setShowAgreement] = useState(false);
+  const [showLegal, setShowLegal] = useState(false);
 
   // 启动检查：版本更新优先，关闭后串联检查协议更新
   useEffect(() => {
@@ -44,9 +44,10 @@ export default function UpdateModals() {
     setShowAgreement(false);
   }
 
+  // 查看协议：当前页原地弹窗，不把用户拽去设置页
   function viewAgreement() {
     closeAgreement();
-    navigate("/settings", { state: { openLegal: true } });
+    setShowLegal(true);
   }
 
   return (
@@ -94,6 +95,8 @@ export default function UpdateModals() {
           </div>
         </div>
       </Modal>
+
+      <AgreementModal open={showLegal} onClose={() => setShowLegal(false)} />
     </>
   );
 }

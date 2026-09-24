@@ -25,7 +25,7 @@ from auth.router import router as auth_router
 from auth.utils import check_captcha_rate, get_client_ip
 from database import get_db, init_db
 from diagnostics import APP_VERSION, attach_log_buffer, build_diagnostics
-from routers import admin, ai, assignments, classes, client_log, health, notes, phrases, questions, students
+from routers import ability, admin, ai, assignments, classes, client_log, health, notes, phrases, questions, students
 
 load_dotenv()
 
@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Autograde", version="0.14.1", lifespan=lifespan)
+app = FastAPI(title="Autograde", version="0.15.0", lifespan=lifespan)
 
 # GZip：JS/CSS/JSON 压缩传输（1.8MB bundle → 约 450KB）
 from fastapi.middleware.gzip import GZipMiddleware
@@ -125,6 +125,8 @@ app.include_router(students.router)
 app.include_router(assignments.router)
 app.include_router(questions.router)
 app.include_router(ai.router)
+app.include_router(ability.router)
+app.include_router(ability.reports_router)
 app.include_router(phrases.router)
 app.include_router(notes.router)
 app.include_router(client_log.router)

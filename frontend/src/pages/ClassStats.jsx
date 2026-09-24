@@ -96,7 +96,7 @@ export default function ClassStats() {
           { label: "班级统计" },
         ]}
       />
-      <div className="wrap">
+      <div className="wrap wrap-wide">
         <Link className="back" to={`/classes/${c.id}`}>
           <IconChevronLeft />返回班级
         </Link>

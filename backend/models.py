@@ -195,6 +195,19 @@ class LlmCallEvent(Base):
     price_tier: Mapped[str] = mapped_column(String(8), default="")  # peak / offpeak；空 = 峰谷引入前的旧行
     finish_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)  # None=调用异常
     is_empty: Mapped[bool] = mapped_column(Boolean, default=False)  # 正文 0 字符
+    # DeepSeek 缓存拆分（V0.15.0）：命中部分按 cache_hit 价结算；无拆分字段时全按未命中兜底
+    cache_hit_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_miss_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    reasoning_tokens: Mapped[int] = mapped_column(Integer, default=0)  # 思考 token（计入输出计费，单列观测）
+    # 延迟三指标（毫秒）：ttft=首个 chunk / think=开始→首个正文 delta / total=全程；非流式只有 total
+    ttft_ms: Mapped[int] = mapped_column(Integer, default=0)
+    think_ms: Mapped[int] = mapped_column(Integer, default=0)
+    total_ms: Mapped[int] = mapped_column(Integer, default=0)
+    student_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 能力报告业务关联
+    # 结算时单价快照（发票原则：改价后旧消费单仍能精确还原）
+    unit_input: Mapped[float] = mapped_column(Float, default=0.0)
+    unit_output: Mapped[float] = mapped_column(Float, default=0.0)
+    unit_cache_hit: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
@@ -233,6 +246,33 @@ class NoteImage(Base):
     owner_uid: Mapped[int] = mapped_column(Integer, index=True)
     key: Mapped[str] = mapped_column(String(256), unique=True)  # COS 对象 key
     size: Mapped[int] = mapped_column(Integer, default=0)  # 字节
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class AbilityReport(Base):
+    """AI 学生能力分析报告：六维分数 + 维度细析 + 证据引用。
+
+    生成走任务制草稿（不落库），人工编辑定稿后才写入本表；
+    存档即冻结——不提供任何更新/删除接口，历次报告可回看对比。
+    """
+
+    __tablename__ = "ability_reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"))
+    range_start: Mapped[str] = mapped_column(String(10), default="")  # ISO 日期，空 = 全部历史
+    range_end: Mapped[str] = mapped_column(String(10), default="")
+    assignment_count: Mapped[int] = mapped_column(Integer, default=0)  # 数据范围内作业次数
+    scores: Mapped[str] = mapped_column(Text, default="")  # JSON：六维 key → 0-100
+    dimensions: Mapped[str] = mapped_column(Text, default="")  # JSON 数组：细析 + 子标签 + 证据
+    overall: Mapped[str] = mapped_column(Text, default="")  # 总评
+    suggestions: Mapped[str] = mapped_column(Text, default="")  # 教学建议
+    # 生成消耗（存进报告便于回溯成本；V0.15.0 增补，自愈补列）
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    elapsed_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    cost_yuan: Mapped[float] = mapped_column(Float, default=0.0)  # 生成这次报告的结算成本
+    price_tier: Mapped[str] = mapped_column(String(8), default="")  # peak / offpeak
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
