@@ -1,10 +1,10 @@
 // 版本日志数据源（设置页「版本日志」弹窗 + 登录后更新提醒弹窗；发版时与 CHANGELOG.md 同步）
 // 结构：minor 为主条目，patch 嵌套在 patches 数组里（主界面只呈现 minor，展开后见 patch）
 // ⚠️ 公开文件：不得出现私人信息
-export const APP_VERSION = "V0.15.0";
+export const APP_VERSION = "V0.16.0";
 
 /** 协议版本（用户协议/隐私政策最后更新日期，改协议时同步递增；触发登录后协议变更提醒） */
-export const AGREEMENT_VERSION = "2026-09-24";
+export const AGREEMENT_VERSION = "2026-09-24.2";
 
 /** 取全站最新更新条目（最新 minor 有 patch 取最新 patch，否则取最新 minor） */
 export function getLatestUpdate() {
@@ -18,6 +18,14 @@ export function getLatestUpdate() {
 }
 
 export const CHANGELOG = [
+  {
+    version: "V0.16.0",
+    date: "2026-09-24",
+    items: [
+      "新功能「AI 助教」：批改与快捷批改页面右下角的浮窗助手——可自由拖拽、悬浮出现关闭小叉、重新进页面自动回来；点开即聊，回答流式逐字出现，每条回答带用时、tokens 与成本（峰/谷），全部计入管理后台「模型调用」的消费单",
+      "助教回答支持排版渲染：加粗、列表、表格、代码块、LaTeX 公式（如 E=mc² 直接渲染成公式），阅读体验与正文一致",
+    ],
+  },
   {
     version: "V0.15.0",
     date: "2026-09-24",

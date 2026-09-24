@@ -376,11 +376,49 @@ async def analyze_ability_stream(student_name: str, class_label: str, evidence_t
     }
 
 
+async def chat_stream(messages: list[dict]) -> AsyncGenerator[dict, None]:
+    """AI 助教通用问答：流式直答，无 system 角色设定（碳碳定：单纯接入模型能力）。
+    内容安全由模型侧承担；计时/用量/缓存拆分与全站 AI 调用同口径。"""
+    client = _client(max_retries=0)
+    stream = await client.chat.completions.create(
+        model=_model(),
+        messages=[{"role": m["role"], "content": m["content"]} for m in messages],
+        temperature=0.7,
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+    usage = None
+    finish_reason = None
+    text_chars = 0
+    timer = _StreamTimer()
+    async for chunk in stream:
+        if chunk.choices:
+            fr = chunk.choices[0].finish_reason
+            if fr:
+                finish_reason = fr
+            timer.on_chunk(chunk.choices[0].delta)
+            delta = chunk.choices[0].delta.content
+            if delta:
+                text_chars += len(delta)
+                yield {"type": "delta", "text": delta}
+        u = _usage_dict(chunk)
+        if u:
+            usage = u
+    yield {
+        "type": "done",
+        "usage": usage,
+        "finish_reason": finish_reason,
+        "text_chars": text_chars,
+        "metrics": timer.metrics(),
+    }
+
+
 __all__ = [
     "AIParseError",
     "APITimeoutError",
     "AIUnavailable",
     "analyze_ability_stream",
+    "chat_stream",
     "draft_explanation",
     "ensure_available",
     "parse_questions_stream",

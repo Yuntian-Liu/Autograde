@@ -178,6 +178,7 @@ const FEATURE_LABELS = {
   parse_questions: "AI 录题",
   draft_explanation: "讲解起草",
   ability_report: "能力报告",
+  chat: "AI 助教",
 };
 
 function TierTag({ tier }) {
@@ -578,6 +579,7 @@ function LlmPanel() {
             { value: "parse_questions", label: "AI 录题" },
             { value: "draft_explanation", label: "讲解起草" },
             { value: "ability_report", label: "能力报告" },
+            { value: "chat", label: "AI 助教" },
           ]}
         />
       </div>

@@ -12,6 +12,7 @@ import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +21,7 @@ from ai import (
     AIParseError,
     APITimeoutError,
     AIUnavailable,
+    chat_stream,
     draft_explanation,
     ensure_available,
     parse_questions_stream,
@@ -147,6 +149,91 @@ async def get_parse_job(job_id: str, user: User = Depends(get_current_user)) -> 
     elif job["status"] == "error":
         out["error"] = job["error"]
     return out
+
+
+class ChatIn(BaseModel):
+    messages: list[dict] = Field(..., max_length=20)
+    assignment_id: int | None = None  # 仅成本归属上下文，不进 prompt（盲答原则）
+
+
+@router.post("/chat")
+async def chat_api(body: ChatIn, user: User = Depends(get_current_user)):
+    """AI 助教浮窗问答（SSE 流式）：通用问答无角色设定，ESA 对持续字节流不掐。"""
+    msgs = []
+    for m in body.messages:
+        role = m.get("role")
+        content = str(m.get("content", ""))
+        if role not in ("user", "assistant"):
+            raise HTTPException(status_code=400, detail="消息角色非法")
+        if not content.strip() or len(content) > 4000:
+            raise HTTPException(status_code=400, detail="消息为空或超长")
+        msgs.append({"role": role, "content": content})
+    if not msgs or msgs[-1]["role"] != "user":
+        raise HTTPException(status_code=400, detail="最后一条必须是提问")
+    if not check_ai_rate(user.uid):
+        raise HTTPException(status_code=429, detail=AI_RATE_HINT)
+    if body.assignment_id is not None:
+        from database import SessionLocal
+
+        async with SessionLocal() as db:
+            await owned_assignment(db, body.assignment_id, user)
+    try:
+        ensure_available()
+    except AIUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+    async def gen():
+        usage = None
+        finish_reason = None
+        text_chars = 0
+        metrics: dict = {}
+        try:
+            async for event in chat_stream(msgs):
+                if event["type"] == "delta":
+                    yield f"data: {json.dumps({'type': 'delta', 'text': event['text']}, ensure_ascii=False)}\n\n"
+                elif event["type"] == "done":
+                    usage = event["usage"]
+                    finish_reason = event["finish_reason"]
+                    text_chars = event["text_chars"]
+                    metrics = event.get("metrics") or {}
+                    settle = await record_llm_call(
+                        uid=user.uid,
+                        feature="chat",
+                        model=ai_model(),
+                        prompt_tokens=(usage or {}).get("prompt_tokens", 0),
+                        completion_tokens=(usage or {}).get("completion_tokens", 0),
+                        finish_reason=finish_reason,
+                        is_empty=text_chars == 0,
+                        assignment_id=body.assignment_id,
+                        cache_hit_tokens=(usage or {}).get("cache_hit_tokens", 0),
+                        cache_miss_tokens=(usage or {}).get("cache_miss_tokens", 0),
+                        reasoning_tokens=(usage or {}).get("reasoning_tokens", 0),
+                        **{k: metrics.get(k, 0) for k in ("ttft_ms", "think_ms", "total_ms")},
+                    )
+                    payload = {
+                        "type": "done",
+                        "usage": usage or {},
+                        "metrics": metrics,
+                        "cost_yuan": (settle or {}).get("cost_yuan", 0),
+                        "price_tier": (settle or {}).get("price_tier", ""),
+                    }
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        except Exception as e:  # 流中断：落一条失败埋点 + 给前端可读错误帧
+            logging.getLogger("autograde.ai").warning("chat 流异常: %s", str(e)[:200])
+            await record_llm_call(
+                uid=user.uid,
+                feature="chat",
+                model=ai_model(),
+                prompt_tokens=(usage or {}).get("prompt_tokens", 0),
+                completion_tokens=(usage or {}).get("completion_tokens", 0),
+                finish_reason=finish_reason,
+                is_empty=text_chars == 0,
+                assignment_id=body.assignment_id,
+            )
+            hint = "AI 响应超时，请重试" if isinstance(e, APITimeoutError) else "AI 服务异常，请重试"
+            yield f"data: {json.dumps({'type': 'error', 'message': hint}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 class DraftExplanationIn(BaseModel):

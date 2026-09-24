@@ -6,6 +6,7 @@ import { apiGet, apiPatch, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
 import CodeChip from "../components/CodeChip";
 import Confetti from "../components/Confetti";
+import AIFloat from "../components/AIFloat";
 import SaveStatus from "../components/SaveStatus";
 import QuestionEditor from "../components/QuestionEditor";
 import {
@@ -657,6 +658,7 @@ export default function Grading() {
   return (
     <div className="page-enter">
       {celebrate && <Confetti />}
+      <AIFloat assignmentId={assignment.id} />
       <AppHeader
         compact
         crumbs={[

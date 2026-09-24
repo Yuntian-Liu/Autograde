@@ -4,6 +4,7 @@ import { Link, useBlocker, useNavigate, useParams } from "react-router-dom";
 import { App as AntApp } from "antd";
 import { apiGet, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
+import AIFloat from "../components/AIFloat";
 import Confetti from "../components/Confetti";
 import SaveStatus from "../components/SaveStatus";
 import PageSkeleton from "../components/PageSkeleton";
@@ -261,6 +262,7 @@ export default function QuickGrade() {
         ]}
       />
       <div className="wrap wrap-wide">
+        <AIFloat assignmentId={assignment.id} />
         <Link className="back" to={`/assignments/${assignment.slug || assignment.id}`}>
           <IconChevronLeft />返回批次
         </Link>
