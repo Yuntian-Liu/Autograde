@@ -228,9 +228,9 @@ async def get_assignment_students(
         error_notes = {str(er.question_id): er.note for er in error_rows if er.note}
 
         # 历史分数：本班其他批次中已批改/缺作业的分数，按课次倒序
-        history_scores = (
+        history_rows = (
             await db.execute(
-                select(Submission.score)
+                select(Submission.score, Assignment.unit_label)
                 .join(Assignment, Submission.assignment_id == Assignment.id)
                 .where(
                     Submission.student_id == s.id,
@@ -240,10 +240,15 @@ async def get_assignment_students(
                 )
                 .order_by(Assignment.lesson_no.desc())
             )
-        ).scalars().all()
+        ).all()
+        history_scores = [r[0] for r in history_rows]
         recent = [float(x) for x in history_scores[:5]]
         recent_avg_5 = round(sum(recent) / len(recent), 2) if recent else None
         last_score = round(float(history_scores[0]), 2) if history_scores else None
+        # 近 3 次逐条（快捷批改学生名悬浮用）
+        recent_scores = [
+            {"unit_label": lbl, "score": round(float(sc), 2)} for sc, lbl in history_rows[:3]
+        ]
 
         # 历史薄弱板块：按错题数取前 3
         weak_rows = (
@@ -267,6 +272,7 @@ async def get_assignment_students(
                 "feedback_text": latest_snapshots.get(s.id),
                 "recent_avg_5": recent_avg_5,
                 "last_score": last_score,
+                "recent_scores": recent_scores,
                 "weak_sections": weak_sections,
             }
         )

@@ -57,14 +57,27 @@ def _model() -> str:
 _PARSE_SYSTEM = """你是英语助教的题库录入助手。用户会粘贴一段从机构 PDF/Word 转换而来的作业答案原文，请把它结构化为严格 JSON。
 
 要求：
-1. 按原文板块分组；板块名逐字照抄原文的板块标题行（如 "Task 1 Vocabulary"、"Task 4 · Grammar"），原文标题行什么样就抄什么样——禁止翻译、改写、合并或自行美化板块名
+1. 按原文板块分组；板块名逐字照抄原文的板块标题行（如 "Task 1 Vocabulary"、"Task 4 · Grammar"），原文标题行什么样就抄什么样——禁止翻译、改写、合并或自行美化板块名。板块名必须是单行：标题占两行时（如 "Task 1" 与 "Section: Vocabulary" 分两行）并成一行，换行替换为空格
 2. 题号照抄原文：seq 必须逐字使用原文中该题的真实题号，原文标几就写几，禁止重新编号。同一大板块拆成 A/B 等子板块时题号保持原文连续——如 Vocabulary A 是原文 1-5 题、Vocabulary B 是原文 6-8 题，则 A 的 seq 是 1-5、B 的 seq 是 6-8（禁止把 B 重编成 1-3）。仅当原文完全没有题号时，才按板块内从 1 开始顺序编号
 3. 原文照抄原则：stem / standard_answer / explanation 必须逐字摘自原文，你只负责分块和归类——禁止改写、翻译、润色、补全、概括任何文字；拿不准的保留原文原样。「解析：」「答案：」「Tips：」这类字段前缀属于内容本身，必须原样保留——如原文是「解析：本句考查…」，explanation 必须以「解析：」开头，禁止因为"看起来像标签"就删掉
 4. 保留原文换行结构：stem / explanation 内部，凡语义独立的部分（如「词义：…」「句意：…」「Tip/小贴士：…」、分点说明）必须各占一行，JSON 字符串里用 \\n 表达，禁止把多行压成一段
    正例："词义：纪念碑，纪念像\\n句意：公园里有一座……\\n小贴士：先看空格前后词……"
    反例："词义：纪念碑，纪念像 句意：公园里有一座…… 小贴士：先看空格前后词……"（错误：三条压成一段）
 5. 你唯一允许删除的内容：机构水印、页眉页脚、联系方式、广告等与题目无关的行
-6. 每题输出字段：
+6. 板块名禁止为空：原文板块标题缺失时（如 Task 2 与 Task 4 之间夹着一个无标题板块），按 Task 编号上下文推断最小标题（如 "Task 3"），绝不留空 section；推断不出就并入相邻最近板块
+7. 完整收录铁律：原文的每一道题都必须收录，禁止因格式残缺、缺题号、换行错乱而丢弃任何题目。缺 "Question N" 行的题：seq 按前后题号推断补缺（如 1,2,?,4 → 补 3）；仅当整个板块完全无题号时才板块内从 1 编。输出前先数一遍原文题目数，输出题目总数必须与之一致
+   示例——原文：
+   Question 2
+   Question: Your desk is the (tidy) desk.
+   Answer: tidiest
+
+   Question: Ben and Bob are the (cute) rabbits.
+   Answer: cutest
+   Question 4
+   Question: This tablet is the (quick) one.
+   Answer: quickest
+   则中间无题号行的 Ben and Bob 题仍是一道题，seq 补 3，禁止跳过
+8. 每题输出字段：
    - seq：原文真实题号（照抄，见第 2 条）
    - stem：题干（原文没有题干则留空字符串）
    - options：选项数组，逐字照抄原文（如 ["A. forest", "B. river", "C. mountain"]；判断题 ["T", "F"]；填空/造句等无选项题型输出空数组 []）
@@ -73,7 +86,7 @@ _PARSE_SYSTEM = """你是英语助教的题库录入助手。用户会粘贴一�
    - mode：建议处理模式，三选一：
      verbatim=客观题且有解析可直出；ai_expand=有答案但无解析的造句/开放类；manual=答案为图片（连线/勾选等）或需人工个性化点评
    - score_weight：建议分值权重（1-10 的数字，按题目难度与题量估算，总和接近 100 为佳）
-7. 只输出 JSON，不要任何额外文字、注释或 Markdown 代码块
+9. 只输出 JSON，不要任何额外文字、注释或 Markdown 代码块
 
 输出格式：
 {"sections": [{"section": "板块名", "questions": [{"seq": 1, "stem": "", "options": [], "standard_answer": "", "explanation": "", "mode": "verbatim", "score_weight": 5.0}]}]}"""

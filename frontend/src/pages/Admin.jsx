@@ -5,6 +5,7 @@ import { App as AntApp, Input, InputNumber, Modal, Popconfirm, Segmented, Select
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { adminApi, apiDelete, apiGet, apiPost, apiPut, downloadBackup } from "../api";
 import AppHeader from "../components/AppHeader";
+import CodeChip from "../components/CodeChip";
 import PageSkeleton from "../components/PageSkeleton";
 import { RATING_THRESHOLDS } from "../rating";
 import { fmtBytes, fmtTime } from "../meta";
@@ -93,7 +94,7 @@ function LookupCard() {
       <div className="sec-title">编码速查</div>
       <div className="notes-toolbar">
         <Input
-          placeholder="输入业务编码，如 202603-W51-S00042-7"
+          placeholder="输入业务编码（学生 SID / 批次 AID / 笔记 NID）"
           value={code}
           onChange={(e) => setCode(e.target.value)}
           onPressEnter={search}
@@ -103,7 +104,28 @@ function LookupCard() {
           {busy ? "查询中…" : "查询"}
         </button>
       </div>
-      {result?.ok && (
+      {result?.ok && result.data.type === "note" && (
+        <div className="settings-row static" style={{ marginTop: "var(--s2)" }}>
+          <span>
+            笔记 · {result.data.label}
+            {result.data.archived
+              ? `（归档${result.data.legacy_name ? ` · ${result.data.legacy_name}` : ""}）`
+              : "（活跃）"}
+            <br />
+            {[
+              result.data.class_name,
+              result.data.student_name,
+              result.data.assignment_label,
+            ].filter(Boolean).join(" · ") || "游离笔记（无关联）"}
+          </span>
+          <span className="settings-value">
+            归属 UID {result.data.owner_uid}
+            {result.data.owner_nickname ? `（${result.data.owner_nickname}）` : ""} ·{" "}
+            <Link to={result.data.web_path}>跳转</Link>
+          </span>
+        </div>
+      )}
+      {result?.ok && result.data.type !== "note" && (
         <div className="settings-row static" style={{ marginTop: "var(--s2)" }}>
           <span>
             {result.data.type === "student" ? "学生" : "批次"} · {result.data.label}（
@@ -446,7 +468,7 @@ function CallReceiptModal({ detail, onClose }) {
         <div className="receipt-head">
           <div className="receipt-title">
             {detail.context ? detail.context.label : FEATURE_LABELS[detail.feature] || detail.feature}
-            {detail.context?.code && <span className="receipt-code">{detail.context.code}</span>}
+            {detail.context?.code && <CodeChip code={detail.context.code} />}
           </div>
           <div className="receipt-meta">
             {detail.model} · {fmtTime(detail.created_at)} · <TierTag tier={detail.price_tier} />
@@ -603,7 +625,7 @@ function LlmPanel() {
               r.context ? (
                 <span>
                   {r.context.label}
-                  {r.context.code && <span className="receipt-code">{r.context.code}</span>}
+                  {r.context.code && <CodeChip code={r.context.code} />}
                 </span>
               ) : (
                 "—"

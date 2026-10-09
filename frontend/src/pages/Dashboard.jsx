@@ -4,7 +4,7 @@ import { apiGet } from "../api";
 import AppHeader from "../components/AppHeader";
 import ClassForm from "../components/ClassForm";
 import PageSkeleton from "../components/PageSkeleton";
-import { classMeta, deadlineText, scoreTone, seriesLabel } from "../meta";
+import { classMeta, daysUntil, scoreTone, seriesLabel } from "../meta";
 
 function batchStatus(a) {
   if (a.status === "已完成") return <span className="status-done">已完成</span>;
@@ -12,11 +12,24 @@ function batchStatus(a) {
   return <span className="status-idle">{a.status}</span>;
 }
 
-function todoText(a) {
-  if (a.question_count === 0) return "题库待录入";
-  if (a.pending_count > 0) return `还有 ${a.pending_count} 人未批改`;
-  if (a.absent_count > 0) return `${a.absent_count} 人未交`;
-  return "待开始批改";
+// 看板行内待办摘要：题库/待批/未交 并列呈现（不再三选一）
+function boardText(a) {
+  const parts = [];
+  if (a.question_count === 0) parts.push("题库待录入");
+  if (a.pending_count > 0) parts.push(`待批 ${a.pending_count} 人`);
+  if (a.absent_count > 0) parts.push(`未交 ${a.absent_count} 人`);
+  return parts.length ? parts.join(" · ") : "待开始批改";
+}
+
+// 天数胶囊：已过期/≤1 天 红，≤3 天 橙，其余灰；无排课灰「未排课」
+function boardWhen(a) {
+  const days = daysUntil(a.class_time);
+  if (days === null) return { text: "未排课", cls: "todo" };
+  if (days < 0) return { text: `已上课 ${-days} 天`, cls: "miss" };
+  if (days === 0) return { text: "今天上课", cls: "miss" };
+  if (days === 1) return { text: "明天上课", cls: "miss" };
+  if (days <= 3) return { text: `距上课 ${days} 天`, cls: "lack" };
+  return { text: `距上课 ${days} 天`, cls: "todo" };
 }
 
 export default function Dashboard() {
@@ -26,7 +39,8 @@ export default function Dashboard() {
   const [classFormOpen, setClassFormOpen] = useState(false);
 
   const reload = useCallback(() => {
-    Promise.all([apiGet("/classes"), apiGet("/assignments?limit=6")])
+    // limit 放宽到 20：看板要覆盖远期已排课的未完成批次；「最近批次」前端截前 6 个
+    Promise.all([apiGet("/classes"), apiGet("/assignments?limit=20")])
       .then(([c, a]) => {
         setClasses(c);
         setRecent(a);
@@ -51,7 +65,12 @@ export default function Dashboard() {
       </div>
     );
 
-  const todos = recent.filter((a) => a.status !== "已完成");
+  // 批改看板：未完成批次按距上课天数升序（过期的最前，未排课垫底，保持原时间序）
+  const todos = recent
+    .filter((a) => a.status !== "已完成")
+    .map((a, i) => ({ a, i, d: daysUntil(a.class_time) }))
+    .sort((x, y) => (x.d ?? 9999) - (y.d ?? 9999) || x.i - y.i)
+    .map((t) => t.a);
 
   return (
     <div className="page-enter">
@@ -61,24 +80,25 @@ export default function Dashboard() {
 
         {todos.length > 0 && (
           <section className="block">
-            <div className="sec-title">待办</div>
-            {todos.map((a) => (
-              <Link
-                className="row"
-                key={a.id}
-                to={`/assignments/${a.slug || a.id}`}
-              >
-                <span className="todo-main">
-                  <b>
-                    {a.class ? `${seriesLabel(a.class.series)} ${a.class.name}` : ""} · {a.unit_label}
-                  </b>
-                  　{todoText(a)}
-                </span>
-                {deadlineText(a.class_time) && (
-                  <span className="todo-when">{deadlineText(a.class_time)}</span>
-                )}
-              </Link>
-            ))}
+            <div className="sec-title">批改看板</div>
+            {todos.map((a) => {
+              const when = boardWhen(a);
+              return (
+                <Link
+                  className="row"
+                  key={a.id}
+                  to={`/assignments/${a.slug || a.id}`}
+                >
+                  <span className="todo-main">
+                    <b>
+                      {a.class ? `${seriesLabel(a.class.series)} ${a.class.name}` : ""} · {a.unit_label}
+                    </b>
+                    　{boardText(a)}
+                  </span>
+                  <span className={`tag-pill ${when.cls}`}>{when.text}</span>
+                </Link>
+              );
+            })}
           </section>
         )}
 
@@ -135,7 +155,7 @@ export default function Dashboard() {
 
         <section className="block">
           <div className="sec-title">最近批次</div>
-          {recent.map((a) => (
+          {recent.slice(0, 6).map((a) => (
             <Link className="row" key={a.id} to={`/assignments/${a.slug || a.id}`}>
               <span className="row-name">
                 {a.unit_label} {a.content}

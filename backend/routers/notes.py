@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import get_current_user
 from auth.models import User
+from codes import issue_code
 from cos_store import (
     MAX_IMAGE_BYTES,
     cos_enabled,
@@ -40,6 +41,16 @@ def _title_of(content: str) -> str:
     return first.strip()[:128] or "无标题"
 
 
+def _plain(content: str) -> str:
+    """全文搜索用纯文本：剥图片占位符（防 COS key 污染匹配）+ 内联标记。"""
+    t = _IMG_MARK_RE.sub(" ", content or "")
+    prev = None
+    while prev != t:
+        prev = t
+        t = _INLINE_MARK_RE.sub(lambda m: next(g for g in m.groups() if g is not None), t)
+    return t.lower()
+
+
 def _excerpt(content: str) -> str:
     """列表摘要：跳过首行标题，取后续三行并保留换行（前端 pre-line + line-clamp 截断）。"""
     lines = [l.strip() for l in (content or "").split("\n")[1:] if l.strip()]
@@ -49,6 +60,7 @@ def _excerpt(content: str) -> str:
 def _note_brief(n: Note, names: dict, sizes: dict[int, int]) -> dict:
     return {
         "id": n.id,
+        "code": n.code,
         "title": n.title,
         "excerpt": _excerpt(n.content),
         "image_count": len(extract_image_keys(n.content)),
@@ -169,7 +181,7 @@ async def list_notes(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
-    """搜索（标题/学生名/归档备注）+ 班级筛选 + 归档过滤，时间倒序。"""
+    """搜索（标题/学生名/归档备注/编码/正文）+ 班级筛选 + 归档过滤，时间倒序。"""
     notes = (
         (
             await db.execute(
@@ -184,18 +196,21 @@ async def list_notes(
     if class_id is not None:
         notes = [n for n in notes if n.class_id == class_id]
     names = await _names_map(db, user.uid, notes)
-    sizes = await _sizes_map(db, notes)
-    briefs = [_note_brief(n, names, sizes) for n in notes]
     if q.strip():
         kw = q.strip().lower()
-        briefs = [
-            b
-            for b in briefs
-            if kw in b["title"].lower()
-            or (b["student_name"] and kw in b["student_name"].lower())
-            or (b["legacy_name"] and kw in b["legacy_name"].lower())
+        kw_flat = kw.replace("-", "")
+        stu_names = names.get("students", {})
+        notes = [
+            n
+            for n in notes
+            if kw in n.title.lower()
+            or (n.legacy_name and kw in n.legacy_name.lower())
+            or (stu_names.get(n.student_id) and kw in stu_names[n.student_id].lower())
+            or (n.code and (kw in n.code.lower() or (kw_flat and kw_flat in n.code.lower().replace("-", ""))))
+            or kw in _plain(n.content)
         ]
-    return briefs
+    sizes = await _sizes_map(db, notes)
+    return [_note_brief(n, names, sizes) for n in notes]
 
 
 class NoteCreate(BaseModel):
@@ -218,6 +233,7 @@ async def create_note(
         content=body.content,
         title=_title_of(body.content),
     )
+    n.code = await issue_code(db, "N", await db.get(Class, body.class_id) if body.class_id else None)
     db.add(n)
     await db.commit()
     await _reconcile_images(db, n)
@@ -260,6 +276,7 @@ async def bulk_create_notes(
                 archived=item.archived,
                 legacy_name=item.legacy_name.strip() if item.archived else "",
             )
+            n.code = await issue_code(db, "N", await db.get(Class, n.class_id) if n.class_id else None)
             db.add(n)
             await db.commit()
             await _reconcile_images(db, n)  # tmp key 归属对账到正式笔记

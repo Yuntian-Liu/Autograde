@@ -4,7 +4,7 @@ import { IconCopy } from "./icons";
 
 // 业务编码 chip：复制图标 + SID/AID 前缀（从码内类型字母推导）+ 等宽小字；点胶囊任意位置复制纯码。
 // 在 Link 内部使用时阻止冒泡/默认行为（复制不触发跳转）。无码（旧数据回填前）不渲染。
-const KIND_LABEL = { S: "SID", A: "AID" };
+const KIND_LABEL = { S: "SID", A: "AID", N: "NID" };
 
 export default function CodeChip({ code }) {
   const { message } = AntApp.useApp();

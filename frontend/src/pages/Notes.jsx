@@ -3,13 +3,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { App as AntApp, DatePicker, Input, Modal, Segmented, Select } from "antd";
 import { apiGet, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
+import CodeChip from "../components/CodeChip";
 import PageSkeleton from "../components/PageSkeleton";
 import { fmtBytes, fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
 import { renderNoteInline } from "../utils/noteFormat";
 import { copyNoteToWechat } from "../utils/wechatExport";
 
-// 笔记库：活跃/归档双区；搜索（学生名/标题/归档备注）+ 班级筛选 + 时间倒序卡片；新建可选关联，全不选即游离笔记
+// 笔记库：活跃/归档双区；搜索（学生名/标题/归档备注/编码/正文）+ 班级筛选 + 时间倒序卡片；新建可选关联，全不选即游离笔记
 // 搜索命中关键词在标题/摘要/关联行里主题色高亮
 function Hi({ text, kw }) {
   if (!kw || !text) return text;
@@ -170,7 +171,7 @@ export default function Notes() {
 
         <div className="notes-toolbar" style={{ marginTop: "var(--s3)" }}>
           <Input
-            placeholder={archived ? "搜索标题 / 归档备注" : "搜索学生名 / 标题"}
+            placeholder={archived ? "搜索标题 / 归档备注 / 正文 / 编码" : "搜索学生名 / 标题 / 正文 / 编码"}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             allowClear
@@ -213,6 +214,7 @@ export default function Notes() {
                 />
               )}
               <div className="note-card-meta">
+                <CodeChip code={n.code} />
                 <span className="meta-text">
                   <Hi
                     text={

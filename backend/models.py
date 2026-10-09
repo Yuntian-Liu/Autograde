@@ -225,6 +225,8 @@ class Note(Base):
     student_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     assignment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     title: Mapped[str] = mapped_column(String(128), default="")
+    # 业务编码（NID）：创建时发码终身不变；游离笔记前缀 X00 兜底；启动自愈回填存量
+    code: Mapped[str] = mapped_column(String(24), default="", index=True)
     content: Mapped[str] = mapped_column(Text, default="")
     # 用户手动编辑过（笔记编辑页 PATCH 即置位）后，批改联动永久脱钩不再覆盖
     user_edited: Mapped[bool] = mapped_column(Boolean, default=False)

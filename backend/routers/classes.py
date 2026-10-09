@@ -30,6 +30,8 @@ class StudentCreate(BaseModel):
 
 class StudentsBatchIn(BaseModel):
     names: list[str]  # 前端负责按行 split，这里收数组
+    # 重名处理：默认跳过（防重复粘贴名单）；前端弹窗让用户决定后传 true 照常录入（SID 区分）
+    allow_duplicates: bool = False
 
 
 class ClassCreate(BaseModel):
@@ -292,7 +294,8 @@ async def import_students(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """名单一键导入：逐行 trim、去空、输入内去重、与现有学生重名跳过。
+    """名单一键导入：逐行 trim、去空；allow_duplicates=false 时输入内去重、与现有学生重名跳过，
+    true 时重名照常录入（SID 区分，由前端弹窗让用户决定后传入）。
     编码在同一事务内连续取号——整批导入的学生码连号。"""
     c = await owned_class(db, class_id, user)
     existing = set(
@@ -307,7 +310,7 @@ async def import_students(
         name = raw.strip()
         if not name:
             continue
-        if name in seen or name in existing:
+        if not body.allow_duplicates and (name in seen or name in existing):
             skipped.append(name)
             continue
         seen.add(name)

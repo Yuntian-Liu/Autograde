@@ -852,6 +852,32 @@ a:hover .os-repo-link, .os-repo:hover .os-repo-link { text-decoration: underline
 .qg-rowhead { background: var(--bg-soft) !important; }
 .qg-cross { background: var(--accent-line); }
 .qg-cross .qg-cell { border-color: var(--accent); }
+
+/* 按题错误徽章：答案速查题号旁的实心小圆牌（--danger 底 + --surface 字） */
+.qg-heat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  flex: none;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 2px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: var(--surface);
+  font-size: calc(var(--t-micro) * 0.75);
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* 学生名悬浮：近 3 次分数 + 编码 + 跳转提示 */
+.qg-tip { display: flex; flex-direction: column; gap: 2px; }
+.qg-tip-row { display: flex; justify-content: space-between; gap: var(--s4); }
+.qg-tip-row b { font-family: var(--font-mono); }
+.qg-tip-code { font-family: var(--font-mono); font-size: var(--t-micro); opacity: 0.75; }
+.qg-tip-avg { font-size: var(--t-micro); opacity: 0.85; border-top: 1px dashed var(--line-strong); padding-top: 2px; margin-top: 2px; }
+.qg-tip-go { font-size: var(--t-micro); opacity: 0.6; }
 /* 轨道着色轻过渡，消除生硬跳变 */
 .qg-table td, .qg-table th { transition: background-color 90ms var(--ease), color 90ms var(--ease); }
 
@@ -1449,15 +1475,6 @@ mark.search-hit {
 .receipt { display: flex; flex-direction: column; gap: var(--s4); }
 .receipt-head { border-bottom: 1px solid var(--line); padding-bottom: var(--s3); }
 .receipt-title { font-size: var(--t-strong); font-weight: 600; display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
-.receipt-code {
-  font-family: var(--font-mono);
-  font-size: var(--t-micro);
-  color: var(--ink-3);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  padding: 0 5px;
-  margin-left: var(--s2);
-}
 .receipt-meta { font-size: var(--t-caption); color: var(--ink-2); margin-top: var(--s1); display: flex; gap: var(--s2); align-items: center; }
 .receipt-sec-t { font-size: var(--t-caption); font-weight: 600; color: var(--ink-2); margin-bottom: var(--s2); }
 .receipt-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s3); }
@@ -1588,8 +1605,25 @@ mark.search-hit {
   overflow-wrap: anywhere;
 }
 .ai-msg.user .ai-bubble { background: var(--accent-bg); color: var(--ink); }
-.ai-msg.assistant .ai-bubble { background: var(--bg-soft); color: var(--ink); }
-.ai-meta { font-family: var(--font-mono); font-size: var(--t-micro); color: var(--ink-3); margin-top: 2px; }
+/* assistant 气泡走 Markdown 渲染，源文换行交给段落结构，pre-wrap 会把 \n 原样渲染成多余空行 */
+.ai-msg.assistant .ai-bubble { background: var(--bg-soft); color: var(--ink); white-space: normal; }
+.ai-meta { font-family: var(--font-mono); font-size: var(--t-micro); color: var(--ink-3); margin-top: 2px; display: flex; align-items: center; gap: var(--s1); }
+.ai-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--ink-3);
+  cursor: pointer;
+  padding: 0 2px;
+}
+.ai-copy:hover { color: var(--accent); }
+.ai-copy.copied { color: var(--success); }
+.ai-think-sec { font-family: var(--font-mono); font-size: var(--t-micro); }
+.ai-think-sec.warn { color: var(--warning); }
+.ai-think-sec.danger { color: var(--danger); }
 .ai-thinking::after { content: "…"; animation: aiDots 1.2s steps(3) infinite; }
 @keyframes aiDots { 0% { opacity: .2; } 50% { opacity: 1; } 100% { opacity: .2; } }
 .ai-panel-foot {
@@ -1663,3 +1697,28 @@ mark.search-hit {
 .md-td { border: 1px solid var(--line); padding: 3px var(--s2); vertical-align: top; }
 .md-body .katex { font-size: 1.05em; }
 .md-body .katex-display { margin: var(--s2) 0; overflow-x: auto; }
+
+/* 名单导入重名决策 */
+.dup-list { display: flex; flex-direction: column; gap: var(--s2); margin-bottom: var(--s3); }
+.dup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: var(--s2) var(--s3);
+}
+.dup-name { font-weight: 600; }
+.dup-kind { font-family: var(--font-mono); font-size: var(--t-micro); color: var(--ink-3); }
+.dup-hint { font-size: var(--t-caption); color: var(--ink-2); line-height: 1.7; }
+.dup-actions { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s3); }
+
+/* 录题验收：缺板块名红标 */
+.sec-card-err { border-color: var(--danger); }
+.sec-err-tag { color: var(--danger); font-size: var(--t-caption); font-weight: 600; white-space: nowrap; }
+
+/* 弹窗全局限高（V0.16.1）：内容超高时主体内部滚动，标题与底部按钮常驻 */
+.ant-modal-content { max-height: 85vh; display: flex; flex-direction: column; }
+.ant-modal-header { flex: none; }
+.ant-modal-body { overflow-y: auto; min-height: 0; }
+.ant-modal-footer { flex: none; }

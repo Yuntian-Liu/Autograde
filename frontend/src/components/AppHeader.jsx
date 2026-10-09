@@ -19,6 +19,7 @@ export default function AppHeader({ compact = false, crumbs = [], children, show
 
   // user 可能为 null（登录态初始化中的骨架屏也渲染本组件），必须可选链
   const items = [
+    { key: "notes", label: "笔记库" },
     ...(user?.is_admin ? [{ key: "admin", label: "管理后台" }] : []),
     { key: "settings", label: "设置" },
     { type: "divider" },
@@ -33,6 +34,8 @@ export default function AppHeader({ compact = false, crumbs = [], children, show
       navigate("/settings");
     } else if (key === "admin") {
       navigate("/admin");
+    } else if (key === "notes") {
+      navigate("/notes");
     }
   }
 

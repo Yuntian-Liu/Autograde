@@ -3,6 +3,7 @@ import { Link, useBlocker, useNavigate, useParams } from "react-router-dom";
 import { App as AntApp, Input, Modal } from "antd";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
+import CodeChip from "../components/CodeChip";
 import SaveStatus from "../components/SaveStatus";
 import PageSkeleton from "../components/PageSkeleton";
 import { fmtTime } from "../meta";
@@ -313,8 +314,9 @@ export default function NoteDetail() {
         <Link className="back" to="/notes">
           ← 笔记库
         </Link>
-        <div className="page-meta" style={{ marginTop: "var(--s3)" }}>
-          {linkLine} · 更新于 {fmtTime(note.updated_at)}
+        <div className="page-meta" style={{ marginTop: "var(--s3)", display: "flex", alignItems: "center", gap: "var(--s2)" }}>
+          <CodeChip code={note.code} />
+          <span>{linkLine} · 更新于 {fmtTime(note.updated_at)}</span>
         </div>
 
         <div className="btn-row" style={{ marginTop: "var(--s3)" }}>

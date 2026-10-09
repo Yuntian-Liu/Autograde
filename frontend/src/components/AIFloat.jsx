@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { getToken } from "../api";
 import { clientLog } from "../utils/clientLog";
 import MdContent from "./MdContent";
+import { IconCopy } from "./icons";
 import assistantIcon from "../assets/ai-assistant.png";
 
 // AI 助教浮窗（仅批改场景挂载）：右下默认、可拖拽、hover 出 × 消掉（本次访问内）、
@@ -24,6 +25,13 @@ function fmtMs(ms) {
   return ms < 60000 ? `${(ms / 1000).toFixed(1)} 秒` : `${Math.floor(ms / 60000)} 分 ${Math.round((ms % 60000) / 1000)} 秒`;
 }
 
+// 思考计时三段递进文案（参照 Stellaris）：秒数着色提示等待程度
+function thinkStage(sec) {
+  if (sec >= 60) return { text: "仍在思考，请再稍候", cls: "danger" };
+  if (sec >= 15) return { text: "思考时间较长", cls: "warn" };
+  return { text: "思考中", cls: "" };
+}
+
 export default function AIFloat({ assignmentId = null }) {
   const [pos, setPos] = useState(() =>
     clampPos(window.innerWidth - ICON_SIZE - 24, window.innerHeight - ICON_SIZE - 24, ICON_SIZE, ICON_SIZE)
@@ -33,9 +41,12 @@ export default function AIFloat({ assignmentId = null }) {
   const [messages, setMessages] = useState([]); // {role, text, meta?}
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [thinkSec, setThinkSec] = useState(null); // 思考计时（秒；null=未在思考）
+  const [copiedIdx, setCopiedIdx] = useState(-1); // 刚复制过的消息序号
   const dragRef = useRef(null); // {startX,startY,baseX,baseY,moved}
   const listRef = useRef(null);
   const inputRef = useRef(null);
+  const thinkTimer = useRef(null);
 
   useEffect(() => {
     if (open) inputRef.current?.focus();
@@ -44,6 +55,18 @@ export default function AIFloat({ assignmentId = null }) {
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages]);
+
+  useEffect(() => () => clearInterval(thinkTimer.current), []);
+
+  async function copyMessage(i, text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedIdx(i);
+      setTimeout(() => setCopiedIdx((v) => (v === i ? -1 : v)), 1200);
+    } catch {
+      clientLog.add("ui", "chat_copy_failed");
+    }
+  }
 
   // 拖拽：pointerdown 记录起点，move 超 5px 才算拖（否则当点击）
   function onPointerDown(e) {
@@ -69,6 +92,8 @@ export default function AIFloat({ assignmentId = null }) {
     if (!text || busy) return;
     setInput("");
     setBusy(true);
+    setThinkSec(0);
+    thinkTimer.current = setInterval(() => setThinkSec((s) => s + 1), 1000);
     clientLog.add("ui", `chat_send len=${text.length}`);
     const history = [...messages, { role: "user", text }];
     setMessages([...history, { role: "assistant", text: "" }]);
@@ -144,6 +169,8 @@ export default function AIFloat({ assignmentId = null }) {
         return next;
       });
     } finally {
+      clearInterval(thinkTimer.current);
+      setThinkSec(null);
       setBusy(false);
     }
   }
@@ -182,13 +209,36 @@ export default function AIFloat({ assignmentId = null }) {
                       用时 {m.meta.elapsed} · tokens {m.meta.tokens.toLocaleString()}
                       {m.meta.cost ? ` · ¥${Number(m.meta.cost).toFixed(4)}` : ""}
                       {m.meta.tier ? `（${m.meta.tier === "offpeak" ? "谷" : "峰"}）` : ""}
+                      <button
+                        type="button"
+                        className={`ai-copy${copiedIdx === i ? " copied" : ""}`}
+                        onClick={() => copyMessage(i, m.text)}
+                        title="复制 Markdown 原文"
+                      >
+                        <IconCopy width={10} height={10} />
+                        {copiedIdx === i ? "已复制" : "复制"}
+                      </button>
                     </div>
                   )}
                 </div>
               );
             })}
             {busy && messages[messages.length - 1]?.text === "" && (
-              <div className="ai-msg assistant"><div className="ai-bubble ai-thinking">思考中</div></div>
+              <div className="ai-msg assistant">
+                <div className="ai-bubble ai-thinking">
+                  {(() => {
+                    const st = thinkStage(thinkSec ?? 0);
+                    return (
+                      <>
+                        {st.text}
+                        {thinkSec !== null && (
+                          <span className={`ai-think-sec${st.cls ? ` ${st.cls}` : ""}`}> · {thinkSec}s</span>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
             )}
           </div>
           <div className="ai-panel-foot">

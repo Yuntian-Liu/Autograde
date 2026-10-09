@@ -26,7 +26,7 @@ from llm_events_store import (
     llm_health,
     set_prices,
 )
-from models import Assignment, Class, LlmCallEvent, Student, Submission
+from models import Assignment, Class, LlmCallEvent, Note, Student, Submission
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -69,7 +69,7 @@ async def overview(
         "graded": graded,
         "db_size_mb": round(db_size / 1024 / 1024, 2),
         "ai_cost_today_yuan": round(float(today_cost), 6),
-        "version": "0.16.0",
+        "version": "0.17.0",
     }
 
 
@@ -110,6 +110,30 @@ async def lookup_by_code(
             "owner_nickname": nickname,
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "web_path": f"/classes/{cls.id}",
+        }
+    if kind == "N":
+        n = (await db.execute(select(Note).where(Note.code == canonical))).scalar_one_or_none()
+        if n is None:
+            raise HTTPException(status_code=404, detail="编码不存在或对应数据已删除")
+        cls = await db.get(Class, n.class_id) if n.class_id else None
+        stu = await db.get(Student, n.student_id) if n.student_id else None
+        asg = await db.get(Assignment, n.assignment_id) if n.assignment_id else None
+        u = (await db.execute(select(User).where(User.uid == n.owner_uid))).scalar_one_or_none()
+        return {
+            "type": "note",
+            "code": n.code,
+            "label": n.title,
+            "class_name": cls.name if cls else None,
+            "student_name": stu.name if stu else None,
+            "assignment_label": asg.unit_label if asg else None,
+            "assignment_code": asg.code if asg else None,
+            "archived": n.archived,
+            "legacy_name": n.legacy_name or None,
+            "owner_uid": n.owner_uid,
+            "owner_nickname": u.nickname if u else "",
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+            "updated_at": n.updated_at.isoformat() if n.updated_at else None,
+            "web_path": f"/notes/{n.id}",
         }
     a = (await db.execute(select(Assignment).where(Assignment.code == canonical))).scalar_one_or_none()
     if a is None:

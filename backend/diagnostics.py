@@ -42,7 +42,7 @@ from models import (
     Submission,
 )
 
-APP_VERSION = "0.16.0"
+APP_VERSION = "0.17.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
 AGREEMENT_VERSION = "2026-09-24.2"
 _STARTED_AT = datetime.now(timezone.utc)
@@ -217,11 +217,15 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
         seq_rows = (
             await db.execute(
                 select(Setting).where(
-                    Setting.key.in_(("code_seq_student", "code_seq_assignment"))
+                    Setting.key.in_(("code_seq_student", "code_seq_assignment", "code_seq_note"))
                 )
             )
         ).scalars().all()
         code_seq_counters = {r.key: int(r.value or 0) for r in seq_rows}
+        # 有码笔记总数（全站）：与 code_seq_note 对照——seq < 有码数 = 计数器被重置（bug）
+        code_seq_counters["note_coded"] = int(
+            (await db.execute(select(func.count(Note.id)).where(Note.code != ""))).scalar() or 0
+        )
 
     # 备份健康（admin 专属；平台级信息）：份数 + 最新备份年龄——「备份是不是没跑」的直接证据，
     # 不用翻日志尾段找。拉取失败也如实上报（失败本身就是信号）

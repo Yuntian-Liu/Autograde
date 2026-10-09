@@ -120,17 +120,20 @@ export function SectionsEditor({ rows, setRows, sections, movable = false }) {
       </div>
       {groups.map((g, gi) => {
         const first = rows[g.indices[0]];
+        const missingSec = !g.section.trim(); // 缺板块名：实时红标，不等提交才发现
         // key 用首行索引而非板块名：板块名一改就 remount 会导致输入框每敲一个字丢焦点
         return (
-          <div className="sec-card" key={g.indices[0]}>
+          <div className={`sec-card${missingSec ? " sec-card-err" : ""}`} key={g.indices[0]}>
             <div className="sec-card-head">
               <AutoComplete
                 className="grow"
+                status={missingSec ? "error" : ""}
                 value={g.section}
                 options={sectionOptions}
                 onChange={(v) => patchGroup(g.indices, { section: v })}
                 placeholder="板块名，如 Task 1 · Vocabulary"
               />
+              {missingSec && <span className="sec-err-tag">缺板块名</span>}
               {movable && (
                 <span className="sec-move">
                   <button
@@ -206,6 +209,7 @@ export function SectionsEditor({ rows, setRows, sections, movable = false }) {
                     value={r.standard_answer}
                     onChange={(e) => patchRow(idx, "standard_answer", e.target.value)}
                     placeholder="标准答案"
+                    status={r.standard_answer.trim() ? "" : "error"}
                   />
                   <Input.TextArea
                     value={r.explanation}
@@ -429,7 +433,16 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
 
   async function freeze() {
     const error = validateRows(rows);
-    if (error) return message.error(error);
+    if (error) {
+      message.error(error);
+      // 红标已在表格里实时显示；提交失败时把第一个问题块滚到视野中央
+      requestAnimationFrame(() =>
+        document
+          .querySelector(".sec-card-err, .ant-input-status-error, .ant-select-status-error")
+          ?.scrollIntoView({ behavior: "smooth", block: "center" })
+      );
+      return;
+    }
     setSaving(true);
     try {
       await freezeQuestions(assignmentId, rows);

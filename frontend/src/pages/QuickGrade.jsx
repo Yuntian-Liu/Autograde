@@ -1,7 +1,7 @@
 import { IconChevronLeft } from "../components/icons";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useBlocker, useNavigate, useParams } from "react-router-dom";
-import { App as AntApp } from "antd";
+import { App as AntApp, Tooltip } from "antd";
 import { apiGet, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
 import AIFloat from "../components/AIFloat";
@@ -73,6 +73,17 @@ export default function QuickGrade() {
   const weightById = useMemo(
     () => Object.fromEntries(flatQuestions.map((q) => [q.id, q.score_weight])),
     [flatQuestions]
+  );
+  // 按题错误名单（勾选口径，随标错实时变）：速查徽章人数 + 矩阵题号悬浮名单共用
+  const wrongNamesOf = useCallback(
+    (qid) =>
+      students.filter((s) => (wrongMap[s.id] || new Set()).has(qid)).map((s) => s.name),
+    [students, wrongMap]
+  );
+  const previewNamesOf = useCallback(
+    (seq) =>
+      students.filter((s) => (previewWrongMap[s.id] || new Set()).has(seq)).map((s) => s.name),
+    [students, previewWrongMap]
   );
   const totalWeight = assignment?.total_weight || 0;
   // 预习答题卡：has_preview 且 5 题答案录齐才开放预习列
@@ -280,12 +291,17 @@ export default function QuickGrade() {
                 </div>
                 {previewReady ? (
                   <div className="qa-chips">
-                    {previewAnswers.map((ans, i) => (
-                      <span className="qa-chip" key={i}>
-                        <b>{i + 1}</b>
-                        <span className="qa-ans">{ans}</span>
-                      </span>
-                    ))}
+                    {previewAnswers.map((ans, i) => {
+                      const names = previewNamesOf(i + 1);
+                      return (
+                        <span className="qa-chip" key={i}
+                              title={names.length ? `本题错 ${names.length} 人：${names.join("、")}` : undefined}>
+                          <b>{i + 1}</b>
+                          {names.length > 0 && <span className="qg-heat">{names.length}</span>}
+                          <span className="qa-ans">{ans}</span>
+                        </span>
+                      );
+                    })}
                   </div>
                 ) : (
                   <Link className="row" to={`/assignments/${assignment.slug || assignment.id}`}>
@@ -298,15 +314,20 @@ export default function QuickGrade() {
               <div className="qa-sec" key={sec.section}>
                 <div className="qa-sec-name">{sec.section}</div>
                 <div className="qa-chips">
-                  {sec.questions.map((q) => (
-                    <span
-                      className={`qa-chip${q.standard_answer.length > 12 ? " long" : ""}`}
-                      key={q.id}
-                    >
-                      <b>{q.seq}</b>
-                      <span className="qa-ans">{q.standard_answer}</span>
-                    </span>
-                  ))}
+                  {sec.questions.map((q) => {
+                    const names = wrongNamesOf(q.id);
+                    return (
+                      <span
+                        className={`qa-chip${q.standard_answer.length > 12 ? " long" : ""}`}
+                        key={q.id}
+                        title={names.length ? `本题错 ${names.length} 人：${names.join("、")}` : undefined}
+                      >
+                        <b>{q.seq}</b>
+                        {names.length > 0 && <span className="qg-heat">{names.length}</span>}
+                        <span className="qa-ans">{q.standard_answer}</span>
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -364,21 +385,29 @@ export default function QuickGrade() {
                     {assignment.sections.map((sec, si) => (
                       <Fragment key={sec.section}>
                         {si > 0 && <th className="qg-gap" />}
-                        {sec.questions.map((q) => (
-                          <th key={q.id} className={hover.col === q.id ? "qg-colhead" : undefined}>
-                            {q.seq}
-                          </th>
-                        ))}
+                        {sec.questions.map((q) => {
+                          const names = wrongNamesOf(q.id);
+                          return (
+                            <th key={q.id} className={hover.col === q.id ? "qg-colhead" : undefined}
+                                title={names.length ? `本题错 ${names.length} 人：${names.join("、")}` : undefined}>
+                              {q.seq}
+                            </th>
+                          );
+                        })}
                       </Fragment>
                     ))}
                     {previewReady && (
                       <Fragment>
                         <th className="qg-gap" />
-                        {[1, 2, 3, 4, 5].map((seq) => (
-                          <th key={seq} className={hover.col === `p${seq}` ? "qg-colhead" : undefined}>
-                            {seq}
-                          </th>
-                        ))}
+                        {[1, 2, 3, 4, 5].map((seq) => {
+                          const names = previewNamesOf(seq);
+                          return (
+                            <th key={seq} className={hover.col === `p${seq}` ? "qg-colhead" : undefined}
+                                title={names.length ? `预习错 ${names.length} 人：${names.join("、")}` : undefined}>
+                              {seq}
+                            </th>
+                          );
+                        })}
                       </Fragment>
                     )}
                     <th className="qg-right qg-scorecol" />
@@ -398,7 +427,30 @@ export default function QuickGrade() {
                         <td className={rowHot ? "qg-stucol qg-rowhead" : "qg-stucol"}>
                           <span className="qg-stu">
                             <span className={`state ${state}`} />
-                            <Link className="qg-name" to={`/grading/${id}?student=${s.id}`} title={`${s.code ? `${s.code} · ` : ""}进入标准批改（定位该生）`}>{s.name}</Link>
+                            <Tooltip
+                              placement="right"
+                              title={
+                                s.recent_scores?.length ? (
+                                  <span className="qg-tip">
+                                    {s.code && <span className="qg-tip-code">{s.code}</span>}
+                                    {s.recent_scores.map((r) => (
+                                      <span className="qg-tip-row" key={r.unit_label}>
+                                        <span>{r.unit_label}</span>
+                                        <b>{Number(r.score).toFixed(2)}</b>
+                                      </span>
+                                    ))}
+                                    {s.recent_avg_5 != null && (
+                                      <span className="qg-tip-avg">近 5 次平均 {s.recent_avg_5}</span>
+                                    )}
+                                    <span className="qg-tip-go">进入标准批改（定位该生）</span>
+                                  </span>
+                                ) : (
+                                  "暂无历史分数 · 进入标准批改"
+                                )
+                              }
+                            >
+                              <Link className="qg-name" to={`/grading/${id}?student=${s.id}`}>{s.name}</Link>
+                            </Tooltip>
                           </span>
                         </td>
                         {assignment.sections.map((sec, si) => (
