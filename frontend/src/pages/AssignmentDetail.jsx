@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { App as AntApp, Input, Modal, Popconfirm, Popover } from "antd";
-import { apiDelete, apiGet, apiPatch, apiPut } from "../api";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
 import AssignmentForm from "../components/AssignmentForm";
+import InlineConfirm from "../components/bencho/InlineConfirm";
 import QuestionCard from "../components/QuestionCard";
 import QuestionEditModal from "../components/QuestionEdit";
 import { AiEntryModal, ManualEntryModal } from "../components/QuestionEntry";
 import PageSkeleton from "../components/PageSkeleton";
 import PreviewEntry from "../components/PreviewEntry";
+import StudentImportModal from "../components/StudentImportModal";
 import CodeChip from "../components/CodeChip";
 import { STATUS_META, deadlineText, fmtScore, modeLabel, ratingTone, scoreTone, seriesLabel } from "../meta";
 import { IconChevronLeft, IconGrip } from "../components/icons";
@@ -61,8 +63,12 @@ function RateCapsule({ q, assignmentId }) {
   );
 }
 
+const DELETE_PHRASE = "确认删除批次";
+const CLEAR_PHRASE = "确认清空题库";
+
 export default function AssignmentDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { message } = AntApp.useApp();
   const [assignment, setAssignment] = useState(null);
   const [students, setStudents] = useState([]);
@@ -71,15 +77,19 @@ export default function AssignmentDetail() {
   const [manualOpen, setManualOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false); // 预习答题卡
+  const [importOpen, setImportOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState(null);
   const [addSection, setAddSection] = useState(null); // 板块级「加题」预填板块名
   const [activeSection, setActiveSection] = useState(null); // 题库目录选中板块
   const [renameFrom, setRenameFrom] = useState(null); // 重命名板块：原名（null=关闭）
   const [renameTo, setRenameTo] = useState("");
   const [renaming, setRenaming] = useState(false);
-  const [clearStep, setClearStep] = useState(0); // 清空题库双重确认：0=关 1=警示 2=输「清空」
+  const [clearStep, setClearStep] = useState(0); // 0=关 1=后果与短语 2=最终确认
   const [clearInput, setClearInput] = useState("");
-  const [clearing, setClearing] = useState(false);
+  const [clearBusy, setClearBusy] = useState(false);
+  const [deleteStep, setDeleteStep] = useState(0); // 0=关 1=后果 2=短语 3=最终确认
+  const [deleteInput, setDeleteInput] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
   // 板块拖拽排序：dragIdx = 拖起项；dropTarget = { idx, pos: before/after } 落点指示
   const [dragIdx, setDragIdx] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
@@ -147,21 +157,39 @@ export default function AssignmentDetail() {
     setDropTarget(null);
   }
 
+  function closeClear() {
+    if (clearBusy) return;
+    setClearStep(0);
+    setClearInput("");
+    setClearBusy(false);
+  }
+
+  function closeDelete() {
+    if (deleteBusy) return;
+    setDeleteStep(0);
+    setDeleteInput("");
+    setDeleteBusy(false);
+  }
+
   async function clearQuestionBank() {
-    if (clearInput.trim() !== "清空") return;
-    setClearing(true);
-    try {
-      await apiDelete(`/assignments/${id}/questions`);
-      message.success("题库已清空，可重新录入");
-      setClearStep(0);
-      setClearInput("");
-      reload();
-    } catch (e) {
-      message.error(e.message);
-      setClearStep(0);
-    } finally {
-      setClearing(false);
-    }
+    if (clearInput !== CLEAR_PHRASE) throw new Error("确认短语不一致");
+    await apiDelete(`/assignments/${id}/questions`);
+    message.success("题库已清空，可重新录入");
+    setClearStep(0);
+    setClearInput("");
+    setClearBusy(false);
+    reload();
+  }
+
+  async function deleteAssignment() {
+    if (deleteInput !== DELETE_PHRASE) throw new Error("确认短语不一致");
+    await apiDelete(`/assignments/${assignment.id}`);
+    message.success("批次已删除");
+    setDeleteStep(0);
+    setDeleteInput("");
+    setDeleteBusy(false);
+    const classInfo = assignment.class;
+    navigate(classInfo?.is_temp ? "/temp" : classInfo ? `/classes/${classInfo.id}` : "/");
   }
 
   if (error)
@@ -178,6 +206,9 @@ export default function AssignmentDetail() {
     );
 
   const c = assignment.class;
+  const isTemp = Boolean(c?.is_temp);
+  const hasStudents = students.length > 0;
+  const assignmentTitle = `${isTemp && c?.name ? `${c.name} · ` : ""}${assignment.unit_label} ${assignment.content}`.trim();
   const sectionNames = assignment.sections.map((s) => s.section);
   // 目录选中项：改名/删板块后原名可能失效，回落第一个板块
   const currentSec =
@@ -188,31 +219,49 @@ export default function AssignmentDetail() {
       <AppHeader
         crumbs={[
           { label: "工作台", to: "/" },
-          ...(c ? [{ label: `${seriesLabel(c.series)} ${c.name}`, to: `/classes/${c.id}` }] : []),
+          ...(isTemp
+            ? [{ label: "临时批改", to: "/temp" }]
+            : c
+              ? [{ label: `${seriesLabel(c.series)} ${c.name}`, to: `/classes/${c.id}` }]
+              : []),
           { label: `${assignment.unit_label} ${assignment.content}`.trim() },
         ]}
       />
       <div className="wrap wrap-wide">
-        <Link className="back" to={c ? `/classes/${c.id}` : "/"}>
-          <IconChevronLeft />{c ? `${seriesLabel(c.series)} ${c.name}` : "返回"}
+        <Link className="back" to={isTemp ? "/temp" : c ? `/classes/${c.id}` : "/"}>
+          <IconChevronLeft />{isTemp ? "临时批改" : c ? `${seriesLabel(c.series)} ${c.name}` : "返回"}
         </Link>
         <h1 style={{ marginTop: "var(--s3)" }}>
-          {assignment.unit_label} {assignment.content}
+          {isTemp && c?.name ? `${c.name} · ` : ""}{assignment.unit_label} {assignment.content}
         </h1>
         <div className="page-meta">
-          第 {assignment.lesson_no} 次课
-          {assignment.class_time ? ` · ${assignment.class_time}` : ""} · {assignment.status}
-          {deadlineText(assignment.class_time) ? ` · ${deadlineText(assignment.class_time)}` : ""}
+          {!isTemp && (
+            <>
+              第 {assignment.lesson_no} 次课
+              {assignment.class_time ? ` · ${assignment.class_time}` : ""} ·{" "}
+            </>
+          )}
+          {assignment.status}
+          {!isTemp && deadlineText(assignment.class_time) ? ` · ${deadlineText(assignment.class_time)}` : ""}
           {" · "}
           <CodeChip code={assignment.code} />
         </div>
+        {isTemp && assignment.note && <div className="assignment-note">{assignment.note}</div>}
         <div className="btn-row" style={{ marginTop: "var(--s4)" }}>
-          <Link className="btn primary" to={`/grading/${assignment.slug || assignment.id}`}>
-            进入批改
-          </Link>
-          <Link className="btn" to={`/assignments/${assignment.slug || assignment.id}/quick`}>
-            快捷批改
-          </Link>
+          {isTemp && !hasStudents ? (
+            <Link className="btn primary" to={`/assignments/${assignment.slug || assignment.id}/quick`}>
+              答案速查
+            </Link>
+          ) : (
+            <>
+              <Link className="btn primary" to={`/grading/${assignment.slug || assignment.id}`}>
+                进入批改
+              </Link>
+              <Link className="btn" to={`/assignments/${assignment.slug || assignment.id}/quick`}>
+                快捷批改
+              </Link>
+            </>
+          )}
           <button className="btn" onClick={() => setAiOpen(true)}>
             AI 录题
           </button>
@@ -238,16 +287,35 @@ export default function AssignmentDetail() {
               style={{ marginLeft: "auto" }}
               onClick={() => {
                 setClearInput("");
+                setClearBusy(false);
                 setClearStep(1);
               }}
             >
               清空题库
             </button>
           )}
+          <button
+            className="btn danger"
+            style={assignment.question_count === 0 ? { marginLeft: "auto" } : undefined}
+            onClick={() => {
+              setDeleteInput("");
+              setDeleteBusy(false);
+              setDeleteStep(1);
+            }}
+          >
+            删除批次
+          </button>
         </div>
 
         <section className="block">
-          <div className="sec-title">学生提交状态</div>
+          <div className={isTemp ? "sec-title sec-title-row" : "sec-title"}>
+            {isTemp ? "本批名单" : "学生提交状态"}
+            {isTemp && (
+              <button className="btn" onClick={() => setImportOpen(true)}>
+                添加本批名单
+              </button>
+            )}
+          </div>
           {students.map((s) => {
             const sub = s.submission;
             const status = sub ? sub.status : "待批改";
@@ -271,7 +339,7 @@ export default function AssignmentDetail() {
               </div>
             );
           })}
-          {students.length === 0 && <div className="row">暂无学生</div>}
+          {students.length === 0 && <div className="row">{isTemp ? "暂无本批名单" : "暂无学生"}</div>}
         </section>
 
         <section className="block">
@@ -390,11 +458,28 @@ export default function AssignmentDetail() {
 
       {c && (
         <AssignmentForm
+          temp={isTemp}
           open={editOpen}
           onClose={() => setEditOpen(false)}
           classInfo={c}
           assignment={assignment}
           onSaved={reload}
+        />
+      )}
+      {isTemp && (
+        <StudentImportModal
+          open={importOpen}
+          onClose={() => setImportOpen(false)}
+          students={students}
+          title="添加本批名单"
+          existingLabel="本批已有"
+          onImport={(names, allowDuplicates) =>
+            apiPost(`/assignments/${assignment.id}/students/batch`, {
+              names,
+              allow_duplicates: allowDuplicates,
+            })
+          }
+          onImported={reload}
         />
       )}
       <ManualEntryModal
@@ -455,20 +540,24 @@ export default function AssignmentDetail() {
         />
       </Modal>
 
-      {/* 清空题库 · 第一重：红色警示列明后果 */}
+      {/* 清空题库 · 第一段：后果清单与逐字确认 */}
       <Modal
         centered
         open={clearStep === 1}
-        onCancel={() => setClearStep(0)}
+        onCancel={closeClear}
         title={<span className="danger-title">清空本题库？</span>}
         width={440}
         destroyOnHidden
         footer={
           <div className="modal-actions">
-            <button className="btn" onClick={() => setClearStep(0)}>
+            <button className="btn" onClick={closeClear}>
               取消
             </button>
-            <button className="btn danger-solid" onClick={() => setClearStep(2)}>
+            <button
+              className="btn danger-solid"
+              disabled={clearInput !== CLEAR_PHRASE}
+              onClick={() => setClearStep(2)}
+            >
               继续
             </button>
           </div>
@@ -484,41 +573,178 @@ export default function AssignmentDetail() {
           <li>全部提交记录（分数 / 等级 / 提交状态）</li>
           <li>全部反馈快照</li>
         </ul>
-        <p>批次本身保留，清空后可重新录题。若只想改题，请用「整批编辑」。</p>
+        <p>批次本身和学生名单保留，清空后可重新录题。若只想改题，请用「整批编辑」。</p>
+        <div className="form-grid">
+          <span className="flab">点击填入</span>
+          <button type="button" className="btn danger" onClick={() => setClearInput(CLEAR_PHRASE)}>
+            {CLEAR_PHRASE}
+          </button>
+          <span className="flab">逐字输入</span>
+          <Input
+            value={clearInput}
+            onChange={(e) => setClearInput(e.target.value)}
+            onPressEnter={() => {
+              if (clearInput === CLEAR_PHRASE) setClearStep(2);
+            }}
+            placeholder={CLEAR_PHRASE}
+          />
+        </div>
       </Modal>
 
-      {/* 清空题库 · 第二重：输入「清空」二字才可执行 */}
+      {/* 清空题库 · 第二段：保险丝烧尽后才提交 */}
       <Modal
         centered
         open={clearStep === 2}
-        onCancel={() => setClearStep(0)}
-        title={<span className="danger-title">确认永久清空</span>}
+        onCancel={closeClear}
+        title={<span className="danger-title">最后确认永久清空</span>}
+        width={440}
+        destroyOnHidden
+        maskClosable={!clearBusy}
+        keyboard={!clearBusy}
+        closable={!clearBusy}
+        footer={
+          <div className="modal-actions" style={{ alignItems: "center" }}>
+            <button className="btn" disabled={clearBusy} onClick={closeClear}>
+              取消
+            </button>
+            <InlineConfirm
+              label="永久清空"
+              doneLabel="已清空"
+              pendingLabel="清空中…"
+              danger
+              height={44}
+              grace={4000}
+              onCommit={clearQuestionBank}
+              onBusyChange={setClearBusy}
+            />
+          </div>
+        }
+      >
+        <p className="danger-title">
+          <strong>最后警示：题库清空后无法恢复。</strong>
+        </p>
+        <p>点击「永久清空」后可在 4 秒内撤销；倒计时结束才会正式清空。</p>
+      </Modal>
+
+      {/* 删除批次 · 第一段：列明批次与全部后果 */}
+      <Modal
+        centered
+        open={deleteStep === 1}
+        onCancel={closeDelete}
+        title={<span className="danger-title">删除批次？</span>}
         width={440}
         destroyOnHidden
         footer={
           <div className="modal-actions">
-            <button className="btn" onClick={() => setClearStep(0)}>
+            <button className="btn" onClick={closeDelete}>
               取消
             </button>
-            <button
-              className="btn danger-solid"
-              disabled={clearInput.trim() !== "清空"}
-              onClick={clearQuestionBank}
-            >
-              {clearing ? "清空中…" : "永久清空"}
+            <button className="btn danger-solid" onClick={() => setDeleteStep(2)}>
+              继续
             </button>
           </div>
         }
       >
+        <div style={{ marginBottom: "var(--s3)" }}>
+          <strong>{assignmentTitle}</strong>
+          <div className="page-meta">
+            <CodeChip code={assignment.code} />
+          </div>
+        </div>
+        <p className="danger-title">
+          <strong>此操作不可恢复，将永久删除该批次及其：</strong>
+        </p>
+        <ul className="danger-list">
+          <li>全部 {assignment.question_count} 道题目</li>
+          <li>全部错题记录（含已批学生的勾选与定稿内容）</li>
+          <li>全部提交记录（分数 / 等级 / 提交状态）</li>
+          <li>全部反馈快照</li>
+          {isTemp && <li>本批名单（{students.length} 名学生）</li>}
+        </ul>
+      </Modal>
+
+      {/* 删除批次 · 第二段：二次警示与逐字确认 */}
+      <Modal
+        centered
+        open={deleteStep === 2}
+        onCancel={closeDelete}
+        title={<span className="danger-title">再次确认删除批次</span>}
+        width={440}
+        destroyOnHidden
+        footer={
+          <div className="modal-actions">
+            <button className="btn" onClick={closeDelete}>
+              取消
+            </button>
+            <button
+              className="btn danger-solid"
+              disabled={deleteInput !== DELETE_PHRASE}
+              onClick={() => setDeleteStep(3)}
+            >
+              继续
+            </button>
+          </div>
+        }
+      >
+        <p className="danger-title">
+          <strong>该批次及上述全部数据将被永久删除，无法找回。</strong>
+        </p>
+        <p>
+          <strong>{assignmentTitle}</strong>
+        </p>
         <div className="form-grid">
-          <span className="flab">输入「清空」二字</span>
+          <span className="flab">点击填入</span>
+          <button type="button" className="btn danger" onClick={() => setDeleteInput(DELETE_PHRASE)}>
+            {DELETE_PHRASE}
+          </button>
+          <span className="flab">逐字输入</span>
           <Input
-            value={clearInput}
-            onChange={(e) => setClearInput(e.target.value)}
-            onPressEnter={clearQuestionBank}
-            placeholder="清空"
+            value={deleteInput}
+            onChange={(e) => setDeleteInput(e.target.value)}
+            onPressEnter={() => {
+              if (deleteInput === DELETE_PHRASE) setDeleteStep(3);
+            }}
+            placeholder={DELETE_PHRASE}
           />
         </div>
+      </Modal>
+
+      {/* 删除批次 · 第三段：保险丝烧尽后才提交 */}
+      <Modal
+        centered
+        open={deleteStep === 3}
+        onCancel={closeDelete}
+        title={<span className="danger-title">最后确认永久删除</span>}
+        width={440}
+        destroyOnHidden
+        maskClosable={!deleteBusy}
+        keyboard={!deleteBusy}
+        closable={!deleteBusy}
+        footer={
+          <div className="modal-actions" style={{ alignItems: "center" }}>
+            <button className="btn" disabled={deleteBusy} onClick={closeDelete}>
+              取消
+            </button>
+            <InlineConfirm
+              label="永久删除"
+              doneLabel="已删除"
+              pendingLabel="删除中…"
+              danger
+              height={44}
+              grace={4000}
+              onCommit={deleteAssignment}
+              onBusyChange={setDeleteBusy}
+            />
+          </div>
+        }
+      >
+        <p className="danger-title">
+          <strong>最后警示：永久删除后无法找回。</strong>
+        </p>
+        <p>
+          <strong>{assignmentTitle}</strong>
+        </p>
+        <p>点击「永久删除」后可在 4 秒内撤销；倒计时结束才会向服务器提交删除。</p>
       </Modal>
     </div>
   );

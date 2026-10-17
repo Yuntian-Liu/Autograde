@@ -34,6 +34,7 @@ class Class(Base):
     level: Mapped[int] = mapped_column(Integer)
     term: Mapped[str] = mapped_column(String(1))  # A / B
     schedule: Mapped[str] = mapped_column(String(32))  # 如「周六 14:00」，驱动 deadline
+    is_temp: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     students: Mapped[list["Student"]] = relationship(back_populates="class_")
@@ -50,6 +51,7 @@ class Student(Base):
     # 全局业务编码（身份证逻辑：发出即终身不变、删号不复用）；仅创建路径发码
     code: Mapped[str] = mapped_column(String(24), default="", index=True)
     class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"))
+    assignment_id: Mapped[int | None] = mapped_column(ForeignKey("assignments.id"), nullable=True)
     note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
@@ -63,6 +65,10 @@ class Assignment(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"))
+    series: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    level: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    term: Mapped[str | None] = mapped_column(String(1), nullable=True)
+    note: Mapped[str] = mapped_column(String(128), default="")
     unit_label: Mapped[str] = mapped_column(String(32))  # 展示冗余，由结构化字段自动生成，如 U7Day1&U7B Preview
     # 结构化单元进度（feedback.py 据此生成 unit_label 与反馈标题）
     unit_no: Mapped[int] = mapped_column(Integer, default=1)  # 单元号，如 7；范围按班级 term 校验（A=U1-6，B=U7-12）
@@ -117,6 +123,7 @@ class ErrorRecord(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id"))
     question_id: Mapped[int] = mapped_column(ForeignKey("questions.id"))
+    awarded_score: Mapped[float] = mapped_column(Float, default=0.0)
     note: Mapped[str] = mapped_column(Text, default="")  # 人工填充 / AI 定稿内容
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 

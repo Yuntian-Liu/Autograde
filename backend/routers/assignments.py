@@ -8,9 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from access import owned_assignment
 from auth.dependencies import get_current_user
 from auth.models import User
+from codes import default_cohort
 from database import get_db
-from feedback import sync_unit_label, validate_unit_fields
+from feedback import sync_unit_label, validate_assignment_metadata, validate_unit_fields
 from models import (
+    AbilityReport,
     Assignment,
     Class,
     ErrorRecord,
@@ -21,11 +23,13 @@ from models import (
     Submission,
 )
 from rating import get_thresholds, rating_for
+from routers.classes import StudentsBatchIn, _import_students
 from serializers import (
     GRADED_STATUSES,
     PROCESSED_STATUSES,
     assignment_brief,
     assignment_status,
+    assignment_student_condition,
     class_brief,
     question_brief,
     student_brief,
@@ -33,6 +37,7 @@ from serializers import (
 )
 
 router = APIRouter(prefix="/api/assignments", tags=["assignments"])
+workspace_router = APIRouter(prefix="/api", tags=["temp-workspace"])
 
 SUBMISSION_STATUSES = ("待批改", "已批改", "缺作业", "未交")
 QUESTION_MODES = ("verbatim", "ai_expand", "manual")
@@ -44,7 +49,11 @@ async def _assignment_progress(db: AsyncSession, a: Assignment) -> dict:
         await db.execute(select(func.count(Question.id)).where(Question.assignment_id == a.id))
     ).scalar_one()
     total_students = (
-        await db.execute(select(func.count(Student.id)).where(Student.class_id == a.class_id))
+        await db.execute(
+            select(func.count(Student.id)).where(
+                Student.class_id == a.class_id, assignment_student_condition(a)
+            )
+        )
     ).scalar_one()
     rows = (
         await db.execute(
@@ -76,7 +85,7 @@ async def list_assignments(
         await db.execute(
             select(Assignment)
             .join(Class, Assignment.class_id == Class.id)
-            .where(Class.owner_uid == user.uid)
+            .where(Class.owner_uid == user.uid, Class.is_temp.is_(False))
             .order_by(Assignment.created_at.desc())
             .limit(limit)
         )
@@ -89,10 +98,57 @@ async def list_assignments(
                 **assignment_brief(a),
                 "status": await assignment_status(db, a),  # 动态推导，覆盖静态字段
                 **await _assignment_progress(db, a),
-                "class": class_brief(c) if c else None,
+                "class": class_brief(c, a) if c else None,
             }
         )
     return result
+
+
+@workspace_router.get("/temp-workspace")
+async def get_temp_workspace(
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict:
+    c = (
+        await db.execute(
+            select(Class)
+            .where(Class.owner_uid == user.uid, Class.is_temp.is_(True))
+            .order_by(Class.id)
+        )
+    ).scalars().first()
+    if c is None:
+        c = Class(
+            owner_uid=user.uid,
+            name="临时批改",
+            series="TMP",
+            level=0,
+            term="",
+            schedule="",
+            cohort=default_cohort(),
+            is_temp=True,
+        )
+        db.add(c)
+        await db.commit()
+
+    assignments = (
+        await db.execute(
+            select(Assignment)
+            .where(Assignment.class_id == c.id)
+            .order_by(Assignment.created_at.desc())
+        )
+    ).scalars().all()
+    items = []
+    for a in assignments:
+        progress = await _assignment_progress(db, a)
+        items.append(
+            {
+                **assignment_brief(a),
+                "status": await assignment_status(db, a),
+                **progress,
+                "student_count": progress["total_students"],
+                "class": class_brief(c, a),
+            }
+        )
+    return {"id": c.id, "is_temp": True, "assignments": items}
 
 
 @router.get("/{assignment_id}")
@@ -172,7 +228,7 @@ async def get_assignment(
         **assignment_brief(a),
         "status": await assignment_status(db, a),  # 动态推导，覆盖静态字段
         **await _assignment_progress(db, a),
-        "class": class_brief(c) if c else None,
+        "class": class_brief(c, a) if c else None,
         "sections": sections,
         "total_weight": round(sum(q.score_weight for q in questions), 2),
     }
@@ -190,7 +246,9 @@ async def get_assignment_students(
 
     students = (
         await db.execute(
-            select(Student).where(Student.class_id == a.class_id).order_by(Student.id)
+            select(Student)
+            .where(Student.class_id == a.class_id, assignment_student_condition(a))
+            .order_by(Student.id)
         )
     ).scalars().all()
 
@@ -226,6 +284,7 @@ async def get_assignment_students(
         ).scalars().all()
         error_question_ids = [er.question_id for er in error_rows]
         error_notes = {str(er.question_id): er.note for er in error_rows if er.note}
+        error_scores = {str(er.question_id): er.awarded_score for er in error_rows}
 
         # 历史分数：本班其他批次中已批改/缺作业的分数，按课次倒序
         history_rows = (
@@ -269,6 +328,7 @@ async def get_assignment_students(
                 "submission": submission_brief(sub) if sub else None,
                 "error_question_ids": error_question_ids,
                 "error_notes": error_notes,
+                "error_scores": error_scores,
                 "feedback_text": latest_snapshots.get(s.id),
                 "recent_avg_5": recent_avg_5,
                 "last_score": last_score,
@@ -277,6 +337,20 @@ async def get_assignment_students(
             }
         )
     return result
+
+
+@router.post("/{assignment_id}/students/batch", status_code=201)
+async def import_temp_students(
+    assignment_id: str,
+    body: StudentsBatchIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    a = await owned_assignment(db, assignment_id, user)
+    c = await db.get(Class, a.class_id)
+    if not c.is_temp:
+        raise HTTPException(status_code=400, detail="仅临时批次支持按批导入学生")
+    return await _import_students(db, c, body.names, body.allow_duplicates, a)
 
 
 class AssignmentPatch(BaseModel):
@@ -291,6 +365,10 @@ class AssignmentPatch(BaseModel):
     class_time: str | None = None
     content: str | None = None
     status: str | None = None
+    series: str | None = None
+    level: int | None = None
+    term: str | None = None
+    note: str | None = Field(default=None, max_length=128)
 
 
 @router.patch("/{assignment_id}")
@@ -310,9 +388,22 @@ async def update_assignment(
         value = getattr(body, field)
         if value is not None:
             setattr(a, field, value)
+    if c.is_temp:
+        for field in ("series", "level", "term"):
+            value = getattr(body, field)
+            if value is not None:
+                setattr(a, field, value)
+        if body.note is not None:
+            a.note = body.note.strip()
 
-    error = validate_unit_fields(
-        c, a.unit_no, a.lesson_type, a.has_preview, a.preview_unit_no, a.preview_half
+    error = validate_assignment_metadata(a, c) or validate_unit_fields(
+        c,
+        a.unit_no,
+        a.lesson_type,
+        a.has_preview,
+        a.preview_unit_no,
+        a.preview_half,
+        assignment=a,
     )
     if error:
         raise HTTPException(status_code=400, detail=error)
@@ -354,7 +445,23 @@ async def delete_assignment(
     await db.execute(
         delete(FeedbackSnapshot).where(FeedbackSnapshot.assignment_id == assignment_id)
     )
+    if a.series is not None:
+        student_ids = select(Student.id).where(
+            Student.class_id == a.class_id, Student.assignment_id == assignment_id
+        )
+        await db.execute(delete(ErrorRecord).where(ErrorRecord.student_id.in_(student_ids)))
+        await db.execute(delete(Submission).where(Submission.student_id.in_(student_ids)))
+        await db.execute(
+            delete(FeedbackSnapshot).where(FeedbackSnapshot.student_id.in_(student_ids))
+        )
+        await db.execute(delete(AbilityReport).where(AbilityReport.student_id.in_(student_ids)))
     await db.execute(delete(Question).where(Question.assignment_id == assignment_id))
+    if a.series is not None:
+        await db.execute(
+            delete(Student).where(
+                Student.class_id == a.class_id, Student.assignment_id == assignment_id
+            )
+        )
     await db.delete(a)
     await db.commit()
 
@@ -622,6 +729,7 @@ class GradingIn(BaseModel):
     checked_question_ids: list[int] = []
     rating_override: str = ""
     notes: dict[int, str] = {}  # question_id → 该题定稿内容（manual 人工填充 / ai_expand 定稿）
+    scores: dict[int, float] | None = None
     final_text: str = ""
     used_phrase_ids: list[int] = []  # 本次用到的话术（问候/评级/Issue），驱动 use_count 越用越聪明
     preview_wrong: list[int] = []  # 预习错题题号（1-5，不算分）
@@ -644,6 +752,9 @@ async def save_grading(
         raise HTTPException(status_code=404, detail="学生不存在")
     if s.class_id != a.class_id:
         raise HTTPException(status_code=400, detail="学生不属于该批次的班级")
+    expected_assignment_id = a.id if a.series is not None else None
+    if s.assignment_id != expected_assignment_id:
+        raise HTTPException(status_code=400, detail="学生不属于该批次")
     if body.status not in SUBMISSION_STATUSES:
         raise HTTPException(status_code=400, detail="未知提交状态")
 
@@ -695,6 +806,33 @@ async def save_grading(
     unknown = [qid for qid in checked_ids if qid not in qmap]
     if unknown:
         raise HTTPException(status_code=400, detail=f"题目不属于本批次：{unknown}")
+    unknown_score_ids = [qid for qid in (body.scores or {}) if qid not in qmap]
+    if unknown_score_ids:
+        raise HTTPException(status_code=400, detail=f"题目不属于本批次：{unknown_score_ids}")
+
+    old_error_rows = (
+        await db.execute(
+            select(ErrorRecord).where(
+                ErrorRecord.student_id == student_id,
+                ErrorRecord.question_id.in_(
+                    select(Question.id).where(Question.assignment_id == assignment_id)
+                ),
+            )
+        )
+    ).scalars().all()
+    previous_scores = {er.question_id: er.awarded_score for er in old_error_rows}
+    awarded_scores = {
+        qid: (
+            body.scores.get(qid, 0.0)
+            if body.scores is not None
+            else previous_scores.get(qid, 0.0)
+        )
+        for qid in checked_ids
+    }
+    scores_to_validate = {**awarded_scores, **(body.scores or {})}
+    for qid, awarded_score in scores_to_validate.items():
+        if not 0 <= awarded_score <= qmap[qid].score_weight:
+            raise HTTPException(status_code=400, detail=f"题目得分须在 0 到本题满分之间：{qid}")
 
     # 预习错题：纯登记不算分；题号限定 1-5，仅预习批次可提交
     preview_wrong = sorted(set(body.preview_wrong))
@@ -704,11 +842,17 @@ async def save_grading(
         if any(not isinstance(n, int) or n < 1 or n > 5 for n in preview_wrong):
             raise HTTPException(status_code=400, detail="预习错题题号须在 1-5 之间")
 
-    # 后端复算：总分 100 按权重归一化，扣勾选错题权重
+    # 后端复算：总分 100 按权重归一化，只扣错题未得部分
     if body.status in GRADED_STATUSES:
         total_weight = sum(q.score_weight for q in questions)
-        checked_weight = sum(qmap[qid].score_weight for qid in checked_ids)
-        score = round(100 * (total_weight - checked_weight) / total_weight, 2) if total_weight > 0 else 100.0
+        deducted_weight = sum(
+            qmap[qid].score_weight - awarded_scores[qid] for qid in checked_ids
+        )
+        score = (
+            round(100 * (total_weight - deducted_weight) / total_weight, 2)
+            if total_weight > 0
+            else 100.0
+        )
         rating = body.rating_override or rating_for(score, await get_thresholds(db))
         rating_override = body.rating_override
     else:
@@ -748,6 +892,7 @@ async def save_grading(
                 ErrorRecord(
                     student_id=student_id,
                     question_id=qid,
+                    awarded_score=awarded_scores[qid],
                     note=body.notes.get(qid, ""),
                 )
             )

@@ -144,13 +144,17 @@ export default function Dashboard() {
           ))}
         </section>
 
-        <section className="block">
-          <Link className="row" to="/notes">
-            <span className="row-name">
-              笔记库
-              <span>批改反馈与图文笔记</span>
-            </span>
-          </Link>
+        <section className="dashboard-shortcuts">
+          <div className="dashboard-shortcut-grid">
+            <Link className="dashboard-shortcut" to="/notes">
+              <span className="dashboard-shortcut-title">笔记库</span>
+              <span className="dashboard-shortcut-sub">批改反馈与图文笔记</span>
+            </Link>
+            <Link className="dashboard-shortcut" to="/temp">
+              <span className="dashboard-shortcut-title">临时批改</span>
+              <span className="dashboard-shortcut-sub">独立名单与作业批次</span>
+            </Link>
+          </div>
         </section>
 
         <section className="block">

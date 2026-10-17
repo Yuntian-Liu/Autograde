@@ -2,11 +2,12 @@ import { IconChevronLeft } from "../components/icons";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useBlocker, useNavigate, useParams } from "react-router-dom";
 import { App as AntApp, Tooltip } from "antd";
-import { apiGet, apiPut } from "../api";
+import { apiGet, apiPost, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
 import AIFloat from "../components/AIFloat";
 import Confetti from "../components/Confetti";
 import SaveStatus from "../components/SaveStatus";
+import StudentImportModal from "../components/StudentImportModal";
 import PageSkeleton from "../components/PageSkeleton";
 import { STATUS_META, scoreTone, seriesLabel } from "../meta";
 import { ratingFor } from "../rating";
@@ -27,6 +28,7 @@ export default function QuickGrade() {
   const [assignment, setAssignment] = useState(null);
   const [students, setStudents] = useState([]);
   const [error, setError] = useState(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [wrongMap, setWrongMap] = useState({}); // studentId -> Set(questionId) 标错
   const [previewWrongMap, setPreviewWrongMap] = useState({}); // studentId -> Set(预习题号1-5) 标错（不计分）
   const [dirtyMap, setDirtyMap] = useState({}); // studentId -> bool
@@ -103,8 +105,12 @@ export default function QuickGrade() {
 
   function scoreFor(sid) {
     const wrong = wrongMap[sid] || new Set();
+    const awardedMap = students.find((s) => s.id === sid)?.error_scores || {};
     let lost = 0;
-    for (const qid of wrong) lost += weightById[qid] || 0;
+    for (const qid of wrong) {
+      const weight = weightById[qid] || 0;
+      lost += weight - (awardedMap[qid] ?? 0);
+    }
     return totalWeight > 0 ? ((100 * (totalWeight - lost)) / totalWeight).toFixed(2) : "100.00";
   }
 
@@ -162,6 +168,7 @@ export default function QuickGrade() {
       checked_question_ids: [...(wrongMap[sid] || [])],
       rating_override: sub?.rating_override || "",
       notes: st?.error_notes || {},
+      scores: st?.error_scores || {},
       final_text: "",
       preview_wrong: [...(previewWrongMap[sid] || [])].sort((a, b) => a - b),
     });
@@ -256,6 +263,8 @@ export default function QuickGrade() {
     );
 
   const c = assignment.class;
+  const isTemp = Boolean(c?.is_temp);
+  const tempEmpty = isTemp && students.length === 0;
   const dirtyCount = students.filter((s) => dirtyMap[s.id]).length;
 
   return (
@@ -264,24 +273,37 @@ export default function QuickGrade() {
       <AppHeader
         crumbs={[
           { label: "工作台", to: "/" },
-          ...(c ? [{ label: `${seriesLabel(c.series)} ${c.name}`, to: `/classes/${c.id}` }] : []),
+          ...(isTemp
+            ? [{ label: "临时批改", to: "/temp" }]
+            : c
+              ? [{ label: `${seriesLabel(c.series)} ${c.name}`, to: `/classes/${c.id}` }]
+              : []),
           {
             label: `${assignment.unit_label} ${assignment.content}`.trim(),
             to: `/assignments/${assignment.slug || assignment.id}`,
           },
-          { label: "快捷批改" },
+          { label: tempEmpty ? "答案速查" : "快捷批改" },
         ]}
       />
       <div className="wrap wrap-wide">
-        <AIFloat assignmentId={assignment.id} />
+        {!tempEmpty && <AIFloat assignmentId={assignment.id} />}
         <Link className="back" to={`/assignments/${assignment.slug || assignment.id}`}>
           <IconChevronLeft />返回批次
         </Link>
-        <h1 style={{ marginTop: "var(--s3)" }}>快捷批改 · {assignment.unit_label}</h1>
+        <h1 style={{ marginTop: "var(--s3)" }}>
+          {tempEmpty ? `答案速查 · ${assignment.unit_label}` : `快捷批改 · ${assignment.unit_label}`}
+        </h1>
 
         {/* 上半区：答案速查（无解析无题干，纯答案紧凑总览） */}
         <section className="block">
-          <div className="sec-title">答案速查</div>
+          <div className={tempEmpty ? "sec-title sec-title-row" : "sec-title"}>
+            答案速查
+            {tempEmpty && (
+              <button className="btn" onClick={() => setImportOpen(true)}>
+                添加本批名单
+              </button>
+            )}
+          </div>
           {assignment.sections.length === 0 && <div className="row">题库待录入</div>}
           <div className="qa-grid">
             {assignment.has_preview && (
@@ -335,7 +357,7 @@ export default function QuickGrade() {
         </section>
 
         {/* 下半区：学生 × 题目 标错矩阵 */}
-        {(assignment.sections.length > 0 || previewReady) && (
+        {!tempEmpty && (assignment.sections.length > 0 || previewReady) && (
           <section className="block">
             <div className="sec-title sec-title-row">
               标错矩阵
@@ -519,6 +541,22 @@ export default function QuickGrade() {
           </section>
         )}
       </div>
+      {isTemp && (
+        <StudentImportModal
+          open={importOpen}
+          onClose={() => setImportOpen(false)}
+          students={students}
+          title="添加本批名单"
+          existingLabel="本批已有"
+          onImport={(names, allowDuplicates) =>
+            apiPost(`/assignments/${assignment.id}/students/batch`, {
+              names,
+              allow_duplicates: allowDuplicates,
+            })
+          }
+          onImported={load}
+        />
+      )}
     </div>
   );
 }

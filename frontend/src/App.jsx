@@ -9,6 +9,7 @@ import AssignmentDetail from "./pages/AssignmentDetail";
 import Grading from "./pages/Grading";
 import QuestionBatchEdit from "./pages/QuestionBatchEdit";
 import QuickGrade from "./pages/QuickGrade";
+import TempGrading from "./pages/TempGrading";
 import Notes from "./pages/Notes";
 import NoteDetail from "./pages/NoteDetail";
 import NoteImport from "./pages/NoteImport";
@@ -86,6 +87,14 @@ export default function App() {
         element={
           <RequireAuth>
             <Dashboard />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/temp"
+        element={
+          <RequireAuth>
+            <TempGrading />
           </RequireAuth>
         }
       />

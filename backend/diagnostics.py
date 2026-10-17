@@ -42,9 +42,9 @@ from models import (
     Submission,
 )
 
-APP_VERSION = "0.17.0"
+APP_VERSION = "0.18.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
-AGREEMENT_VERSION = "2026-09-24.2"
+AGREEMENT_VERSION = "2026-10-17"
 _STARTED_AT = datetime.now(timezone.utc)
 
 MAX_LOG_ENTRIES = 500
@@ -289,6 +289,49 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
             "classes": await count_classes(),
             "students": await count_owned(Student, Student.class_id),
             "assignments": await count_owned(Assignment, Assignment.class_id),
+            # 临时批改健康（V0.18.0）：临时名单只允许「同班 + 本批 + 临时批」；
+            # 异常应恒为 0——非 0 即跨批串数据、孤儿 assignment_id 或误挂正式批
+            "temp_assignments": (
+                await db.execute(
+                    select(func.count(Assignment.id))
+                    .join(Class, Assignment.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid, Class.is_temp.is_(True))
+                )
+            ).scalar_one(),
+            "temp_students": (
+                await db.execute(
+                    select(func.count(Student.id))
+                    .join(Class, Student.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid, Class.is_temp.is_(True))
+                )
+            ).scalar_one(),
+            "temp_roster_anomalies": (
+                await db.execute(
+                    select(func.count(Student.id))
+                    .join(Class, Student.class_id == Class.id)
+                    .outerjoin(Assignment, Student.assignment_id == Assignment.id)
+                    .where(
+                        Class.owner_uid == user.uid,
+                        Student.assignment_id.is_not(None),
+                        (
+                            Assignment.id.is_(None)
+                            | (Student.class_id != Assignment.class_id)
+                            | (Assignment.series.is_(None))
+                        ),
+                    )
+                )
+            ).scalar_one()
+            + (
+                await db.execute(
+                    select(func.count(Student.id))
+                    .join(Class, Student.class_id == Class.id)
+                    .where(
+                        Class.owner_uid == user.uid,
+                        Class.is_temp.is_(True),
+                        Student.assignment_id.is_(None),
+                    )
+                )
+            ).scalar_one(),
             # 业务编码健康（V0.13.0）：缺码数应恒为 0——非 0 即发码/回填断链；
             # 无届别班级数同理（cohort 空 = 编码前缀来源缺失）
             "codes_students": (
@@ -351,6 +394,27 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                     .join(Student, ErrorRecord.student_id == Student.id)
                     .join(Class, Student.class_id == Class.id)
                     .where(Class.owner_uid == user.uid)
+                )
+            ).scalar_one(),
+            "partial_score_records": (
+                await db.execute(
+                    select(func.count(ErrorRecord.id))
+                    .join(Student, ErrorRecord.student_id == Student.id)
+                    .join(Class, Student.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid, ErrorRecord.awarded_score > 0)
+                )
+            ).scalar_one(),
+            "score_anomalies": (
+                await db.execute(
+                    select(func.count(ErrorRecord.id))
+                    .join(Student, ErrorRecord.student_id == Student.id)
+                    .join(Class, Student.class_id == Class.id)
+                    .join(Question, ErrorRecord.question_id == Question.id)
+                    .where(
+                        Class.owner_uid == user.uid,
+                        (ErrorRecord.awarded_score < 0)
+                        | (ErrorRecord.awarded_score > Question.score_weight),
+                    )
                 )
             ).scalar_one(),
             "feedback_snapshots": (

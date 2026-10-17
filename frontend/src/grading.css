@@ -87,6 +87,13 @@
   color: var(--accent);
 }
 .score-hero .of { font-family: var(--font-mono); font-size: var(--t-caption); color: var(--ink-2); margin-top: 2px; }
+.score-hero-button {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.score-hero-button:hover { border-color: var(--accent); }
 
 .rating-row {
   padding: var(--s4) var(--s6);

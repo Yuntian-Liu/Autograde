@@ -22,14 +22,20 @@ export function buildFeedbackDoc({ title, ratingPhrase, sections, checkedSet, no
     blocks.push({
       section: sec.section,
       items: picked.map((q) => {
-        if (q.mode === "verbatim" && q.explanation) {
-          // verbatim：题号+答案一行，解析原文另起行照抄（不加任何标签骨架）
-          return { id: q.id, kind: "answer", seq: q.seq, answer: q.standard_answer, explanation: q.explanation };
+        const note = (notes || {})[q.id];
+        if (q.mode === "verbatim" && (note || q.explanation)) {
+          // verbatim：题号+答案一行；有该生个别修订时用修订，否则照抄题库原解析
+          return {
+            id: q.id,
+            kind: "answer",
+            seq: q.seq,
+            answer: q.standard_answer,
+            explanation: note || q.explanation,
+          };
         }
         if (q.mode === "verbatim") {
           return { id: q.id, kind: "text", text: null, blank: `${sec.section} · 第 ${q.seq} 题 · 待填充` };
         }
-        const note = (notes || {})[q.id];
         return {
           id: q.id,
           kind: "text",

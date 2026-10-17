@@ -98,13 +98,18 @@ export default function QuestionBatchEdit() {
     );
 
   const c = assignment.class;
+  const isTemp = Boolean(c?.is_temp);
 
   return (
     <div className="page-enter">
       <AppHeader
         crumbs={[
           { label: "工作台", to: "/" },
-          ...(c ? [{ label: `${seriesLabel(c.series)} ${c.name}`, to: `/classes/${c.id}` }] : []),
+          ...(isTemp
+            ? [{ label: "临时批改", to: "/temp" }]
+            : c
+              ? [{ label: `${seriesLabel(c.series)} ${c.name}`, to: `/classes/${c.id}` }]
+              : []),
           { label: `${assignment.unit_label} ${assignment.content}`.trim(), to: `/assignments/${assignment.slug || assignment.id}` },
           { label: "整批编辑" },
         ]}

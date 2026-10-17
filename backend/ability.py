@@ -107,7 +107,8 @@ async def build_evidence(
         note = (er.note or "").strip()
         err_blocks.append(
             f"── {a.unit_label} · {q.section} 第{q.seq}题\n"
-            f"错点/讲解记录：{note if note else '（无文字记录，仅标记错误）'}"
+            f"错点/讲解记录：{note if note else '（无文字记录，仅标记错误）'}\n"
+            f"本题得分 {er.awarded_score} / {q.score_weight}"
         )
 
     snap_blocks: list[tuple[int, str]] = []  # (lesson_no, block) 供从远到近裁剪

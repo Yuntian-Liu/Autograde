@@ -2,12 +2,13 @@ import { IconChevronLeft } from "../components/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { App as AntApp, Input, Modal, Select } from "antd";
-import { apiGet, apiPatch, apiPut } from "../api";
+import { apiGet, apiPatch, apiPost, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
 import CodeChip from "../components/CodeChip";
 import Confetti from "../components/Confetti";
 import AIFloat from "../components/AIFloat";
 import SaveStatus from "../components/SaveStatus";
+import StudentImportModal from "../components/StudentImportModal";
 import QuestionEditor from "../components/QuestionEditor";
 import {
   STATUS_META,
@@ -54,6 +55,8 @@ export default function Grading() {
   const [assignment, setAssignment] = useState(null);
   const [students, setStudents] = useState([]);
   const [error, setError] = useState(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [currentId, setCurrentId] = useState(null);
   const [celebrate, setCelebrate] = useState(false); // 全班改完撒花（每次进页最多一次）
   const celebratedRef = useRef(false);
@@ -61,9 +64,11 @@ export default function Grading() {
   const [checkedMap, setCheckedMap] = useState({});
   const [previewMap, setPreviewMap] = useState({}); // studentId -> 预习错题题号（1-5，不计分）
   const [notesMap, setNotesMap] = useState({});
+  const [scoresMap, setScoresMap] = useState({}); // studentId -> { questionId: 本题得分 }
   const [ratingOverrides, setRatingOverrides] = useState({});
   const [statusDrafts, setStatusDrafts] = useState({});
   const [editingQid, setEditingQid] = useState(null);
+  const [breakdownOpen, setBreakdownOpen] = useState(false); // 实时扣分明细小票
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false); // 上次保存失败（状态灯红灯）
   const [phrases, setPhrases] = useState([]);
@@ -102,16 +107,19 @@ export default function Grading() {
         if (list.length) setGreetingId(list[Math.floor(Math.random() * list.length)].id);
         const checked = {};
         const notes = {};
+        const scores = {};
         const snapshots = {};
         const preview = {};
         for (const stu of s) {
           checked[stu.id] = [...stu.error_question_ids];
           notes[stu.id] = { ...stu.error_notes };
+          scores[stu.id] = { ...stu.error_scores };
           snapshots[stu.id] = stu.feedback_text ?? null;
           preview[stu.id] = [...(stu.submission?.preview_wrong || [])];
         }
         setCheckedMap(checked);
         setNotesMap(notes);
+        setScoresMap(scores);
         setSnapshotMap(snapshots);
         setPreviewMap(preview);
         // 预习错题已入库的学生：「预习有错题」话术自动勾上并按错数填 N（可手动取消/改数）
@@ -137,7 +145,7 @@ export default function Grading() {
         setCurrentId((target || firstTodo || s[0] || {}).id ?? null);
       })
       .catch((e) => setError(e.message));
-  }, [assignmentId]);
+  }, [assignmentId, reloadKey]);
 
   const questionById = useMemo(() => {
     const map = {};
@@ -154,6 +162,7 @@ export default function Grading() {
   const checkedIds = current ? checkedMap[current.id] || [] : [];
   const checkedSet = useMemo(() => new Set(checkedIds), [checkedIds]);
   const currentNotes = current ? notesMap[current.id] || {} : {};
+  const currentScores = current ? scoresMap[current.id] || {} : {};
   // 预习：答题卡答案 + 当前学生预习错题集合（不计分，仅驱动「预习有错题」计数）
   const previewAnswers = assignment?.preview_answers || [];
   const previewChecked = current ? previewMap[current.id] || [] : [];
@@ -176,13 +185,19 @@ export default function Grading() {
   const snapshot = snapshotRaw ? stripSnapshotGreeting(snapshotRaw) : null;
   const showSnapshot = Boolean(snapshot) && !dirtyMap[current?.id];
 
-  const checkedWeight = checkedIds.reduce(
-    (sum, qid) => sum + (questionById[qid]?.score_weight || 0),
-    0
-  );
-  // 总分 100 按权重归一化，扣掉勾选错题权重，保留两位小数（与后端复算同规则）
+  function awardedFor(qid) {
+    const weight = questionById[qid]?.score_weight || 0;
+    const raw = Number(currentScores[qid] ?? 0);
+    return Math.min(weight, Math.max(0, Number.isFinite(raw) ? raw : 0));
+  }
+
+  // 总分 100 按权重归一化：勾错题按本题得分计算扣分（0=全错，中间值=部分得分）
+  const deductedWeight = checkedIds.reduce((sum, qid) => {
+    const weight = questionById[qid]?.score_weight || 0;
+    return sum + (weight - awardedFor(qid));
+  }, 0);
   const score =
-    totalWeight > 0 ? ((100 * (totalWeight - checkedWeight)) / totalWeight).toFixed(2) : "100.00";
+    totalWeight > 0 ? ((100 * (totalWeight - deductedWeight)) / totalWeight).toFixed(2) : "100.00";
   const autoRating = ratingFor(Number(score), thresholds || undefined);
   const rating = (current && ratingOverrides[current.id]) || autoRating;
 
@@ -366,11 +381,18 @@ export default function Grading() {
     });
   }
 
-  function saveNote(qid, note) {
+  function saveNote(qid, note, awardedScore) {
     if (!current) return;
     setNotesMap((prev) => ({
       ...prev,
       [current.id]: { ...(prev[current.id] || {}), [qid]: note },
+    }));
+    setScoresMap((prev) => ({
+      ...prev,
+      [current.id]: {
+        ...(prev[current.id] || {}),
+        [qid]: awardedScore ?? prev[current.id]?.[qid] ?? 0,
+      },
     }));
     setEditingQid(null);
     markDirty();
@@ -593,6 +615,7 @@ export default function Grading() {
         checked_question_ids: checkedIds,
         rating_override: ratingOverrides[current.id] || "",
         notes: currentNotes,
+        scores: currentScores,
         final_text: finalText,
         used_phrase_ids: usedIds,
         preview_wrong: previewChecked,
@@ -607,6 +630,7 @@ export default function Grading() {
       if (me) {
         setCheckedMap((prev) => ({ ...prev, [me.id]: [...me.error_question_ids] }));
         setNotesMap((prev) => ({ ...prev, [me.id]: { ...me.error_notes } }));
+        setScoresMap((prev) => ({ ...prev, [me.id]: { ...me.error_scores } }));
         setPreviewMap((prev) => ({ ...prev, [me.id]: [...(me.submission?.preview_wrong || [])] }));
         setStatusDrafts((prev) => ({ ...prev, [me.id]: me.submission?.status || statusDraft }));
       }
@@ -653,17 +677,30 @@ export default function Grading() {
   }
 
   const c = assignment.class;
+  const isTemp = Boolean(c?.is_temp);
+  const tempEmpty = isTemp && students.length === 0;
   const editingQuestion = editingQid ? questionById[editingQid] : null;
+  // 扣分明细小票：只保留真正产生扣分的题目与板块（未扣分一律不显示）
+  const deductionSections = (assignment?.sections || [])
+    .map((sec) => ({
+      ...sec,
+      items: sec.questions.filter((q) => checkedSet.has(q.id) && q.score_weight - awardedFor(q.id) > 0),
+    }))
+    .filter((sec) => sec.items.length > 0);
 
   return (
     <div className="page-enter">
       {celebrate && <Confetti />}
-      <AIFloat assignmentId={assignment.id} />
+      {!tempEmpty && <AIFloat assignmentId={assignment.id} />}
       <AppHeader
         compact
         crumbs={[
           { label: "工作台", to: "/" },
-          ...(c ? [{ label: `${seriesLabel(c.series)} ${c.name}`, to: `/classes/${c.id}` }] : []),
+          ...(isTemp
+            ? [{ label: "临时批改", to: "/temp" }]
+            : c
+              ? [{ label: `${seriesLabel(c.series)} ${c.name}`, to: `/classes/${c.id}` }]
+              : []),
           {
             label: `${assignment.unit_label} ${assignment.content}`.trim(),
             to: `/assignments/${assignment.slug || assignment.id}`,
@@ -671,11 +708,29 @@ export default function Grading() {
           { label: "批改" },
         ]}
       >
-        {deadlineText(assignment.class_time) && (
+        {!isTemp && deadlineText(assignment.class_time) && (
           <span className="deadline">{deadlineText(assignment.class_time)}</span>
         )}
       </AppHeader>
 
+      {tempEmpty ? (
+        <main className="wrap">
+          <Link className="back" to={`/assignments/${assignment.slug || assignment.id}`}>
+            <IconChevronLeft />返回批次
+          </Link>
+          <div className="empty-state" style={{ marginTop: "var(--s3)" }}>
+            <p>本批还没有名单</p>
+            <div className="btn-row" style={{ justifyContent: "center" }}>
+              <button className="btn primary" onClick={() => setImportOpen(true)}>
+                添加本批名单
+              </button>
+              <Link className="btn" to={`/assignments/${assignment.slug || assignment.id}/quick`}>
+                返回答案速查
+              </Link>
+            </div>
+          </div>
+        </main>
+      ) : (
       <main className="grading-main">
         {/* 左栏：学生名单 */}
         <section className="panel">
@@ -746,24 +801,27 @@ export default function Grading() {
                   </h1>
                   <div className="stu-meta">
                     {c ? `${seriesLabel(c.series)} ${c.name}` : ""} · {assignment.unit_label}{" "}
-                    {assignment.content} · 第 {assignment.lesson_no} 次课 ·{" "}
+                    {assignment.content}
+                    {!isTemp && ` · 第 ${assignment.lesson_no} 次课`} ·{" "}
                     <CodeChip code={assignment.code} />
                   </div>
-                  <div className="stu-stats">
-                    <div className="stat">
-                      <div className="k">近 5 次平均</div>
-                      <div className="v">{fmtScore(current.recent_avg_5)}</div>
+                  {!isTemp && (
+                    <div className="stu-stats">
+                      <div className="stat">
+                        <div className="k">近 5 次平均</div>
+                        <div className="v">{fmtScore(current.recent_avg_5)}</div>
+                      </div>
+                      <div className="stat">
+                        <div className="k">上一次</div>
+                        <div className="v">{fmtScore(current.last_score)}</div>
+                      </div>
+                      <div className="stat">
+                        <div className="k">本次出勤</div>
+                        <div className="v">已到</div>
+                      </div>
                     </div>
-                    <div className="stat">
-                      <div className="k">上一次</div>
-                      <div className="v">{fmtScore(current.last_score)}</div>
-                    </div>
-                    <div className="stat">
-                      <div className="k">本次出勤</div>
-                      <div className="v">已到</div>
-                    </div>
-                  </div>
-                  {current.weak_sections.length > 0 && (
+                  )}
+                  {!isTemp && current.weak_sections.length > 0 && (
                     <div className="weak-tags">
                       {current.weak_sections.map((sec) => (
                         <span className="weak-tag" key={sec}>
@@ -782,7 +840,12 @@ export default function Grading() {
                     {current.note || "+ 添加备注（仅自己可见）"}
                   </span>
                 </div>
-                <div className="score-hero">
+                <button
+                  type="button"
+                  className="score-hero score-hero-button"
+                  onClick={() => setBreakdownOpen(true)}
+                  title="查看实时扣分明细"
+                >
                   <div className="lab">当前分数 · 预览</div>
                   <div className={`num ${statusDraft === "未交" ? "" : scoreTone(score)}`}>
                     {statusDraft === "未交" ? "—" : score}
@@ -790,9 +853,9 @@ export default function Grading() {
                   <div className="of">
                     {statusDraft === "未交"
                       ? "未交 · 不计分"
-                      : `已勾选 ${checkedIds.length} / ${totalQuestions} 题`}
+                      : `已勾选 ${checkedIds.length} / ${totalQuestions} 题 · 点击查明细`}
                   </div>
-                </div>
+                </button>
               </div>
 
               {statusDraft !== "未交" && (
@@ -1068,15 +1131,81 @@ export default function Grading() {
           </div>
         </section>
       </main>
+      )}
+
+      {isTemp && (
+        <StudentImportModal
+          open={importOpen}
+          onClose={() => setImportOpen(false)}
+          students={students}
+          title="添加本批名单"
+          existingLabel="本批已有"
+          onImport={(names, allowDuplicates) =>
+            apiPost(`/assignments/${assignment.id}/students/batch`, {
+              names,
+              allow_duplicates: allowDuplicates,
+            })
+          }
+          onImported={() => setReloadKey((key) => key + 1)}
+        />
+      )}
 
       <QuestionEditor
         question={editingQuestion}
         note={editingQid ? currentNotes[editingQid] : ""}
+        score={editingQid ? currentScores[editingQid] ?? 0 : 0}
+        maxScore={editingQuestion?.score_weight || 0}
         open={Boolean(editingQid)}
         onClose={() => setEditingQid(null)}
-        onSave={(note) => saveNote(editingQid, note)}
+        onSave={(note, awardedScore) => saveNote(editingQid, note, awardedScore)}
         onUncheck={() => uncheckFromEditor(editingQid)}
       />
+
+      <Modal
+        centered
+        open={breakdownOpen}
+        onCancel={() => setBreakdownOpen(false)}
+        footer={null}
+        width={520}
+        title="扣分明细 · 实时"
+      >
+        <div className="receipt">
+          <div className="receipt-head">
+            <div className="receipt-title">当前得分 {score}</div>
+            <div className="receipt-meta">仅显示扣分项 · 已勾选 {checkedIds.length} / {totalQuestions} 题</div>
+          </div>
+          {deductionSections.length === 0 && <div className="receipt-sec">暂无扣分</div>}
+          {deductionSections.map((sec) => {
+            const secLost = sec.items.reduce((sum, q) => sum + (q.score_weight - awardedFor(q.id)), 0);
+            return (
+              <div className="receipt-sec" key={sec.section}>
+                <div className="receipt-sec-t receipt-sec-deduct">
+                  <span>{sec.section}</span>
+                  <span>扣 {fmtScore(secLost)}</span>
+                </div>
+                <div className="receipt-bill">
+                  {sec.items.map((q) => (
+                    <div className="receipt-bill-row" key={q.id}>
+                      <span>第 {q.seq} 题</span>
+                      <span className="receipt-bill-sum">扣 {fmtScore(q.score_weight - awardedFor(q.id))}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {deductionSections.length > 0 && (
+            <div className="receipt-sec">
+              <div className="receipt-bill">
+                <div className="receipt-bill-total">
+                  <span>合计扣分</span>
+                  <span className="receipt-total-v">扣 {fmtScore(deductedWeight)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
 
       <Modal
         centered

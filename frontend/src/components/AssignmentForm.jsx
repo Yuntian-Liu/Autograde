@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { App as AntApp, DatePicker, InputNumber, Modal, Select, Switch } from "antd";
+import { App as AntApp, DatePicker, Input, InputNumber, Modal, Select, Switch } from "antd";
 import dayjs from "dayjs";
 import { apiPatch, apiPost } from "../api";
 
@@ -15,13 +15,23 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
   return { value: `${h}:${m}`, label: `${h}:${m}` };
 });
 
+function unitInRange(value, term) {
+  const [lo, hi] = TERM_UNIT_RANGE[term] || [1, 12];
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : lo;
+}
+
 // 批次创建/编辑表单：课型默认值按班级系列预填（WW→L，NG→Day），可切换
-export default function AssignmentForm({ open, onClose, classInfo, assignment, onSaved }) {
+export default function AssignmentForm({ open, onClose, classInfo, assignment, onSaved, temp = false }) {
   const { message } = AntApp.useApp();
   const editing = Boolean(assignment);
-  const [lo, hi] = TERM_UNIT_RANGE[classInfo?.term] || [1, 12];
-
-  const [unitNo, setUnitNo] = useState(lo);
+  const initialTerm = classInfo?.term || "A";
+  const initialUnit = (TERM_UNIT_RANGE[initialTerm] || [1, 12])[0];
+  const [series, setSeries] = useState(classInfo?.series || "WW");
+  const [level, setLevel] = useState(classInfo?.level ?? 1);
+  const [term, setTerm] = useState(initialTerm);
+  const [note, setNote] = useState("");
+  const [unitNo, setUnitNo] = useState(initialUnit);
   const [lessonType, setLessonType] = useState("L");
   const [unitLessonNo, setUnitLessonNo] = useState(1);
   const [lessonNo, setLessonNo] = useState(1);
@@ -29,18 +39,28 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
   const [classHM, setClassHM] = useState(""); // "14:00"
   const [content, setContent] = useState("");
   const [hasPreview, setHasPreview] = useState(false);
-  const [previewUnitNo, setPreviewUnitNo] = useState(lo);
-  const [previewHalf, setPreviewHalf] = useState(classInfo?.term || "A");
+  const [previewUnitNo, setPreviewUnitNo] = useState(initialUnit);
+  const [previewHalf, setPreviewHalf] = useState(initialTerm);
   const [saving, setSaving] = useState(false);
+  const activeTerm = temp ? term : classInfo?.term;
+  const [lo, hi] = TERM_UNIT_RANGE[activeTerm] || [1, 12];
+  const [previewLo, previewHi] = TERM_UNIT_RANGE[activeTerm] || [1, 12];
 
   useEffect(() => {
     if (!open || !classInfo) return;
-    const [lo_] = TERM_UNIT_RANGE[classInfo.term] || [1, 12];
+    const assignmentClass = assignment?.class;
+    const nextSeries = temp ? assignmentClass?.series || "WW" : classInfo.series;
+    const nextTerm = temp ? assignmentClass?.term || "A" : classInfo.term;
+    const [lo_] = TERM_UNIT_RANGE[nextTerm] || [1, 12];
+    setSeries(nextSeries || "WW");
+    setLevel(temp ? assignmentClass?.level ?? 1 : classInfo.level ?? 1);
+    setTerm(nextTerm || "A");
+    setNote(temp ? assignment?.note || "" : "");
     if (assignment) {
       setUnitNo(assignment.unit_no);
       setLessonType(assignment.lesson_type);
       setUnitLessonNo(assignment.unit_lesson_no);
-      setLessonNo(assignment.lesson_no);
+      setLessonNo(temp ? 0 : assignment.lesson_no);
       // class_time 形如 "2026-09-12 14:00"，拆成日期 + 时间两个控件
       const [d, t] = (assignment.class_time || "").split(" ");
       setClassDate(d ? dayjs(d) : null);
@@ -48,20 +68,29 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
       setContent(assignment.content || "");
       setHasPreview(Boolean(assignment.has_preview));
       setPreviewUnitNo(assignment.preview_unit_no ?? lo_);
-      setPreviewHalf(assignment.preview_half || classInfo.term);
+      setPreviewHalf(assignment.preview_half || nextTerm);
     } else {
       setUnitNo(lo_);
-      setLessonType(SERIES_LESSON_TYPE[classInfo.series] || "L");
+      setLessonType(SERIES_LESSON_TYPE[nextSeries] || "L");
       setUnitLessonNo(1);
-      setLessonNo((classInfo.next_lesson_no || 1));
+      setLessonNo(temp ? 0 : classInfo.next_lesson_no || 1);
       setClassDate(null);
       setClassHM("");
-      setContent(CONTENT_BY_LESSON_TYPE[SERIES_LESSON_TYPE[classInfo.series]] || "练习");
+      setContent(CONTENT_BY_LESSON_TYPE[SERIES_LESSON_TYPE[nextSeries]] || "练习");
       setHasPreview(false);
       setPreviewUnitNo(lo_);
-      setPreviewHalf(classInfo.term);
+      setPreviewHalf(nextTerm);
     }
-  }, [open, assignment, classInfo]);
+  }, [open, assignment, classInfo, temp]);
+
+  function changeTerm(value) {
+    setTerm(value);
+    setUnitNo((current) => unitInRange(current, value));
+  }
+
+  function changePreviewHalf(value) {
+    setPreviewHalf(value);
+  }
 
   async function submit() {
     if (saving) return;
@@ -76,9 +105,10 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
       has_preview: lessonType === "Day" ? hasPreview : false,
       preview_unit_no: hasPreview ? previewUnitNo : null,
       preview_half: hasPreview ? previewHalf : "",
-      lesson_no: lessonNo,
-      class_time: classDate && classHM ? `${classDate.format("YYYY-MM-DD")} ${classHM}` : "",
+      lesson_no: temp ? 0 : lessonNo,
+      class_time: temp ? "" : classDate && classHM ? `${classDate.format("YYYY-MM-DD")} ${classHM}` : "",
       content: content.trim(),
+      ...(temp ? { series, level, term, note: note.trim() } : {}),
     };
     setSaving(true);
     try {
@@ -111,6 +141,30 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
       destroyOnHidden
     >
       <div className="form-grid">
+        {temp && (
+          <>
+            <span className="flab">系列</span>
+            <Select
+              value={series}
+              onChange={setSeries}
+              options={[
+                { value: "WW", label: "WW（厚少 · Wonderful World）" },
+                { value: "NG", label: "NG（厚中）" },
+              ]}
+            />
+            <span className="flab">级别</span>
+            <InputNumber min={1} max={12} value={level} onChange={(v) => setLevel(v)} />
+            <span className="flab">上下册</span>
+            <Select
+              value={term}
+              onChange={changeTerm}
+              options={[
+                { value: "A", label: "A（上册 U1-6）" },
+                { value: "B", label: "B（下册 U7-12）" },
+              ]}
+            />
+          </>
+        )}
         <span className="flab">单元号</span>
         <InputNumber min={lo} max={hi} value={unitNo} onChange={(v) => setUnitNo(v)} />
         <span className="flab">课型</span>
@@ -132,25 +186,29 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
         />
         <span className="flab">单元内课次</span>
         <InputNumber min={1} max={20} value={unitLessonNo} onChange={(v) => setUnitLessonNo(v)} />
-        <span className="flab">第几次课</span>
-        <InputNumber min={1} value={lessonNo} onChange={(v) => setLessonNo(v)} />
-        <span className="flab">上课日期</span>
-        <DatePicker
-          value={classDate}
-          onChange={setClassDate}
-          placeholder="选择日期"
-          style={{ width: "100%" }}
-          allowClear
-        />
-        <span className="flab">上课时间</span>
-        <Select
-          value={classHM || undefined}
-          onChange={setClassHM}
-          options={TIME_OPTIONS}
-          placeholder="选择时间"
-          allowClear
-          showSearch
-        />
+        {!temp && (
+          <>
+            <span className="flab">第几次课</span>
+            <InputNumber min={1} value={lessonNo} onChange={(v) => setLessonNo(v)} />
+            <span className="flab">上课日期</span>
+            <DatePicker
+              value={classDate}
+              onChange={setClassDate}
+              placeholder="选择日期"
+              style={{ width: "100%" }}
+              allowClear
+            />
+            <span className="flab">上课时间</span>
+            <Select
+              value={classHM || undefined}
+              onChange={setClassHM}
+              options={TIME_OPTIONS}
+              placeholder="选择时间"
+              allowClear
+              showSearch
+            />
+          </>
+        )}
         <span className="flab">作业内容</span>
         <Select
           value={content || undefined}
@@ -160,6 +218,12 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
             { value: "伴学手册", label: "伴学手册" },
           ]}
         />
+        {temp && (
+          <>
+            <span className="flab">备注</span>
+            <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="可选" />
+          </>
+        )}
         {lessonType === "Day" && (
           <>
             <span className="flab">预习</span>
@@ -174,15 +238,15 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
               <>
                 <span className="flab">预习单元号</span>
                 <InputNumber
-                  min={lo}
-                  max={hi}
+                  min={previewLo}
+                  max={previewHi}
                   value={previewUnitNo}
                   onChange={(v) => setPreviewUnitNo(v)}
                 />
                 <span className="flab">上下册</span>
                 <Select
                   value={previewHalf}
-                  onChange={setPreviewHalf}
+                  onChange={changePreviewHalf}
                   options={[
                     { value: "A", label: "A（上册）" },
                     { value: "B", label: "B（下册）" },

@@ -1,25 +1,30 @@
 import { useEffect, useState } from "react";
-import { App as AntApp, Input, Modal } from "antd";
+import { App as AntApp, Input, InputNumber, Modal } from "antd";
 import { apiPost } from "../api";
 import { modeLabel } from "../meta";
 
 // 统一编辑窗（DEVELOPMENT.md 2.6）：按题目 mode 分态
 // verbatim 只读展示冻结解析 / manual 空白框填内容 / ai_expand 先填错点 → AI 起草 → 窗内可改 → 定稿
-export default function QuestionEditor({ question, note, open, onClose, onSave, onUncheck }) {
+export default function QuestionEditor({ question, note, score = 0, maxScore = 0, open, onClose, onSave, onUncheck }) {
   const { message } = AntApp.useApp();
   const [text, setText] = useState("");
   const [errorDesc, setErrorDesc] = useState("");
   const [drafting, setDrafting] = useState(false);
+  const [editing, setEditing] = useState(false); // verbatim：默认只读，点「修改解析」才进入编辑
+  const [scoreValue, setScoreValue] = useState(0); // 本题得分（默认全错 0，可给部分分）
 
   useEffect(() => {
     if (open) {
-      setText(note || "");
+      setText(note || (question?.mode === "verbatim" ? question.explanation || "" : ""));
       setErrorDesc("");
+      setEditing(false);
+      setScoreValue(Number(score) || 0);
     }
-  }, [open, note]);
+  }, [open, note, question, score]);
 
   if (!question) return null;
   const { mode } = question;
+  const scoreChanged = Number(scoreValue) !== Number(score || 0);
 
   async function draft() {
     if (!errorDesc.trim()) return message.error("请先描述学生错点");
@@ -51,14 +56,38 @@ export default function QuestionEditor({ question, note, open, onClose, onSave, 
             取消勾选
           </button>
           {mode !== "verbatim" && (
-            <button className="btn primary" onClick={() => onSave(text)}>
+            <button className="btn primary" onClick={() => onSave(text, scoreValue)}>
               定稿
             </button>
           )}
-          {mode === "verbatim" && (
-            <button className="btn primary" onClick={onClose}>
-              关闭
-            </button>
+          {mode === "verbatim" && !editing && (
+            <>
+              <button className="btn" onClick={() => setEditing(true)}>
+                修改解析
+              </button>
+              <button
+                className="btn primary"
+                onClick={scoreChanged ? () => onSave(note || question.explanation || "", scoreValue) : onClose}
+              >
+                {scoreChanged ? "保存" : "关闭"}
+              </button>
+            </>
+          )}
+          {mode === "verbatim" && editing && (
+            <>
+              <button
+                className="btn"
+                onClick={() => {
+                  setText(note || question.explanation || "");
+                  setEditing(false);
+                }}
+              >
+                取消修改
+              </button>
+              <button className="btn primary" onClick={() => onSave(text.trim(), scoreValue)}>
+                保存解析
+              </button>
+            </>
           )}
         </div>
       }
@@ -68,8 +97,30 @@ export default function QuestionEditor({ question, note, open, onClose, onSave, 
         <div className="qinfo-line">答案：{question.standard_answer}</div>
       </div>
 
-      {mode === "verbatim" && (
-        <p className="frozen-text">{question.explanation || "（本题无冻结解析）"}</p>
+      <div className="qscore-row">
+        <span className="qscore-label">本题得分</span>
+        <InputNumber
+          min={0}
+          max={maxScore}
+          step={0.5}
+          precision={2}
+          value={scoreValue}
+          onChange={(value) => setScoreValue(value ?? 0)}
+        />
+        <span className="qscore-max">/ {maxScore}</span>
+      </div>
+
+      {mode === "verbatim" && !editing && (
+        <p className="frozen-text">{note || question.explanation || "（本题无冻结解析）"}</p>
+      )}
+
+      {mode === "verbatim" && editing && (
+        <Input.TextArea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={6}
+          placeholder="修改本题解析（仅影响当前学生的反馈）"
+        />
       )}
 
       {mode === "manual" && (

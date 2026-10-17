@@ -8,6 +8,7 @@ import AssignmentForm from "../components/AssignmentForm";
 import ClassForm from "../components/ClassForm";
 import CodeChip from "../components/CodeChip";
 import PageSkeleton from "../components/PageSkeleton";
+import StudentImportModal from "../components/StudentImportModal";
 import { classMeta, seriesLabel } from "../meta";
 
 function batchStatus(a) {
@@ -24,9 +25,6 @@ export default function ClassDetail() {
   const [formOpen, setFormOpen] = useState(false);
   const [classFormOpen, setClassFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  const [importText, setImportText] = useState("");
-  const [importing, setImporting] = useState(false);
-  const [dupOpen, setDupOpen] = useState(null); // 重名决策：[{name, kind: existing|repeat, code?}]
   const [noteStudent, setNoteStudent] = useState(null); // 备注编辑目标
   const [noteText, setNoteText] = useState("");
   const [deleteStep, setDeleteStep] = useState(0); // 删除班级双重确认：0=关 1=警示 2=输名确认
@@ -41,54 +39,6 @@ export default function ClassDetail() {
   useEffect(() => {
     reload();
   }, [reload]);
-
-  function parseNames() {
-    return importText
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }
-
-  async function doImport(allowDup) {
-    setImporting(true);
-    try {
-      const res = await apiPost(`/classes/${id}/students/batch`, {
-        names: parseNames(),
-        allow_duplicates: allowDup,
-      });
-      message.success(
-        `成功导入 ${res.added} 人` +
-          (res.skipped.length ? `，跳过重复 ${res.skipped.length} 人（${res.skipped.join("、")}）` : "")
-      );
-      setImportOpen(false);
-      setDupOpen(null);
-      setImportText("");
-      reload();
-    } catch (e) {
-      message.error(e.message);
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  // 点击「导入」：先查重——与班内已有学生重名 / 名单内重复，交给用户决定（保留/跳过/返回修改）
-  function importStudents() {
-    const names = parseNames();
-    if (names.length === 0) return message.error("请先粘贴名单（一行一个名字）");
-    const existingByName = new Map((data.students || []).map((s) => [s.name, s]));
-    const counts = {};
-    names.forEach((n) => (counts[n] = (counts[n] || 0) + 1));
-    const dups = [];
-    for (const n of new Set(names)) {
-      if (existingByName.has(n)) {
-        dups.push({ name: n, kind: "existing", code: existingByName.get(n).code });
-      } else if (counts[n] > 1) {
-        dups.push({ name: n, kind: "repeat" });
-      }
-    }
-    if (dups.length === 0) return doImport(false);
-    setDupOpen(dups);
-  }
 
   async function saveNote() {
     try {
@@ -261,59 +211,18 @@ export default function ClassDetail() {
         classInfo={data}
         onSaved={reload}
       />
-      <Modal
-        centered
+      <StudentImportModal
         open={importOpen}
-        onCancel={() => setImportOpen(false)}
-        onOk={importStudents}
-        confirmLoading={importing}
-        title="导入名单"
-        okText="导入"
-        cancelText="取消"
-        width={400}
-        destroyOnHidden
-      >
-        <Input.TextArea
-          value={importText}
-          onChange={(e) => setImportText(e.target.value)}
-          rows={10}
-          placeholder={"一行一个名字\nAmy\nBob"}
-        />
-      </Modal>
-      {/* 重名决策：保留（SID 区分）/ 跳过 / 返回修改。
-          zIndex 必须高过导入弹窗——AntD 同层 Modal  stacking 不稳，导入弹窗 textarea 会盖住按钮 */}
-      <Modal
-        centered
-        open={dupOpen !== null}
-        onCancel={() => setDupOpen(null)}
-        title="检测到重名"
-        width={440}
-        footer={null}
-        zIndex={1010}
-      >
-        <div className="dup-list">
-          {(dupOpen || []).map((d) => (
-            <div className="dup-row" key={d.name}>
-              <span className="dup-name">{d.name}</span>
-              <span className="dup-kind">
-                {d.kind === "existing" ? `班内已有${d.code ? ` · ${d.code}` : ""}` : "名单内重复"}
-              </span>
-            </div>
-          ))}
-        </div>
-        <p className="dup-hint">保留后，重名学生将通过编码（SID）区分；也可以只跳过重名，或返回修改名单。</p>
-        <div className="dup-actions">
-          <button className="btn" onClick={() => setDupOpen(null)} disabled={importing}>
-            返回修改
-          </button>
-          <button className="btn" onClick={() => doImport(false)} disabled={importing}>
-            跳过重名
-          </button>
-          <button className="btn primary" onClick={() => doImport(true)} disabled={importing}>
-            保留重名
-          </button>
-        </div>
-      </Modal>
+        onClose={() => setImportOpen(false)}
+        students={data.students}
+        onImport={(names, allowDuplicates) =>
+          apiPost(`/classes/${id}/students/batch`, {
+            names,
+            allow_duplicates: allowDuplicates,
+          })
+        }
+        onImported={reload}
+      />
       <Modal
         centered
         open={noteStudent !== null}

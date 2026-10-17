@@ -4,11 +4,17 @@ import json
 
 from sqlalchemy import func, select
 
-from feedback import feedback_type, unit_progress
+from feedback import effective_metadata, feedback_type, unit_progress
 from models import Assignment, Class, Phrase, Question, Student, Submission
 
 GRADED_STATUSES = ("已批改", "缺作业")  # 有分数的状态
 PROCESSED_STATUSES = ("已批改", "缺作业", "未交")  # 已处理：唯一未处理状态是「待批改」
+
+
+def assignment_student_condition(a: Assignment):
+    if a.series is not None:
+        return Student.assignment_id == a.id
+    return Student.assignment_id.is_(None)
 
 
 async def assignment_status(db, a: Assignment) -> str:
@@ -16,7 +22,11 @@ async def assignment_status(db, a: Assignment) -> str:
     全部学生待批改 = 未开始；存在待批改 = 批改中；零待批改 = 已完成。
     没有提交记录的学生视为待批改。"""
     total = (
-        await db.execute(select(func.count(Student.id)).where(Student.class_id == a.class_id))
+        await db.execute(
+            select(func.count(Student.id)).where(
+                Student.class_id == a.class_id, assignment_student_condition(a)
+            )
+        )
     ).scalar_one()
     if total == 0:
         return "未开始"
@@ -58,16 +68,23 @@ def parse_int_list(raw: str) -> list[int]:
         return []
 
 
-def class_brief(c: Class) -> dict:
+def class_brief(c: Class, a: Assignment | None = None) -> dict:
+    series, level, term = c.series, c.level, c.term
+    name = c.name
+    if a is not None:
+        series, level, term = effective_metadata(a, c)
+        if c.is_temp:
+            name = f"{series}{level}{term}"
     return {
         "id": c.id,
-        "name": c.name,
-        "series": c.series,
-        "level": c.level,
-        "term": c.term,
+        "name": name,
+        "series": series,
+        "level": level,
+        "term": term,
         "cohort": c.cohort,
         "schedule": c.schedule,
-        "feedback_type": feedback_type(c.series),
+        "feedback_type": feedback_type(series),
+        "is_temp": c.is_temp,
     }
 
 
@@ -90,6 +107,7 @@ def assignment_brief(a: Assignment) -> dict:
         "class_time": a.class_time,
         "content": a.content,
         "status": a.status,
+        "note": a.note,
     }
 
 

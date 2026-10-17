@@ -1,0 +1,145 @@
+/* Bencho Inline confirm（MIT — bencho.dev/licence），适配 Autograde 设计令牌。 */
+.inline-confirm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+.inline-confirm-error {
+  max-width: 220px;
+  color: var(--danger);
+  font-size: var(--t-caption);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.say-well {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  font-family: var(--font-body);
+  --say-pane: var(--surface);
+  --say-fill: var(--bg-soft);
+  --say-ink: var(--ink);
+  --say-muted: var(--ink-3);
+  --say-pick: var(--accent);
+}
+
+.say-well--danger { --say-ink: var(--danger); }
+
+.say-body {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  border-radius: var(--say-r, var(--r-md));
+  background: var(--say-fill, var(--say-pane));
+  transition: scale var(--dur) var(--ease);
+}
+
+.say-well[data-phase="idle"]:has(.say-face:hover) .say-body,
+.say-well[data-phase="idle"]:has(.say-face:hover) .say-face { scale: 0.97; }
+
+.say-well[data-phase="idle"]:has(.say-face:active) .say-body,
+.say-well[data-phase="idle"]:has(.say-face:active) .say-face { scale: 0.94; }
+
+.say-face,
+.say-pending {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  padding: 0 var(--s4);
+  border: 0;
+  border-radius: var(--say-r, var(--r-md));
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: var(--t-body);
+  white-space: nowrap;
+}
+
+.say-face {
+  color: var(--say-ink);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), scale var(--dur) var(--ease);
+}
+
+.say-face:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.say-merged {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding-right: var(--s1);
+  border-radius: var(--say-r, var(--r-md));
+  overflow: hidden;
+}
+
+.say-done {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0 var(--s3);
+  color: var(--say-muted);
+  font-size: var(--t-body);
+  white-space: nowrap;
+}
+
+.say-undo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  height: calc(var(--say-h, 44px) - var(--s2));
+  padding: 0 var(--s3);
+  margin-left: auto;
+  border: 0;
+  border-radius: var(--say-r, var(--r-md));
+  background: transparent;
+  color: var(--say-pick);
+  font-family: var(--font-body);
+  font-size: var(--t-caption);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+
+.say-undo:hover { background: var(--accent-bg); }
+
+.say-pending { color: var(--ink-2); }
+.say-pending svg { animation: say-spin 0.8s linear infinite; }
+
+.say-fuse {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--say-pick);
+  animation: say-burn linear forwards;
+}
+
+@keyframes say-burn {
+  from { width: 100%; }
+  to { width: 0; }
+}
+
+@keyframes say-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .say-body,
+  .say-face,
+  .say-undo { transition: none; }
+  .say-pending svg { animation: none; }
+  .say-fuse { display: none; }
+}

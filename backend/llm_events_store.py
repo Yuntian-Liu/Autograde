@@ -15,6 +15,7 @@ from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import SessionLocal
+from auth.models import User
 from models import Assignment, Class, LlmCallEvent, Setting, Student
 
 logger = logging.getLogger(__name__)
@@ -458,12 +459,13 @@ async def llm_health(db: AsyncSession, window: str = "24h") -> dict:
     }
 
 
-def _event_out(e: LlmCallEvent, ctx: dict | None = None) -> dict:
+def _event_out(e: LlmCallEvent, ctx: dict | None = None, nickname: str = "") -> dict:
     return {
         "id": e.id,
         "created_at": e.created_at.isoformat() if e.created_at else None,
         "feature": e.feature,
         "model": e.model,
+        "caller": {"uid": e.uid, "nickname": nickname},
         "context": ctx or None,
         "prompt_tokens": e.prompt_tokens,
         "completion_tokens": e.completion_tokens,
@@ -509,6 +511,15 @@ async def _resolve_contexts(db: AsyncSession, events: list[LlmCallEvent]) -> dic
     return out
 
 
+async def _resolve_callers(db: AsyncSession, events: list[LlmCallEvent]) -> dict[int, str]:
+    """批量解析调用人昵称（UID 始终由事件自身提供，避免逐行 N+1）。"""
+    uids = {e.uid for e in events if e.uid}
+    if not uids:
+        return {}
+    rows = (await db.execute(select(User.uid, User.nickname).where(User.uid.in_(uids)))).all()
+    return {uid: nickname or "" for uid, nickname in rows}
+
+
 async def llm_calls_list(
     db: AsyncSession, window: str = "7d", feature: str = "", limit: int = 100
 ) -> list[dict]:
@@ -528,7 +539,8 @@ async def llm_calls_list(
         )
     ).scalars().all()
     ctxs = await _resolve_contexts(db, events)
-    return [_event_out(e, ctxs.get(e.id)) for e in events]
+    callers = await _resolve_callers(db, events)
+    return [_event_out(e, ctxs.get(e.id), callers.get(e.uid, "")) for e in events]
 
 
 async def llm_call_detail(db: AsyncSession, call_id: int) -> dict | None:
@@ -537,7 +549,8 @@ async def llm_call_detail(db: AsyncSession, call_id: int) -> dict | None:
     if e is None:
         return None
     ctxs = await _resolve_contexts(db, [e])
-    out = _event_out(e, ctxs.get(e.id))
+    callers = await _resolve_callers(db, [e])
+    out = _event_out(e, ctxs.get(e.id), callers.get(e.uid, ""))
     out["unit_input"] = e.unit_input
     out["unit_output"] = e.unit_output
     out["unit_cache_hit"] = e.unit_cache_hit

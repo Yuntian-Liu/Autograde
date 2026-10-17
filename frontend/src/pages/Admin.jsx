@@ -473,6 +473,9 @@ function CallReceiptModal({ detail, onClose }) {
           <div className="receipt-meta">
             {detail.model} · {fmtTime(detail.created_at)} · <TierTag tier={detail.price_tier} />
           </div>
+          <div className="receipt-meta">
+            调用人：{detail.caller?.nickname || "—"}（UID {detail.caller?.uid ?? "—"}）
+          </div>
         </div>
 
         <div className="receipt-sec">
@@ -621,6 +624,14 @@ function LlmPanel() {
               render: (v) => (v ? fmtTime(v) : "—") },
             { title: "功能", dataIndex: "feature", width: 100,
               render: (v) => FEATURE_LABELS[v] || v },
+            { title: "调用人", width: 180, render: (_, r) =>
+              r.caller ? (
+                <span>
+                  {r.caller.nickname || "—"} <span className="mono">UID {r.caller.uid}</span>
+                </span>
+              ) : (
+                "—"
+              ) },
             { title: "业务对象", width: 200, render: (_, r) =>
               r.context ? (
                 <span>

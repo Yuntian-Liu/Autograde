@@ -71,16 +71,21 @@ async def next_seq(db: AsyncSession, kind: str) -> int:
     return int(row.value)
 
 
-async def issue_code(db: AsyncSession, kind: str, cls: Class | None) -> str:
+async def issue_code(
+    db: AsyncSession, kind: str, cls: Class | None, assignment: Assignment | None = None
+) -> str:
     """创建路径专用发码：cohort 为空时按当前时间兜底（正常建班已带 cohort）。
     cls=None（游离笔记无班级）用兜底前缀 X00——前缀只是人读信息位，唯一性由序号段保证。"""
     if cls is None:
         cohort, info = default_cohort(), "X00"
     else:
+        if cls.is_temp and kind in ("S", "A") and assignment is None:
+            raise ValueError("临时学生/批次发码必须提供本批元数据")
         cohort = cls.cohort if validate_cohort(cls.cohort or "") else default_cohort()
-        series = SERIES_LETTER.get(cls.series, "X")
-        term = TERM_DIGIT.get(cls.term, "0")
-        info = f"{series}{cls.level}{term}"
+        source = assignment if cls.is_temp and assignment is not None else cls
+        series = SERIES_LETTER.get(source.series, "X")
+        term = TERM_DIGIT.get(source.term, "0")
+        info = f"{series}{source.level}{term}"
     seq = await next_seq(db, kind)
     body = f"{cohort}{info}{kind}{seq:05d}"
     return f"{cohort}-{info}-{kind}{seq:05d}-{compute_check(body)}"
@@ -116,23 +121,26 @@ async def backfill_codes(db: AsyncSession) -> tuple[int, int, int, int]:
             c.cohort = "202603"
             n_cls += 1
     by_id = {c.id: c for c in classes}
+    assignments = (await db.execute(select(Assignment).order_by(Assignment.id))).scalars().all()
+    assignments_by_id = {a.id: a for a in assignments}
 
     for s in (await db.execute(select(Student).where(Student.code == "").order_by(Student.id))).scalars().all():
         cls = by_id.get(s.class_id)
         if cls is None:
             continue  # 孤儿数据（班级已删）不发码
-        s.code = await issue_code(db, "S", cls)
+        assignment = assignments_by_id.get(s.assignment_id) if s.assignment_id else None
+        if cls.is_temp and (assignment is None or assignment.class_id != cls.id):
+            continue
+        s.code = await issue_code(db, "S", cls, assignment)
         n_student += 1
 
-    for a in (
-        (await db.execute(select(Assignment).where(Assignment.code == "").order_by(Assignment.id)))
-        .scalars()
-        .all()
-    ):
+    for a in assignments:
+        if a.code:
+            continue
         cls = by_id.get(a.class_id)
         if cls is None:
             continue
-        a.code = await issue_code(db, "A", cls)
+        a.code = await issue_code(db, "A", cls, a)
         n_assignment += 1
 
     for n in (

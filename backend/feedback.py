@@ -26,13 +26,32 @@ def unit_progress(a: Assignment) -> str:
     return text
 
 
+def effective_metadata(assignment: Assignment, class_: Class) -> tuple[str, int, str]:
+    if class_.is_temp:
+        return assignment.series, assignment.level, assignment.term
+    return class_.series, class_.level, class_.term
+
+
+def validate_assignment_metadata(assignment: Assignment, class_: Class) -> str | None:
+    if not class_.is_temp:
+        return None
+    if assignment.series not in SERIES_DEFAULT_LESSON_TYPE:
+        return "教材系列仅支持 WW / NG"
+    if assignment.level is None or assignment.level < 1:
+        return "教材级别必须为正整数"
+    if assignment.term not in TERM_UNIT_RANGE:
+        return "册别仅支持 A（上册）/ B（下册）"
+    return None
+
+
 def feedback_type(class_series: str) -> str:
     return SERIES_FEEDBACK_TYPE.get(class_series, "反馈")
 
 
 def feedback_title(student_name: str, assignment: Assignment, class_: Class) -> str:
     """完整反馈标题，如「Alice U7Day1&U7B Preview 伴学手册反馈」。"""
-    return f"{student_name} {unit_progress(assignment)} {feedback_type(class_.series)}"
+    series, _, _ = effective_metadata(assignment, class_)
+    return f"{student_name} {unit_progress(assignment)} {feedback_type(series)}"
 
 
 def sync_unit_label(a: Assignment) -> None:
@@ -47,16 +66,20 @@ def validate_unit_fields(
     has_preview: bool,
     preview_unit_no: int | None,
     preview_half: str,
+    assignment: Assignment | None = None,
 ) -> str | None:
     """校验结构化单元进度字段，返回中文错误信息；None 表示通过。"""
     if lesson_type not in LESSON_TYPES:
         return "课型仅支持 L / Day"
-    lo, hi = TERM_UNIT_RANGE.get(class_.term, (1, 12))
+    term = class_.term
+    if assignment is not None:
+        _, _, term = effective_metadata(assignment, class_)
+    lo, hi = TERM_UNIT_RANGE.get(term, (1, 12))
     if not (lo <= unit_no <= hi):
-        return f"单元号超出本册范围（{class_.term} 册为 U{lo}-U{hi}）"
+        return f"单元号超出本册范围（{term} 册为 U{lo}-U{hi}）"
     if has_preview:
         if preview_unit_no is None or preview_half not in PREVIEW_HALVES:
             return "开启预习时必须填写预习单元号与上下册（A/B）"
         if not (lo <= preview_unit_no <= hi):
-            return f"预习单元号超出本册范围（{class_.term} 册为 U{lo}-U{hi}）"
+            return f"预习单元号超出本册范围（{term} 册为 U{lo}-U{hi}）"
     return None

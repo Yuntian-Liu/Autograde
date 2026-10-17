@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Autograde", version="0.17.0", lifespan=lifespan)
+app = FastAPI(title="Autograde", version="0.18.0", lifespan=lifespan)
 
 # GZip：JS/CSS/JSON 压缩传输（1.8MB bundle → 约 450KB）
 from fastapi.middleware.gzip import GZipMiddleware
@@ -123,6 +123,7 @@ app.include_router(admin.router)
 app.include_router(classes.router)
 app.include_router(students.router)
 app.include_router(assignments.router)
+app.include_router(assignments.workspace_router)
 app.include_router(questions.router)
 app.include_router(ai.router)
 app.include_router(ability.router)
