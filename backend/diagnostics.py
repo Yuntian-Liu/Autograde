@@ -28,6 +28,7 @@ from llm_events_store import get_prices
 from models import (
     AbilityReport,
     Assignment,
+    BatchAnalysisReport,
     Class,
     ClientEvent,
     ErrorRecord,
@@ -42,9 +43,9 @@ from models import (
     Submission,
 )
 
-APP_VERSION = "0.18.0"
+APP_VERSION = "0.19.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
-AGREEMENT_VERSION = "2026-10-17"
+AGREEMENT_VERSION = "2026-10-18.2"
 _STARTED_AT = datetime.now(timezone.utc)
 
 MAX_LOG_ENTRIES = 500
@@ -127,6 +128,8 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
             "total_ms": e.total_ms,
             "cost_yuan": e.cost_yuan,
             "price_tier": e.price_tier,
+            "web_search_count": e.web_search_count,
+            "unit_web_search": e.unit_web_search,
             "finish_reason": e.finish_reason,
             "is_empty": e.is_empty,
             "created_at": e.created_at.isoformat() if e.created_at else None,
@@ -432,6 +435,13 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                     .join(Student, AbilityReport.student_id == Student.id)
                     .join(Class, Student.class_id == Class.id)
                     .where(Class.owner_uid == user.uid)
+                )
+            ).scalar_one(),
+            "batch_analysis_reports": (
+                await db.execute(
+                    select(func.count(BatchAnalysisReport.id)).where(
+                        BatchAnalysisReport.owner_uid == user.uid
+                    )
                 )
             ).scalar_one(),
             "submissions_by_status": submissions_by_status,

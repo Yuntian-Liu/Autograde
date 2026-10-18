@@ -20,6 +20,7 @@ from access import owned_assignment, owned_question
 from ai import (
     AIParseError,
     APITimeoutError,
+    AIResponseError,
     AIUnavailable,
     chat_stream,
     draft_explanation,
@@ -154,6 +155,7 @@ async def get_parse_job(job_id: str, user: User = Depends(get_current_user)) -> 
 class ChatIn(BaseModel):
     messages: list[dict] = Field(..., max_length=20)
     assignment_id: int | None = None  # 仅成本归属上下文，不进 prompt（盲答原则）
+    web_search: bool = False
 
 
 @router.post("/chat")
@@ -186,15 +188,17 @@ async def chat_api(body: ChatIn, user: User = Depends(get_current_user)):
         usage = None
         finish_reason = None
         text_chars = 0
+        web_search_count = 0
         metrics: dict = {}
         try:
-            async for event in chat_stream(msgs):
+            async for event in chat_stream(msgs, web_search=body.web_search):
                 if event["type"] == "delta":
                     yield f"data: {json.dumps({'type': 'delta', 'text': event['text']}, ensure_ascii=False)}\n\n"
                 elif event["type"] == "done":
                     usage = event["usage"]
                     finish_reason = event["finish_reason"]
                     text_chars = event["text_chars"]
+                    web_search_count = event.get("web_search_count", 0)
                     metrics = event.get("metrics") or {}
                     settle = await record_llm_call(
                         uid=user.uid,
@@ -208,6 +212,7 @@ async def chat_api(body: ChatIn, user: User = Depends(get_current_user)):
                         cache_hit_tokens=(usage or {}).get("cache_hit_tokens", 0),
                         cache_miss_tokens=(usage or {}).get("cache_miss_tokens", 0),
                         reasoning_tokens=(usage or {}).get("reasoning_tokens", 0),
+                        web_search_count=web_search_count,
                         **{k: metrics.get(k, 0) for k in ("ttft_ms", "think_ms", "total_ms")},
                     )
                     payload = {
@@ -216,6 +221,7 @@ async def chat_api(body: ChatIn, user: User = Depends(get_current_user)):
                         "metrics": metrics,
                         "cost_yuan": (settle or {}).get("cost_yuan", 0),
                         "price_tier": (settle or {}).get("price_tier", ""),
+                        "web_search_count": web_search_count,
                     }
                     yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
         except Exception as e:  # 流中断：落一条失败埋点 + 给前端可读错误帧
@@ -229,8 +235,14 @@ async def chat_api(body: ChatIn, user: User = Depends(get_current_user)):
                 finish_reason=finish_reason,
                 is_empty=text_chars == 0,
                 assignment_id=body.assignment_id,
+                web_search_count=web_search_count,
             )
-            hint = "AI 响应超时，请重试" if isinstance(e, APITimeoutError) else "AI 服务异常，请重试"
+            if isinstance(e, AIResponseError):
+                hint = str(e)
+            elif isinstance(e, APITimeoutError):
+                hint = "AI 响应超时，请重试"
+            else:
+                hint = "AI 服务异常，请重试"
             yield f"data: {json.dumps({'type': 'error', 'message': hint}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")

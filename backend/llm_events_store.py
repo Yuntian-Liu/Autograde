@@ -30,6 +30,7 @@ DEFAULT_PRICES = {
     "offpeak_input": 1.0,  # 谷：输入
     "offpeak_output": 4.0,  # 谷：输出
     "offpeak_cache_hit": 0.25,  # 谷：缓存命中
+    "price_web_search": 5.0,  # 网络搜索：元/千次（不按峰谷区分）
     "peak_windows": [["09:00", "12:00"], ["14:00", "18:00"]],  # 北京时间
     "weekend_rule": "all_offpeak",  # all_offpeak=周末全谷 / same=周末同工作日
 }
@@ -42,6 +43,7 @@ _PRICE_KEYS = (
     "offpeak_input",
     "offpeak_output",
     "offpeak_cache_hit",
+    "price_web_search",
 )
 
 
@@ -178,6 +180,7 @@ async def record_llm_call(
     ttft_ms: int = 0,
     think_ms: int = 0,
     total_ms: int = 0,
+    web_search_count: int = 0,
 ) -> dict | None:
     """埋点一条 AI 调用；按调用时刻判峰谷并结算成本（含缓存命中拆分）；
     单价快照同行写入（发票原则）；独立 session，失败静默（只日志）。
@@ -195,6 +198,9 @@ async def record_llm_call(
                 cache_hit=cache_hit_tokens or 0,
                 cache_miss=cache_miss_tokens or 0,
             )
+            search_count = web_search_count or 0
+            unit_web_search = float(prices.get("price_web_search", 5.0))
+            cost += search_count * unit_web_search / 1000
             db.add(
                 LlmCallEvent(
                     uid=uid,
@@ -215,6 +221,8 @@ async def record_llm_call(
                     unit_input=u_in,
                     unit_output=u_out,
                     unit_cache_hit=u_hit,
+                    web_search_count=search_count,
+                    unit_web_search=unit_web_search,
                     finish_reason=finish_reason,
                     is_empty=is_empty,
                 )
@@ -265,10 +273,11 @@ async def ai_usage_stats(db: AsyncSession, window: str = "7d") -> dict:
                     ),
                     0.0,
                 ),
+                func.coalesce(func.sum(LlmCallEvent.web_search_count), 0),
             ).where(*cond)
         )
     ).one()
-    calls, ptok, ctok, cost, empty, failed, peak_cost, offpeak_cost = row
+    calls, ptok, ctok, cost, empty, failed, peak_cost, offpeak_cost, web_search_count = row
 
     by_feature = [
         {"feature": f, "calls": c, "tokens": t, "cost": round(k, 6)}
@@ -323,6 +332,7 @@ async def ai_usage_stats(db: AsyncSession, window: str = "7d") -> dict:
                 func.count(LlmCallEvent.id),
                 func.sum(LlmCallEvent.prompt_tokens + LlmCallEvent.completion_tokens),
                 func.sum(LlmCallEvent.cost_yuan),
+                func.coalesce(func.sum(LlmCallEvent.web_search_count), 0),
             )
             .where(*cond)
             .group_by(func.date(LlmCallEvent.created_at), LlmCallEvent.price_tier)
@@ -330,13 +340,14 @@ async def ai_usage_stats(db: AsyncSession, window: str = "7d") -> dict:
         )
     ).all()
     by_day_map: dict[str, dict] = {}
-    for day, tier, c, t, k in rows:
+    for day, tier, c, t, k, k2 in rows:
         item = by_day_map.setdefault(
             str(day),
-            {"day": str(day), "calls": 0, "tokens": 0, "peak_cost": 0.0, "offpeak_cost": 0.0, "untagged_cost": 0.0},
+            {"day": str(day), "calls": 0, "tokens": 0, "peak_cost": 0.0, "offpeak_cost": 0.0, "untagged_cost": 0.0, "web_search_count": 0},
         )
         item["calls"] += c or 0
         item["tokens"] += int(t or 0)
+        item["web_search_count"] += int(k2 or 0)
         if tier == "peak":
             item["peak_cost"] = round(item["peak_cost"] + float(k or 0), 6)
         elif tier == "offpeak":
@@ -379,6 +390,7 @@ async def ai_usage_stats(db: AsyncSession, window: str = "7d") -> dict:
             "cost_yuan": round(float(cost), 6),
             "peak_cost": round(float(peak_cost), 6),
             "offpeak_cost": round(float(offpeak_cost), 6),
+            "web_search_count": int(web_search_count or 0),
             "empty": int(empty or 0),
             "failed": int(failed or 0),
         },
@@ -477,6 +489,8 @@ def _event_out(e: LlmCallEvent, ctx: dict | None = None, nickname: str = "") -> 
         "total_ms": e.total_ms,
         "cost_yuan": e.cost_yuan,
         "price_tier": e.price_tier or "",
+        "web_search_count": e.web_search_count or 0,
+        "unit_web_search": e.unit_web_search or 0.0,
         "finish_reason": e.finish_reason,
         "is_empty": e.is_empty,
     }

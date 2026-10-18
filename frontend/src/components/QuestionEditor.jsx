@@ -26,6 +26,10 @@ export default function QuestionEditor({ question, note, score = 0, maxScore = 0
   const { mode } = question;
   const scoreChanged = Number(scoreValue) !== Number(score || 0);
 
+  function bumpScore(step) {
+    setScoreValue((value) => Math.max(0, Math.min(maxScore, Number(((Number(value) || 0) + step).toFixed(2)))));
+  }
+
   async function draft() {
     if (!errorDesc.trim()) return message.error("请先描述学生错点");
     setDrafting(true);
@@ -108,6 +112,20 @@ export default function QuestionEditor({ question, note, score = 0, maxScore = 0
           onChange={(value) => setScoreValue(value ?? 0)}
         />
         <span className="qscore-max">/ {maxScore}</span>
+        <span className="qscore-actions">
+          <button type="button" className="btn sm qscore-minus" aria-label="减 1 分" onClick={() => bumpScore(-1)}>
+            -1
+          </button>
+          <button type="button" className="btn sm qscore-minus" aria-label="减 0.5 分" onClick={() => bumpScore(-0.5)}>
+            -0.5
+          </button>
+          <button type="button" className="btn primary sm qscore-plus" aria-label="加 0.5 分" onClick={() => bumpScore(0.5)}>
+            +0.5
+          </button>
+          <button type="button" className="btn primary sm qscore-plus" aria-label="加 1 分" onClick={() => bumpScore(1)}>
+            +1
+          </button>
+        </span>
       </div>
 
       {mode === "verbatim" && !editing && (

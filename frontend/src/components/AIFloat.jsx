@@ -41,6 +41,7 @@ export default function AIFloat({ assignmentId = null }) {
   const [messages, setMessages] = useState([]); // {role, text, meta?}
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [webSearch, setWebSearch] = useState(false); // 网络搜索：默认关闭，用户主动开启
   const [thinkSec, setThinkSec] = useState(null); // 思考计时（秒；null=未在思考）
   const [copiedIdx, setCopiedIdx] = useState(-1); // 刚复制过的消息序号
   const dragRef = useRef(null); // {startX,startY,baseX,baseY,moved}
@@ -94,7 +95,7 @@ export default function AIFloat({ assignmentId = null }) {
     setBusy(true);
     setThinkSec(0);
     thinkTimer.current = setInterval(() => setThinkSec((s) => s + 1), 1000);
-    clientLog.add("ui", `chat_send len=${text.length}`);
+    clientLog.add("ui", `chat_send len=${text.length} web=${webSearch ? 1 : 0}`);
     const history = [...messages, { role: "user", text }];
     setMessages([...history, { role: "assistant", text: "" }]);
     const started = Date.now();
@@ -108,6 +109,7 @@ export default function AIFloat({ assignmentId = null }) {
         body: JSON.stringify({
           messages: history.map((m) => ({ role: m.role, content: m.text })).slice(-20),
           assignment_id: assignmentId,
+          web_search: webSearch,
         }),
       });
       if (!res.ok) {
@@ -149,6 +151,7 @@ export default function AIFloat({ assignmentId = null }) {
               tokens: (u.prompt_tokens || 0) + (u.completion_tokens || 0),
               cost: ev.cost_yuan,
               tier: ev.price_tier,
+              webSearchCount: ev.web_search_count || 0,
             };
             setMessages((ms) => {
               const next = [...ms];
@@ -207,6 +210,7 @@ export default function AIFloat({ assignmentId = null }) {
                   {m.meta && (
                     <div className="ai-meta">
                       用时 {m.meta.elapsed} · tokens {m.meta.tokens.toLocaleString()}
+                      {m.meta.webSearchCount > 0 ? ` · 搜索 ${m.meta.webSearchCount} 次` : ""}
                       {m.meta.cost ? ` · ¥${Number(m.meta.cost).toFixed(4)}` : ""}
                       {m.meta.tier ? `（${m.meta.tier === "offpeak" ? "谷" : "峰"}）` : ""}
                       <button
@@ -240,6 +244,17 @@ export default function AIFloat({ assignmentId = null }) {
                 </div>
               </div>
             )}
+          </div>
+          <div className="ai-panel-tools">
+            <button
+              type="button"
+              className={`ai-search-toggle${webSearch ? " on" : ""}`}
+              onClick={() => setWebSearch((value) => !value)}
+              disabled={busy}
+              aria-pressed={webSearch}
+            >
+              网络搜索
+            </button>
           </div>
           <div className="ai-panel-foot">
             <textarea

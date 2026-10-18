@@ -247,7 +247,7 @@ export default function AssignmentDetail() {
           <CodeChip code={assignment.code} />
         </div>
         {isTemp && assignment.note && <div className="assignment-note">{assignment.note}</div>}
-        <div className="btn-row" style={{ marginTop: "var(--s4)" }}>
+        <div className="btn-row assignment-actions" style={{ marginTop: "var(--s4)" }}>
           {isTemp && !hasStudents ? (
             <Link className="btn primary" to={`/assignments/${assignment.slug || assignment.id}/quick`}>
               答案速查
@@ -262,6 +262,9 @@ export default function AssignmentDetail() {
               </Link>
             </>
           )}
+          <Link className="btn" to={`/assignments/${assignment.slug || assignment.id}/analysis`}>
+            批次分析
+          </Link>
           <button className="btn" onClick={() => setAiOpen(true)}>
             AI 录题
           </button>

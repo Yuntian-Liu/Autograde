@@ -69,7 +69,7 @@ async def overview(
         "graded": graded,
         "db_size_mb": round(db_size / 1024 / 1024, 2),
         "ai_cost_today_yuan": round(float(today_cost), 6),
-        "version": "0.18.0",
+        "version": "0.19.0",
     }
 
 
@@ -220,6 +220,8 @@ class PricesIn(BaseModel):
     offpeak_input: float = Field(..., ge=0)
     offpeak_cache_hit: float = Field(..., ge=0)
     offpeak_output: float = Field(..., ge=0)
+    # 网络搜索（元/千次，不按峰谷区分）
+    price_web_search: float = Field(..., ge=0)
     # 峰时段（北京时间，[["09:00","12:00"],...]，支持跨午夜）与周末规则
     peak_windows: list[list[str]] = Field(default=[["09:00", "12:00"], ["14:00", "18:00"]])
     weekend_rule: str = Field(default="all_offpeak")

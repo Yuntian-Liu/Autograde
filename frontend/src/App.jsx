@@ -6,6 +6,7 @@ import ClassStats from "./pages/ClassStats";
 import StudentDetail from "./pages/StudentDetail";
 import ReportDetail from "./pages/ReportDetail";
 import AssignmentDetail from "./pages/AssignmentDetail";
+import AssignmentAnalysis from "./pages/AssignmentAnalysis";
 import Grading from "./pages/Grading";
 import QuestionBatchEdit from "./pages/QuestionBatchEdit";
 import QuickGrade from "./pages/QuickGrade";
@@ -135,6 +136,14 @@ export default function App() {
         element={
           <RequireAuth>
             <AssignmentDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/assignments/:id/analysis"
+        element={
+          <RequireAuth>
+            <AssignmentAnalysis />
           </RequireAuth>
         }
       />

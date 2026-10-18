@@ -200,6 +200,7 @@ const FEATURE_LABELS = {
   parse_questions: "AI 录题",
   draft_explanation: "讲解起草",
   ability_report: "能力报告",
+  batch_analysis: "AI 批次分析",
   chat: "AI 助教",
 };
 
@@ -221,6 +222,7 @@ function AiPanel() {
     offpeak_input: 1,
     offpeak_output: 4,
     offpeak_cache_hit: 0.25,
+    price_web_search: 5,
     peak_windows: [["09:00", "12:00"], ["14:00", "18:00"]],
     weekend_rule: "all_offpeak",
   });
@@ -245,6 +247,7 @@ function AiPanel() {
           offpeak_input: r.prices.offpeak_input,
           offpeak_output: r.prices.offpeak_output,
           offpeak_cache_hit: r.prices.offpeak_cache_hit,
+          price_web_search: r.prices.price_web_search ?? 5,
           peak_windows: (r.prices.peak_windows || []).map((w) => [...w]),
           weekend_rule: r.prices.weekend_rule || "all_offpeak",
         });
@@ -285,6 +288,7 @@ function AiPanel() {
         <Metric label="调用次数" value={s.calls} sub={`失败 ${s.failed} · 空回答 ${s.empty}`} />
         <Metric label="输入 tokens" value={s.prompt_tokens?.toLocaleString?.() ?? s.prompt_tokens} />
         <Metric label="输出 tokens" value={s.completion_tokens?.toLocaleString?.() ?? s.completion_tokens} />
+        <Metric label="网络搜索" value={`${Number(s.web_search_count ?? 0).toLocaleString()} 次`} />
         <Metric label="总成本" value={`¥${Number(s.cost_yuan).toFixed(4)}`} tone="accent" />
         <Metric label="峰时成本" value={`¥${Number(s.peak_cost ?? 0).toFixed(4)}`} tone="warn" />
         <Metric label="谷时成本" value={`¥${Number(s.offpeak_cost ?? 0).toFixed(4)}`} tone="good" />
@@ -299,7 +303,21 @@ function AiPanel() {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
                 <XAxis dataKey="day" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} width={60} />
-                <Tooltip formatter={(v, name) => [`¥${Number(v).toFixed(4)}`, name === "peak_cost" ? "峰时" : name === "offpeak_cost" ? "谷时" : "未标注"]} />
+                <Tooltip
+                  content={({ label, payload }) => {
+                    const item = payload?.[0]?.payload;
+                    if (!item) return null;
+                    return (
+                      <div className="admin-day-tip">
+                        <div className="admin-day-tip-title">{label}</div>
+                        {item.peak_cost > 0 && <div className="tone-mid">峰时：¥{Number(item.peak_cost).toFixed(4)}</div>}
+                        {item.offpeak_cost > 0 && <div className="tone-good">谷时：¥{Number(item.offpeak_cost).toFixed(4)}</div>}
+                        {item.untagged_cost > 0 && <div>未标注：¥{Number(item.untagged_cost).toFixed(4)}</div>}
+                        {item.web_search_count > 0 && <div className="tone-accent">网络搜索：{item.web_search_count} 次</div>}
+                      </div>
+                    );
+                  }}
+                />
                 <Bar dataKey="peak_cost" stackId="cost" fill="var(--warning)" />
                 <Bar dataKey="offpeak_cost" stackId="cost" fill="var(--success)" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="untagged_cost" stackId="cost" fill="var(--accent)" radius={[3, 3, 0, 0]} />
@@ -396,6 +414,14 @@ function AiPanel() {
             </div>
           </div>
         </div>
+        <div className="price-group">
+          <div className="price-group-title">网络搜索（元 / 千次，不按峰谷区分）</div>
+          <div className="form-grid">
+            <span className="flab">搜索单价</span>
+            <InputNumber min={0} step={0.5} value={priceForm.price_web_search}
+              onChange={(v) => setPriceForm({ ...priceForm, price_web_search: v })} style={{ width: "100%" }} />
+          </div>
+        </div>
         <div className="price-windows">
           <div className="price-group-title">峰时段（北京时间）</div>
           {priceForm.peak_windows.map((w, i) => (
@@ -457,10 +483,19 @@ function cacheRate(r) {
 function CallReceiptModal({ detail, onClose }) {
   if (!detail) return null;
   const lines = [
-    { name: "输入·未命中", tokens: detail.cache_miss_tokens || 0, unit: detail.unit_input },
-    { name: "输入·缓存命中", tokens: detail.cache_hit_tokens || 0, unit: detail.unit_cache_hit },
-    { name: "输出", tokens: detail.completion_tokens || 0, unit: detail.unit_output },
+    { name: "输入·未命中", tokens: detail.cache_miss_tokens || 0, unit: detail.unit_input, divisor: 1e6 },
+    { name: "输入·缓存命中", tokens: detail.cache_hit_tokens || 0, unit: detail.unit_cache_hit, divisor: 1e6 },
+    { name: "输出", tokens: detail.completion_tokens || 0, unit: detail.unit_output, divisor: 1e6 },
   ];
+  if (detail.web_search_count > 0) {
+    lines.push({
+      name: "网络搜索",
+      tokens: detail.web_search_count,
+      unit: detail.unit_web_search,
+      divisor: 1000,
+      suffix: " / 千次",
+    });
+  }
   const answerMs = detail.total_ms && detail.think_ms ? detail.total_ms - detail.think_ms : 0;
   return (
     <Modal open onCancel={onClose} footer={null} width={520} title="调用详情 · 消费单">
@@ -499,16 +534,18 @@ function CallReceiptModal({ detail, onClose }) {
         </div>
 
         <div className="receipt-sec">
-          <div className="receipt-sec-t">费用明细（单价：元/百万 tokens）</div>
+          <div className="receipt-sec-t">
+            {detail.web_search_count > 0 ? "费用明细（token：元/百万；搜索：元/千次）" : "费用明细（单价：元/百万 tokens）"}
+          </div>
           <div className="receipt-bill">
             {lines.map((l) => (
               <div className="receipt-bill-row" key={l.name}>
                 <span>{l.name}</span>
                 <span className="receipt-bill-calc">
-                  {l.tokens.toLocaleString()} × ¥{Number(l.unit || 0).toFixed(2)}
+                  {l.tokens.toLocaleString()} × ¥{Number(l.unit || 0).toFixed(2)}{l.suffix || ""}
                 </span>
                 <span className="receipt-bill-sum">
-                  ¥{((l.tokens * (l.unit || 0)) / 1e6).toFixed(6)}
+                  ¥{((l.tokens * (l.unit || 0)) / l.divisor).toFixed(6)}
                 </span>
               </div>
             ))}
@@ -604,6 +641,7 @@ function LlmPanel() {
             { value: "parse_questions", label: "AI 录题" },
             { value: "draft_explanation", label: "讲解起草" },
             { value: "ability_report", label: "能力报告" },
+            { value: "batch_analysis", label: "AI 批次分析" },
             { value: "chat", label: "AI 助教" },
           ]}
         />

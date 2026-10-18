@@ -1,7 +1,7 @@
 import { IconChevronLeft } from "../components/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { App as AntApp, Input, Modal, Select } from "antd";
+import { App as AntApp, Input, Modal, Select, Tooltip } from "antd";
 import { apiGet, apiPatch, apiPost, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
 import CodeChip from "../components/CodeChip";
@@ -756,36 +756,60 @@ export default function Grading() {
             const status = sub ? sub.status : "待批改";
             const state = (STATUS_META[status] || STATUS_META["待批改"]).state;
             return (
-              <div
+              <Tooltip
                 key={s.id}
-                className={s.id === currentId ? "stu active" : "stu"}
-                onClick={() => setCurrentId(s.id)}
-                title={s.code || undefined}
+                placement="right"
+                mouseEnterDelay={1}
+                title={
+                  <span className="qg-tip">
+                    {s.code && <span className="qg-tip-code">{s.code}</span>}
+                    {s.recent_scores?.length ? (
+                      <>
+                        {s.recent_scores.map((r) => (
+                          <span className="qg-tip-row" key={r.unit_label}>
+                            <span>{r.unit_label}</span>
+                            <b>{Number(r.score).toFixed(2)}</b>
+                          </span>
+                        ))}
+                        {s.recent_avg_5 != null && (
+                          <span className="qg-tip-avg">近 5 次平均 {s.recent_avg_5}</span>
+                        )}
+                      </>
+                    ) : (
+                      "暂无历史分数"
+                    )}
+                  </span>
+                }
               >
-                <span className={`state ${state}`} />
-                <span className="name">{s.name}</span>
-                {status === "缺作业" && <span className="tag-lack">缺项</span>}
-                {status === "未交" && <span className="tag-miss">未交</span>}
-                <span
-                  className={`score ${
-                    s.id === currentId
-                      ? statusDraft === "未交"
-                        ? ""
-                        : scoreTone(score)
-                      : sub && sub.score !== null
-                        ? scoreTone(sub.score)
-                        : ""
-                  }`}
+                <div
+                  className={s.id === currentId ? "stu active" : "stu"}
+                  onClick={() => setCurrentId(s.id)}
                 >
-                  {s.id === currentId
-                    ? statusDraft === "未交"
-                      ? "—"
-                      : score
-                    : sub && sub.score !== null
-                      ? fmtScore(sub.score)
-                      : "—"}
-                </span>
-              </div>
+                  <span className={`state ${state}`} />
+                  <span className="name">{s.name}</span>
+                  {status === "缺作业" && <span className="tag-lack">缺项</span>}
+                  {status === "未交" && <span className="tag-miss">未交</span>}
+                  <span
+                    className={`score ${
+                      s.id === currentId
+                        ? statusDraft === "未交"
+                          ? ""
+                          : scoreTone(score)
+                        : sub && sub.score !== null
+                          ? scoreTone(sub.score)
+                          : ""
+                    }`}
+                  >
+                    {s.id === currentId
+                      ? statusDraft === "未交"
+                        ? "—"
+                        : score
+                      : sub && sub.score !== null
+                        ? fmtScore(sub.score)
+                        : "—"}
+                  </span>
+                </div>
+              </Tooltip>
             );
           })}
         </section>
@@ -1187,7 +1211,9 @@ export default function Grading() {
                   {sec.items.map((q) => (
                     <div className="receipt-bill-row" key={q.id}>
                       <span>第 {q.seq} 题</span>
-                      <span className="receipt-bill-sum">扣 {fmtScore(q.score_weight - awardedFor(q.id))}</span>
+                      <span className="receipt-bill-sum score-receipt-points">
+                        <b>{fmtScore(awardedFor(q.id))}</b> / {fmtScore(q.score_weight)}
+                      </span>
                     </div>
                   ))}
                 </div>

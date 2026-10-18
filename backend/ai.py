@@ -135,6 +135,22 @@ _ABILITY_SYSTEM = """你是资深英语教研分析师。老师会给你一名�
 }
 dimensions 必须恰好包含上述六个维度、顺序一致；每维 evidence 2-4 条（habit 维度可只用统计做证据，quote 摘录统计行即可）。"""
 
+_BATCH_ANALYSIS_HEADINGS = ("整体表现与分数段", "共性薄弱板块", "重点错题", "学生分层", "教学建议")
+_BATCH_ANALYSIS_SYSTEM = """你是资深英语教研分析师。老师会给出一个作业批次的逐生成绩、逐题正确率、当前错题记录与错点原文，以及仅作补充的反馈快照。请输出 Markdown 批次分析报告。
+
+分析纪律：
+1. Submission 汇总出的学生状态、真实分与排名分，以及 ErrorRecord 汇总出的错题、得分和人工错点是当前事实；反馈快照只补充细节，不得用快照覆盖或猜测当前事实
+2. 分数段与整体表现只依据有效分统计；未交与待批改不得当作 0 分纳入平均或分数段。学生分层必须说明未交、待批改的情况，不能虚构其能力结论
+3. 共性薄弱板块依据逐题正确率与错误人数归纳；重点错题优先引用老师写下的人工错点，并保留「板块 + 题号 + 学生」证据，不得杜撰错因
+4. 建议具体、可执行，与本次证据对应；材料不足之处直接说明，禁止空泛鼓励
+
+输出必须恰好包含以下五个二级标题，顺序不变，不要 JSON、代码块、额外标题或前后说明：
+## 整体表现与分数段
+## 共性薄弱板块
+## 重点错题
+## 学生分层
+## 教学建议"""
+
 
 def _extract_json(text: str) -> dict:
     """从模型输出中提取 JSON 对象，容忍代码块包裹与首尾杂文本。"""
@@ -209,6 +225,16 @@ class _StreamTimer:
         if getattr(delta, "reasoning_content", None):
             self.seen_reasoning = True
         if not self.think_ms and getattr(delta, "content", None):
+            self.think_ms = int((now - self.t0) * 1000)
+
+    def on_response_event(self, event) -> None:
+        now = time.monotonic()
+        if not self.ttft_ms:
+            self.ttft_ms = int((now - self.t0) * 1000)
+        event_type = getattr(event, "type", "")
+        if event_type.startswith("response.reasoning"):
+            self.seen_reasoning = True
+        if not self.think_ms and event_type == "response.output_text.delta" and getattr(event, "delta", None):
             self.think_ms = int((now - self.t0) * 1000)
 
     def total_ms(self) -> int:
@@ -389,9 +415,133 @@ async def analyze_ability_stream(student_name: str, class_label: str, evidence_t
     }
 
 
-async def chat_stream(messages: list[dict]) -> AsyncGenerator[dict, None]:
+async def analyze_batch_analysis_stream(
+    class_label: str, assignment_label: str, evidence_text: str
+) -> AsyncGenerator[dict, None]:
+    """流式生成五段 Markdown 批次分析；超时按 chunk 间隔计，正文长度用于任务轮询进度。"""
+    client = _client(max_retries=0)
+    user = (
+        f"班级：{class_label}\n批次：{assignment_label}\n\n"
+        f"{evidence_text}\n\n请按系统要求输出五段 Markdown 批次分析报告。"
+    )
+    stream = await client.chat.completions.create(
+        model=_model(),
+        messages=[
+            {"role": "system", "content": _BATCH_ANALYSIS_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.3,
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+    buf = ""
+    usage = None
+    finish_reason = None
+    timer = _StreamTimer()
+    async for chunk in stream:
+        if chunk.choices:
+            fr = chunk.choices[0].finish_reason
+            if fr:
+                finish_reason = fr
+            timer.on_chunk(chunk.choices[0].delta)
+            delta = chunk.choices[0].delta.content
+            if delta:
+                buf += delta
+                yield {"type": "progress", "recv_chars": len(buf)}
+        u = _usage_dict(chunk)
+        if u:
+            usage = u
+    content = buf.strip()
+    headings = [line.strip() for line in content.splitlines() if line.startswith("#")]
+    expected = [f"## {heading}" for heading in _BATCH_ANALYSIS_HEADINGS]
+    if not content or headings != expected:
+        raise AIParseError("输出未按要求包含五个 Markdown 段落", raw=buf[:500])
+    yield {
+        "type": "done",
+        "data": {"content": content},
+        "usage": usage,
+        "finish_reason": finish_reason,
+        "text_chars": len(buf),
+        "metrics": timer.metrics(),
+    }
+
+
+class AIResponseError(Exception):
+    """Responses API 返回失败或未完成的终态。"""
+
+
+def _responses_usage_dict(response) -> dict | None:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return None
+    prompt_tokens = getattr(usage, "input_tokens", 0) or 0
+    input_details = getattr(usage, "input_tokens_details", None)
+    cached = (getattr(input_details, "cached_tokens", 0) or 0) if input_details else 0
+    output_details = getattr(usage, "output_tokens_details", None)
+    reasoning = (getattr(output_details, "reasoning_tokens", 0) or 0) if output_details else 0
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": getattr(usage, "output_tokens", 0) or 0,
+        "cache_hit_tokens": cached,
+        "cache_miss_tokens": max(prompt_tokens - cached, 0),
+        "reasoning_tokens": reasoning,
+    }
+
+
+async def _chat_web_search_stream(messages: list[dict]) -> AsyncGenerator[dict, None]:
+    client = _client(max_retries=0)
+    stream = await client.responses.create(
+        model=_model(),
+        input=[{"role": m["role"], "content": m["content"]} for m in messages],
+        stream=True,
+        tools=[{"type": "web_search"}],
+    )
+    usage = None
+    finish_reason = None
+    text_chars = 0
+    web_search_count = 0
+    timer = _StreamTimer()
+    async for event in stream:
+        timer.on_response_event(event)
+        event_type = getattr(event, "type", "")
+        if event_type == "response.output_text.delta":
+            delta = getattr(event, "delta", "")
+            if delta:
+                text_chars += len(delta)
+                yield {"type": "delta", "text": delta}
+        elif event_type == "response.web_search_call.completed":
+            web_search_count += 1
+        elif event_type == "response.completed":
+            response = event.response
+            usage = _responses_usage_dict(response)
+            finish_reason = "stop"
+        elif event_type == "response.failed":
+            response = event.response
+            error = getattr(response, "error", None)
+            message = getattr(error, "message", None) or "未知错误"
+            raise AIResponseError(f"AI 搜索响应失败：{message}")
+        elif event_type == "response.incomplete":
+            response = event.response
+            details = getattr(response, "incomplete_details", None)
+            reason = getattr(details, "reason", None) or "未知原因"
+            raise AIResponseError(f"AI 搜索响应未完成：{reason}")
+    yield {
+        "type": "done",
+        "usage": usage,
+        "finish_reason": finish_reason,
+        "text_chars": text_chars,
+        "metrics": timer.metrics(),
+        "web_search_count": web_search_count,
+    }
+
+
+async def chat_stream(messages: list[dict], web_search: bool = False) -> AsyncGenerator[dict, None]:
     """AI 助教通用问答：流式直答，无 system 角色设定（碳碳定：单纯接入模型能力）。
     内容安全由模型侧承担；计时/用量/缓存拆分与全站 AI 调用同口径。"""
+    if web_search:
+        async for event in _chat_web_search_stream(messages):
+            yield event
+        return
     client = _client(max_retries=0)
     stream = await client.chat.completions.create(
         model=_model(),
@@ -423,14 +573,17 @@ async def chat_stream(messages: list[dict]) -> AsyncGenerator[dict, None]:
         "finish_reason": finish_reason,
         "text_chars": text_chars,
         "metrics": timer.metrics(),
+        "web_search_count": 0,
     }
 
 
 __all__ = [
     "AIParseError",
     "APITimeoutError",
+    "AIResponseError",
     "AIUnavailable",
     "analyze_ability_stream",
+    "analyze_batch_analysis_stream",
     "chat_stream",
     "draft_explanation",
     "ensure_available",

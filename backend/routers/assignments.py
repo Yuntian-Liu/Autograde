@@ -14,6 +14,7 @@ from feedback import sync_unit_label, validate_assignment_metadata, validate_uni
 from models import (
     AbilityReport,
     Assignment,
+    BatchAnalysisReport,
     Class,
     ErrorRecord,
     FeedbackSnapshot,
@@ -444,6 +445,9 @@ async def delete_assignment(
     await db.execute(delete(Submission).where(Submission.assignment_id == assignment_id))
     await db.execute(
         delete(FeedbackSnapshot).where(FeedbackSnapshot.assignment_id == assignment_id)
+    )
+    await db.execute(
+        delete(BatchAnalysisReport).where(BatchAnalysisReport.assignment_id == assignment_id)
     )
     if a.series is not None:
         student_ids = select(Student.id).where(

@@ -215,6 +215,9 @@ class LlmCallEvent(Base):
     unit_input: Mapped[float] = mapped_column(Float, default=0.0)
     unit_output: Mapped[float] = mapped_column(Float, default=0.0)
     unit_cache_hit: Mapped[float] = mapped_column(Float, default=0.0)
+    # 网络搜索按次计费：completed 事件次数与结算时单价快照（元/千次）
+    web_search_count: Mapped[int] = mapped_column(Integer, default=0)
+    unit_web_search: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
@@ -283,6 +286,30 @@ class AbilityReport(Base):
     cost_yuan: Mapped[float] = mapped_column(Float, default=0.0)  # 生成这次报告的结算成本
     price_tier: Mapped[str] = mapped_column(String(8), default="")  # peak / offpeak
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class BatchAnalysisReport(Base):
+    """AI 批次分析报告：每批一行，重复生成覆盖内容与本次调用消耗。"""
+
+    __tablename__ = "batch_analysis_reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    assignment_id: Mapped[int] = mapped_column(
+        ForeignKey("assignments.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    owner_uid: Mapped[int] = mapped_column(Integer, index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    model: Mapped[str] = mapped_column(String(64), default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_hit_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_miss_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    reasoning_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_yuan: Mapped[float] = mapped_column(Float, default=0.0)
+    price_tier: Mapped[str] = mapped_column(String(8), default="")
+    total_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
 
 class ClientEvent(Base):
