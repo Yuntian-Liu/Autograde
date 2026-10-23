@@ -13,8 +13,8 @@ RUN npm run build
 FROM python:3.12-slim
 WORKDIR /app
 
-# 系统依赖：captcha 字体渲染（Pillow）
-RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core \
+# 系统依赖：captcha 字体渲染（Pillow）+ curl（Coolify HTTP 健康探针）
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./
