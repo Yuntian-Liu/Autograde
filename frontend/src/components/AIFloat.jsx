@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { getToken } from "../api";
 import { clientLog } from "../utils/clientLog";
 import MdContent from "./MdContent";
@@ -188,7 +189,7 @@ export default function AIFloat({ assignmentId = null }) {
     PANEL_H
   );
 
-  return (
+  return createPortal(
     <>
       {open && (
         <div className="ai-panel" style={{ left: panelPos.x, top: panelPos.y, width: PANEL_W, height: PANEL_H }}>
@@ -300,6 +301,7 @@ export default function AIFloat({ assignmentId = null }) {
           ×
         </button>
       </div>
-    </>
+    </>,
+    document.body
   );
 }

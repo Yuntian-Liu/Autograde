@@ -2,11 +2,58 @@
 
 .grading-main {
   display: grid;
-  grid-template-columns: 224px 1fr 360px;
+  grid-template-columns: 224px minmax(0, 1fr) 360px;
   height: calc(100vh - 54px);
+  transition: grid-template-columns 480ms var(--ease);
 }
-.panel { overflow-y: auto; background: var(--surface); }
+.grading-main.left-collapsed { grid-template-columns: 40px minmax(0, 1fr) 360px; }
+.grading-main.right-collapsed { grid-template-columns: 224px minmax(0, 1fr) 40px; }
+.grading-main.left-collapsed.right-collapsed { grid-template-columns: 40px minmax(0, 1fr) 40px; }
+.panel { min-width: 0; overflow-y: auto; background: var(--surface); }
 .panel + .panel { border-left: 1px solid var(--line); }
+.panel-back { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+.panel-toggle {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.panel-toggle:hover { color: var(--accent); background: var(--accent-bg); }
+.panel-rail {
+  display: none;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  flex-direction: column;
+  gap: var(--s3);
+  border: none;
+  background: var(--surface);
+  color: var(--ink-2);
+  padding: var(--s3) 0;
+  cursor: pointer;
+}
+.panel-rail:hover { color: var(--accent); background: var(--accent-bg); }
+.panel-rail span { writing-mode: vertical-rl; font-size: var(--t-caption); }
+.left-collapsed .grading-students > :not(.panel-rail),
+.right-collapsed .grading-preview > :not(.panel-rail) { display: none; }
+.left-collapsed .grading-students > .panel-rail,
+.right-collapsed .grading-preview > .panel-rail {
+  display: flex;
+  animation: panelContentIn var(--dur) var(--ease) 240ms both;
+}
+.grading-main:not(.left-collapsed) .grading-students > :not(.panel-rail),
+.grading-main:not(.right-collapsed) .grading-preview > :not(.panel-rail) {
+  animation: panelContentIn var(--dur) var(--ease) both;
+}
+@keyframes panelContentIn { from { opacity: 0; } to { opacity: 1; } }
+.pv-actions { display: flex; align-items: center; gap: var(--s2); }
 .panel-head {
   padding: var(--s4);
   border-bottom: 1px solid var(--line);
@@ -19,6 +66,10 @@
 }
 
 /* 左栏：学生名单 */
+.student-list-title { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+.student-nav { display: flex; align-items: center; gap: 0; }
+.student-nav-count { font-family: var(--font-mono); font-size: var(--t-micro); font-weight: 400; color: var(--ink-3); }
+.student-nav .panel-toggle:disabled { color: var(--ink-3); opacity: .35; cursor: default; background: transparent; }
 .progress-track { height: 3px; background: var(--line); border-radius: 2px; margin-top: var(--s3); }
 .progress-fill { height: 100%; background: var(--accent); border-radius: 2px; }
 .progress-num { font-family: var(--font-mono); font-size: var(--t-caption); color: var(--ink-2); margin-top: var(--s2); }
@@ -195,6 +246,7 @@
   gap: var(--s3);
 }
 .save-row .lab { font-weight: 600; font-size: var(--t-strong); }
+.save-row-status { margin-left: auto; }
 
 /* 情况勾选芯片（文本型）：不折字、不被 flex 挤压 */
 .chip.text { min-width: 0; padding: 0 var(--s3); font-family: var(--font-body); white-space: nowrap; flex: none; }

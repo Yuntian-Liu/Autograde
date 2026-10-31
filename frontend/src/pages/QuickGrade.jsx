@@ -306,6 +306,27 @@ export default function QuickGrade() {
           </div>
           {assignment.sections.length === 0 && <div className="row">题库待录入</div>}
           <div className="qa-grid">
+            {assignment.sections.map((sec) => (
+              <div className="qa-sec" key={sec.section}>
+                <div className="qa-sec-name">{sec.section}</div>
+                <div className="qa-chips">
+                  {sec.questions.map((q) => {
+                    const names = wrongNamesOf(q.id);
+                    return (
+                      <span
+                        className={`qa-chip${q.standard_answer.length > 12 ? " long" : ""}`}
+                        key={q.id}
+                        title={names.length ? `本题错 ${names.length} 人：${names.join("、")}` : undefined}
+                      >
+                        <b>{q.seq}</b>
+                        {names.length > 0 && <span className="qg-heat">{names.length}</span>}
+                        <span className="qa-ans">{q.standard_answer}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
             {assignment.has_preview && (
               <div className="qa-sec">
                 <div className="qa-sec-name">
@@ -332,27 +353,6 @@ export default function QuickGrade() {
                 )}
               </div>
             )}
-            {assignment.sections.map((sec) => (
-              <div className="qa-sec" key={sec.section}>
-                <div className="qa-sec-name">{sec.section}</div>
-                <div className="qa-chips">
-                  {sec.questions.map((q) => {
-                    const names = wrongNamesOf(q.id);
-                    return (
-                      <span
-                        className={`qa-chip${q.standard_answer.length > 12 ? " long" : ""}`}
-                        key={q.id}
-                        title={names.length ? `本题错 ${names.length} 人：${names.join("、")}` : undefined}
-                      >
-                        <b>{q.seq}</b>
-                        {names.length > 0 && <span className="qg-heat">{names.length}</span>}
-                        <span className="qa-ans">{q.standard_answer}</span>
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
           </div>
         </section>
 

@@ -1,4 +1,4 @@
-import { IconChevronLeft } from "../components/icons";
+import { IconChevron, IconChevronLeft, IconPanelLeft, IconPanelRight } from "../components/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { App as AntApp, Input, Modal, Select, Tooltip } from "antd";
@@ -7,6 +7,7 @@ import AppHeader from "../components/AppHeader";
 import CodeChip from "../components/CodeChip";
 import Confetti from "../components/Confetti";
 import AIFloat from "../components/AIFloat";
+import AnswerFloat from "../components/AnswerFloat";
 import SaveStatus from "../components/SaveStatus";
 import StudentImportModal from "../components/StudentImportModal";
 import QuestionEditor from "../components/QuestionEditor";
@@ -69,6 +70,8 @@ export default function Grading() {
   const [statusDrafts, setStatusDrafts] = useState({});
   const [editingQid, setEditingQid] = useState(null);
   const [breakdownOpen, setBreakdownOpen] = useState(false); // 实时扣分明细小票
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false); // 上次保存失败（状态灯红灯）
   const [phrases, setPhrases] = useState([]);
@@ -159,6 +162,11 @@ export default function Grading() {
   const totalWeight = assignment?.total_weight || 0;
 
   const current = students.find((s) => s.id === currentId) || null;
+  const currentIndex = students.findIndex((s) => s.id === currentId);
+  function stepStudent(offset) {
+    const next = students[currentIndex + offset];
+    if (next) setCurrentId(next.id);
+  }
   const checkedIds = current ? checkedMap[current.id] || [] : [];
   const checkedSet = useMemo(() => new Set(checkedIds), [checkedIds]);
   const currentNotes = current ? notesMap[current.id] || {} : {};
@@ -648,6 +656,24 @@ export default function Grading() {
     }
   }
 
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (event.repeat || event.isComposing || (!event.metaKey && !event.ctrlKey)) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest('input, textarea, select, [contenteditable="true"], .ant-select')) return;
+      if (document.querySelector(".ant-modal-wrap:not(.ant-modal-wrap-hidden)")) return;
+      if (event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        saveGrading();
+      } else if ((event.key === "ArrowUp" || event.key === "ArrowDown") && currentIndex >= 0) {
+        event.preventDefault();
+        stepStudent(event.key === "ArrowUp" ? -1 : 1);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [saveGrading, currentIndex, students]);
+
   if (error)
     return (
       <div className="page-enter">
@@ -731,16 +757,62 @@ export default function Grading() {
           </div>
         </main>
       ) : (
-      <main className="grading-main">
+      <main className={`grading-main${leftCollapsed ? " left-collapsed" : ""}${rightCollapsed ? " right-collapsed" : ""}`}>
         {/* 左栏：学生名单 */}
-        <section className="panel">
+        <section className="panel grading-students">
+          <button
+            type="button"
+            className="panel-rail"
+            aria-label="展开学生名单"
+            aria-expanded={false}
+            title="展开学生名单"
+            onClick={() => setLeftCollapsed(false)}
+          >
+            <IconPanelLeft />
+            <span>学生名单</span>
+          </button>
           <div className="panel-back">
             <Link className="back" to={`/assignments/${assignment.slug || assignment.id}`}>
               <IconChevronLeft />返回批次
             </Link>
+            <button
+              type="button"
+              className="panel-toggle"
+              aria-label="收起学生名单"
+              aria-expanded={!leftCollapsed}
+              title="收起学生名单"
+              onClick={() => setLeftCollapsed(true)}
+            >
+              <IconPanelLeft />
+            </button>
           </div>
           <div className="panel-head">
-            学生名单
+            <div className="student-list-title">
+              <span>学生名单</span>
+              <div className="student-nav">
+                <span className="student-nav-count">{currentIndex >= 0 ? `${currentIndex + 1}/${students.length}` : "—"}</span>
+                <button
+                  type="button"
+                  className="panel-toggle"
+                  aria-label="上一位学生"
+                  title="上一位（Cmd/Ctrl+↑）"
+                  disabled={currentIndex <= 0}
+                  onClick={() => stepStudent(-1)}
+                >
+                  <IconChevron style={{ transform: "rotate(180deg)" }} />
+                </button>
+                <button
+                  type="button"
+                  className="panel-toggle"
+                  aria-label="下一位学生"
+                  title="下一位（Cmd/Ctrl+↓）"
+                  disabled={currentIndex < 0 || currentIndex === students.length - 1}
+                  onClick={() => stepStudent(1)}
+                >
+                  <IconChevron />
+                </button>
+              </div>
+            </div>
             <div className="progress-track">
               <div
                 className="progress-fill"
@@ -936,11 +1008,6 @@ export default function Grading() {
                 <button className="btn primary" onClick={() => saveGrading()} disabled={saving}>
                   {saving ? "保存中…" : "保存批改"}
                 </button>
-                <SaveStatus
-                  dirty={Boolean(dirtyMap[current?.id])}
-                  saving={saving}
-                  failed={saveFailed}
-                />
                 <button
                   className="btn"
                   disabled={saving}
@@ -952,13 +1019,17 @@ export default function Grading() {
                 >
                   补录保存
                 </button>
-                <button
-                  className="btn danger"
-                  style={{ marginLeft: "auto" }}
-                  onClick={() => setClearOpen(true)}
-                >
+                <AnswerFloat assignment={assignment} />
+                <button className="btn danger" onClick={() => setClearOpen(true)}>
                   清空勾选
                 </button>
+                <span className="save-row-status">
+                  <SaveStatus
+                    dirty={Boolean(dirtyMap[current?.id])}
+                    saving={saving}
+                    failed={saveFailed}
+                  />
+                </span>
               </div>
 
               {issuePhrases.length > 0 && (
@@ -1061,12 +1132,35 @@ export default function Grading() {
         </section>
 
         {/* 右栏：只读预览 */}
-        <section className="panel">
+        <section className="panel grading-preview">
+          <button
+            type="button"
+            className="panel-rail"
+            aria-label="展开反馈预览"
+            aria-expanded={false}
+            title="展开反馈预览"
+            onClick={() => setRightCollapsed(false)}
+          >
+            <IconPanelRight />
+            <span>反馈预览</span>
+          </button>
           <div className="panel-head pv-head">
             反馈预览
-            <button className="btn primary" onClick={copyAll}>
-              复制反馈
-            </button>
+            <div className="pv-actions">
+              <button className="btn primary" onClick={copyAll}>
+                复制反馈
+              </button>
+              <button
+                type="button"
+                className="panel-toggle"
+                aria-label="收起反馈预览"
+                aria-expanded={!rightCollapsed}
+                title="收起反馈预览"
+                onClick={() => setRightCollapsed(true)}
+              >
+                <IconPanelRight />
+              </button>
+            </div>
           </div>
           {hasGreetings && (
             <div className="greeting-box">

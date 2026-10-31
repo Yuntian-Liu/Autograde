@@ -110,6 +110,20 @@ export const IconChevronLeft = (p) => (
   </svg>
 );
 
+export const IconPanelLeft = (p) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M9 4v16" />
+  </svg>
+);
+
+export const IconPanelRight = (p) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M15 4v16" />
+  </svg>
+);
+
 export const IconBold = (p) => (
   <svg {...base} {...p}>
     <path d="M7 4h6a3 3 0 0 1 0 6H7zM7 10h7a3 3 0 1 1 0 6H7zM7 4v12" />

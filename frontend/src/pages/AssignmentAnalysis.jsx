@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { App as AntApp, Popover, Tabs } from "antd";
+import { App as AntApp, Dropdown, Popover, Tabs } from "antd";
 import {
   Bar,
   BarChart,
@@ -18,9 +18,10 @@ import { apiGet, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
 import MdContent from "../components/MdContent";
 import PageSkeleton from "../components/PageSkeleton";
-import { IconChevronLeft } from "../components/icons";
+import { IconChevronLeft, IconDownload } from "../components/icons";
 import { fmtScore, fmtTime, seriesLabel } from "../meta";
 import { clientLog } from "../utils/clientLog";
+import { downloadAssignmentCsv } from "../utils/csvExport";
 
 const MEDAL = { 1: "🥇", 2: "🥈", 3: "🥉" };
 const NICE_STEPS = [1, 2, 5, 10, 20, 25, 50, 100];
@@ -262,6 +263,34 @@ function QuestionStatistics({ sections, assignmentId }) {
       })}
     </div>
   ));
+}
+
+function CsvExport({ data }) {
+  const { message } = AntApp.useApp();
+  function exportCsv(kind) {
+    try {
+      const result = downloadAssignmentCsv(data, kind);
+      clientLog.add("ui", `batch_csv_export assignment=${data.assignment.id} kind=${kind} rows=${result.count}`);
+      message.success(`已导出${result.label}`);
+    } catch (error) {
+      clientLog.add("ui", `batch_csv_export_error assignment=${data.assignment.id} kind=${kind} ${error.message}`.slice(0, 200));
+      message.error("导出失败，请重试");
+    }
+  }
+  return (
+    <Dropdown
+      trigger={["click"]}
+      menu={{
+        items: [
+          { key: "ranking", label: "学生成绩" },
+          { key: "questions", label: "题目统计" },
+        ],
+        onClick: ({ key }) => exportCsv(key),
+      }}
+    >
+      <button type="button" className="btn"><IconDownload />导出 CSV</button>
+    </Dropdown>
+  );
 }
 
 function Overview({ data, assignmentId }) {
@@ -521,6 +550,7 @@ export default function AssignmentAnalysis() {
   const { id } = useParams();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [activeTab, setActiveTab] = useState("overview");
 
   useEffect(() => {
     let cancelled = false;
@@ -583,7 +613,9 @@ export default function AssignmentAnalysis() {
         <Tabs
           key={id}
           className="analysis-tabs"
-          defaultActiveKey="overview"
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          tabBarExtraContent={{ right: activeTab === "overview" ? <CsvExport data={data} /> : null }}
           items={[
             {
               key: "overview",

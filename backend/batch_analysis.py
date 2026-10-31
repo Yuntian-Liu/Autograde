@@ -333,6 +333,7 @@ async def build_assignment_analysis(
         "assignment": {**assignment_brief(assignment), "class": class_brief(class_, assignment)},
         "summary": data["summary"],
         "ranking": data["ranking"],
+        "students": data["_students"],
         "valid_scores": data["valid_scores"],
         "sections": data["sections"],
         "ai_report": batch_analysis_report_out(report) if report else None,

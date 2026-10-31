@@ -788,6 +788,44 @@ a:hover .os-repo-link, .os-repo:hover .os-repo-link { text-decoration: underline
 .qa-chip b { font-family: var(--font-mono); font-size: var(--t-micro); color: var(--accent); font-weight: 600; flex: none; }
 .qa-ans { font-size: var(--t-strong); font-weight: 600; color: var(--ink); overflow-wrap: anywhere; min-width: 0; }
 
+.answer-float-trigger { display: inline-flex; align-items: center; gap: var(--s1); }
+.answer-float {
+  position: fixed;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+.answer-float-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-strong);
+  font-weight: 600;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.answer-float-head:active { cursor: grabbing; }
+.answer-float-close {
+  border: none;
+  background: none;
+  color: var(--ink-3);
+  font-size: var(--t-strong);
+  cursor: pointer;
+  padding: 0 var(--s1);
+}
+.answer-float-close:hover { color: var(--ink); }
+.answer-float-body { flex: 1; overflow-y: auto; padding: var(--s3); }
+.answer-float-body .qa-grid { grid-template-columns: 1fr; }
+
 /* 标错矩阵 */
 .qg-scroll { overflow-x: auto; }
 .qg-table { border-collapse: separate; border-spacing: 0; }
