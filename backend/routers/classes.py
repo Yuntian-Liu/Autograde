@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -338,6 +340,14 @@ async def _import_students(
         db.add(s)
         added.append(s)
     await db.commit()
+    logging.getLogger("autograde.business").info(
+        "students_import uid=%s class=%s assignment=%s added=%s skipped=%s",
+        c.owner_uid,
+        c.id,
+        assignment_id,
+        len(added),
+        len(skipped),
+    )
     return {"added": len(added), "skipped": skipped, "students": [student_brief(s) for s in added]}
 
 

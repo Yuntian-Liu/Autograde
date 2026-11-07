@@ -9,7 +9,14 @@ const TOKEN_KEY = "autograde_token";
 const buffer = [];
 let addedCount = 0;
 let flushedCount = 0;
+let lastFlushedSeq = 0;
+let droppedCount = 0;
 let flushing = false;
+let flushFailureCount = 0;
+let consecutiveFlushFailures = 0;
+let lastFlushAt = "";
+let lastFlushResult = "idle";
+let lastFlushError = "";
 
 function ts() {
   const d = new Date();
@@ -18,13 +25,42 @@ function ts() {
 }
 
 function add(type, detail) {
-  buffer.push({ ts: ts(), type, detail: typeof detail === "string" ? detail : JSON.stringify(detail) });
   addedCount++;
-  if (buffer.length > MAX) buffer.shift();
+  buffer.push({ seq: addedCount, ts: ts(), type, detail: typeof detail === "string" ? detail : JSON.stringify(detail) });
+  if (buffer.length > MAX) {
+    buffer.shift();
+    droppedCount++;
+  }
 }
 
 function dump() {
   return [...buffer];
+}
+
+function pending() {
+  return buffer.filter((event) => event.seq > lastFlushedSeq);
+}
+
+function health() {
+  return {
+    added: addedCount,
+    flushed: flushedCount,
+    dropped: droppedCount,
+    pending: pending().length,
+    flush_failures: flushFailureCount,
+    consecutive_flush_failures: consecutiveFlushFailures,
+    last_flush_at: lastFlushAt,
+    last_flush_result: lastFlushResult,
+    last_flush_error: lastFlushError,
+  };
+}
+
+function operation(action, outcome, fields = {}) {
+  const detail = Object.entries(fields)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(([key, value]) => `${key}=${String(value).replace(/[\r\n]+/g, " ").slice(0, 200)}`)
+    .join(" ");
+  add("operation", `${action} ${outcome}${detail ? ` ${detail}` : ""}`);
 }
 
 // 构建信息（诊断包可直接对比前后端版本）
@@ -33,25 +69,37 @@ add("boot", `build ${__APP_VERSION__} @ ${__BUILD_TIME__}`);
 // ---- 落库 flush：每 20s + 页面隐藏/关闭时批量 POST /api/client-log（失败静默重试下次）----
 async function flushEvents(keepalive = false) {
   if (flushing) return;
-  const backlog = Math.min(addedCount - flushedCount, buffer.length);
-  if (backlog <= 0) return;
+  const backlog = pending();
+  if (!backlog.length) return;
   const token = localStorage.getItem(TOKEN_KEY);
-  if (!token) return; // 未登录不上报（登录后下轮自然补发）
+  if (!token) {
+    lastFlushResult = "waiting_auth";
+    return;
+  }
   flushing = true;
   try {
-    const events = buffer
-      .slice(buffer.length - Math.min(backlog, FLUSH_BATCH))
-      .map((e) => ({ ts: e.ts, type: e.type, detail: String(e.detail).slice(0, 800) }));
-    // 不用 api.js（它会给自己记日志造成自激；这里静默失败重试）
+    const batch = backlog.slice(0, FLUSH_BATCH);
+    const events = batch.map((e) => ({ ts: e.ts, type: e.type, detail: String(e.detail).slice(0, 800) }));
+    // 不用 api.js（它会给自己记日志造成自激；失败只更新健康状态）
     const res = await fetch("/api/client-log", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ events }),
       keepalive,
     });
-    if (res.ok) flushedCount += events.length;
-  } catch {
-    /* 静默：下轮重试 */
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    lastFlushedSeq = Math.max(...batch.map((event) => event.seq));
+    flushedCount += events.length;
+    consecutiveFlushFailures = 0;
+    lastFlushAt = ts();
+    lastFlushResult = "success";
+    lastFlushError = "";
+  } catch (error) {
+    flushFailureCount++;
+    consecutiveFlushFailures++;
+    lastFlushAt = ts();
+    lastFlushResult = "failed";
+    lastFlushError = String(error?.message || error).slice(0, 200);
   } finally {
     flushing = false;
   }
@@ -105,4 +153,4 @@ window.addEventListener("unhandledrejection", (e) => {
   add("error", `Promise ${reason}`.slice(0, MAX_DETAIL));
 });
 
-export const clientLog = { add, dump };
+export const clientLog = { add, dump, pending, health, operation };

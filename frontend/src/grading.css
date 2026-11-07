@@ -242,11 +242,16 @@
   padding: var(--s3) var(--s6);
   border-bottom: 1px solid var(--line);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--s3);
 }
 .save-row .lab { font-weight: 600; font-size: var(--t-strong); }
 .save-row-status { margin-left: auto; }
+
+.transfer-option { display: flex; align-items: center; gap: var(--s3); }
+.transfer-option-name { flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transfer-option-code { flex: none; font-family: var(--font-mono); font-size: var(--t-caption); white-space: nowrap; }
 
 /* 情况勾选芯片（文本型）：不折字、不被 flex 挤压 */
 .chip.text { min-width: 0; padding: 0 var(--s3); font-family: var(--font-body); white-space: nowrap; flex: none; }

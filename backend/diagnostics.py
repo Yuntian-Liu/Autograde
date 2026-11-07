@@ -36,6 +36,7 @@ from models import (
     LlmCallEvent,
     Note,
     NoteImage,
+    OperationEvent,
     Phrase,
     Question,
     Setting,
@@ -43,13 +44,14 @@ from models import (
     Submission,
 )
 
-APP_VERSION = "0.20.0"
+APP_VERSION = "0.21.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
-AGREEMENT_VERSION = "2026-10-31"
+AGREEMENT_VERSION = "2026-11-07"
 _STARTED_AT = datetime.now(timezone.utc)
 
 MAX_LOG_ENTRIES = 500
 _log_buffer: deque = deque(maxlen=MAX_LOG_ENTRIES)
+_log_total = 0
 
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
@@ -63,7 +65,9 @@ class RingBufferHandler(logging.Handler):
     """把日志记录（含堆栈）写进环形缓冲，供诊断导出。"""
 
     def emit(self, record: logging.LogRecord) -> None:
+        global _log_total
         try:
+            _log_total += 1
             entry = {
                 "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
                 "level": record.levelname,
@@ -71,7 +75,8 @@ class RingBufferHandler(logging.Handler):
                 "msg": record.getMessage()[:800],
             }
             if record.exc_info:
-                entry["exc"] = self.format(record)[:1500]  # 含异常栈
+                entry["exc"] = self.format(record)[:1500]
+                entry["error"] = f"{record.exc_info[0].__name__}: {record.exc_info[1]}"[:500]
             _log_buffer.append(entry)
         except Exception:  # noqa: BLE001 日志采集自身绝不影响业务
             pass
@@ -256,7 +261,46 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
             except Exception:
                 backup_health = {"error": "备份列表拉取失败"}
 
+    operation_rows = (
+        await db.execute(
+            select(OperationEvent)
+            .where(OperationEvent.uid == user.uid)
+            .order_by(OperationEvent.id.desc())
+            .limit(200)
+        )
+    ).scalars().all()
+    operation_failures = (
+        await db.execute(
+            select(OperationEvent)
+            .where(OperationEvent.uid == user.uid, OperationEvent.outcome != "success")
+            .order_by(OperationEvent.id.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+    operation_24h_rows = (
+        await db.execute(
+            select(OperationEvent.outcome, func.count(OperationEvent.id))
+            .where(OperationEvent.uid == user.uid, OperationEvent.created_at >= llm24_start)
+            .group_by(OperationEvent.outcome)
+        )
+    ).all()
+    operation_health_24h = {outcome: n for outcome, n in operation_24h_rows}
+
+    def operation_out(e: OperationEvent) -> dict:
+        return {
+            "id": e.id,
+            "request_id": e.request_id,
+            "method": e.method,
+            "path": e.path,
+            "status": e.status,
+            "duration_ms": e.duration_ms,
+            "outcome": e.outcome,
+            "detail": mask_urls(e.detail),
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+
     return {
+        "diagnostics_schema_version": 1,
         "app": {
             "version": APP_VERSION,
             "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -487,8 +531,16 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
             "client_events": (
                 await db.execute(select(func.count(ClientEvent.id)).where(ClientEvent.uid == user.uid))
             ).scalar_one(),
+            "operation_events": (
+                await db.execute(
+                    select(func.count(OperationEvent.id)).where(OperationEvent.uid == user.uid)
+                )
+            ).scalar_one(),
         },
         "recent_llm_calls": recent_llm,
+        "recent_operation_events": [operation_out(e) for e in operation_rows],
+        "recent_operation_failures": [operation_out(e) for e in operation_failures],
+        "operation_health_24h": operation_health_24h,
         # 客户端事件（落库，该用户最近 200 条；detail 过 URL 打码）
         "client_events": [
             {
@@ -512,13 +564,20 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
             "login_blocked_count": get_login_blocked_count(),
         },
         "invite_codes": invite_stats,
+        "logging_health": {
+            "server_buffer_capacity": MAX_LOG_ENTRIES,
+            "server_buffer_produced": _log_total,
+            "server_buffer_dropped": max(0, _log_total - len(_log_buffer)),
+            "server_buffer_exported": len(_log_buffer),
+        },
         # 服务端日志尾段保留（诊断意义所在），URL 逐条打码
         "server_log_tail": [
             {
                 **entry,
                 "msg": mask_urls(entry["msg"]),
                 **({"exc": mask_urls(entry["exc"])} if "exc" in entry else {}),
+                **({"error": mask_urls(entry["error"])} if "error" in entry else {}),
             }
-            for entry in list(_log_buffer)[-200:]
+            for entry in list(_log_buffer)
         ],
     }

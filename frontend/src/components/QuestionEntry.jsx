@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { App as AntApp, AutoComplete, Input, InputNumber, Modal, Select } from "antd";
 import { apiPost, clearToken, getToken, UNAUTHORIZED_EVENT } from "../api";
 import { MODE_LABELS } from "../meta";
+import { trackedFetch } from "../utils/trackedFetch";
+import { clientLog } from "../utils/clientLog";
 
 const MODE_OPTIONS = Object.entries(MODE_LABELS).map(([value, label]) => ({ value, label }));
 
@@ -341,6 +343,7 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
   // 任务制 + 轮询：POST 建任务立即返回 job_id，短轮询拿进度/结果（SSE 长连接会被边缘代理掐断）
   async function parse() {
     if (!rawText.trim()) return message.error("请先粘贴答案原文");
+    clientLog.operation("ai_parse", "start", { assignment: assignmentId, chars: rawText.length });
     const controller = new AbortController();
     abortRef.current = controller;
     setParsing(true);
@@ -357,7 +360,7 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       };
-      const res = await fetch("/api/ai/parse-questions", {
+      const res = await trackedFetch("/api/ai/parse-questions", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ raw_text: rawText, assignment_id: Number(assignmentId) }),
@@ -387,10 +390,11 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
         throw new Error(detail);
       }
       const { job_id: jobId } = await res.json();
+      clientLog.operation("ai_parse", "job", { assignment: assignmentId, job: jobId });
       let draft = null;
       for (;;) {
         await new Promise((r) => setTimeout(r, 2000));
-        const jr = await fetch(`/api/ai/parse-jobs/${jobId}`, {
+        const jr = await trackedFetch(`/api/ai/parse-jobs/${jobId}`, {
           headers: authHeaders,
           signal: controller.signal,
         });
@@ -414,11 +418,17 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
       }
       const flat = draft ? flattenDraft(draft) : [];
       if (flat.length === 0) {
+        clientLog.operation("ai_parse", "error", { assignment: assignmentId, job: jobId, error: "empty_result" });
         message.error("AI 未拆出任何题目，请检查粘贴内容");
         return;
       }
       setRows(flat);
+      clientLog.operation("ai_parse", "success", { assignment: assignmentId, job: jobId, questions: flat.length });
     } catch (e) {
+      clientLog.operation("ai_parse", e.name === "AbortError" ? "cancelled" : "error", {
+        assignment: assignmentId,
+        error: e.message,
+      });
       if (e.name !== "AbortError") message.error(e.message);
     } finally {
       clearInterval(timerRef.current);

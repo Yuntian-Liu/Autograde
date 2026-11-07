@@ -25,6 +25,7 @@ import { useAuth } from "../contexts/AuthContext";
 /* global __APP_VERSION__, __BUILD_TIME__ */
 import { avatarUrl, randomSeed } from "../utils/avatar";
 import { clientLog } from "../utils/clientLog";
+import { trackedFetch } from "../utils/trackedFetch";
 
 // 设置页（iOS 设置风格）：资料卡 + 数据横幅 + 分组行项；协议/改密/换头像/诊断导出/登出
 function RowItem({ icon, tint, label, value, onClick, arrow = true, danger = false }) {
@@ -114,9 +115,11 @@ export default function Settings() {
     try {
       await apiPut("/auth/profile", { nickname: nickname.trim() });
       await refresh();
+      clientLog.operation("profile_nickname", "success");
       message.success("昵称已更新");
       setNickOpen(false);
     } catch (e) {
+      clientLog.operation("profile_nickname", "error", { error: e.message });
       message.error(e.message);
     } finally {
       setSaving(false);
@@ -129,9 +132,11 @@ export default function Settings() {
     try {
       await apiPut("/auth/profile", { avatar_seed: pickedSeed });
       await refresh();
+      clientLog.operation("profile_avatar", "success");
       message.success("头像已更新");
       setAvatarOpen(false);
     } catch (e) {
+      clientLog.operation("profile_avatar", "error", { error: e.message });
       message.error(e.message);
     } finally {
       setSaving(false);
@@ -147,12 +152,14 @@ export default function Settings() {
         old_password: oldPwd,
         new_password: newPwd,
       });
+      clientLog.operation("password_change", "success");
       message.success("密码已修改");
       setPwdOpen(false);
       setOldPwd("");
       setNewPwd("");
       setNewPwd2("");
     } catch (e) {
+      clientLog.operation("password_change", "error", { error: e.message });
       message.error(e.message);
     } finally {
       setSaving(false);
@@ -161,13 +168,16 @@ export default function Settings() {
 
   // 导出诊断日志：后端整包 + 前端事件/环境注入 → JSON 下载（生产 Debug 用）
   async function exportDiagnostics() {
+    clientLog.operation("diagnostics_export", "start");
     try {
-      const res = await fetch("/api/diagnostics/export", {
+      const res = await trackedFetch("/api/diagnostics/export", {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) throw new Error(`导出失败 (${res.status})`);
       const data = await res.json();
-      data.client_events_local = clientLog.dump(); // 本地未 flush 尾段（落库部分由后端 client_events 提供）
+      data.client_events_local = clientLog.dump();
+      data.client_events_pending = clientLog.pending();
+      data.client_log_health = clientLog.health();
       data.client_env = {
         userAgent: navigator.userAgent,
         language: navigator.language,
@@ -186,13 +196,16 @@ export default function Settings() {
       a.download = `autograde-diagnostics-${Date.now()}.json`;
       a.click();
       URL.revokeObjectURL(a.href);
+      clientLog.operation("diagnostics_export", "success", { bytes: blob.size });
       message.success("诊断日志已导出");
     } catch (e) {
+      clientLog.operation("diagnostics_export", "error", { error: e.message });
       message.error(e.message);
     }
   }
 
   function doLogout() {
+    clientLog.operation("logout", "success");
     logout();
     navigate("/login", { replace: true });
   }

@@ -1,5 +1,6 @@
 """管理接口 — 邀请码 / AI 用量与成本 / 安全面板 / 总览 / 备份下载（is_admin 守卫）。"""
 
+import logging
 import os
 import sqlite3
 import tempfile
@@ -69,7 +70,7 @@ async def overview(
         "graded": graded,
         "db_size_mb": round(db_size / 1024 / 1024, 2),
         "ai_cost_today_yuan": round(float(today_cost), 6),
-        "version": "0.20.0",
+        "version": "0.21.0",
     }
 
 
@@ -413,6 +414,12 @@ async def orphan_images_cleanup(
     if not cos_enabled():
         raise HTTPException(status_code=503, detail="对象存储未配置")
     result = await cleanup_orphans(db)
+    logging.getLogger("autograde.business").info(
+        "orphan_cleanup uid=%s deleted=%s freed_bytes=%s",
+        admin.uid,
+        result.get("deleted", 0),
+        result.get("freed_bytes", 0),
+    )
     return result
 
 

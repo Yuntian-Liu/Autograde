@@ -1,6 +1,7 @@
 const BASE = "/api";
 const TOKEN_KEY = "autograde_token";
 import { clientLog } from "./utils/clientLog";
+import { newRequestId, trackedFetch } from "./utils/trackedFetch";
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
@@ -21,6 +22,8 @@ async function request(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
+  const requestId = newRequestId();
+  headers["X-Request-ID"] = requestId;
 
   const startedAt = Date.now();
   const method = options.method || "GET";
@@ -28,15 +31,15 @@ async function request(path, options = {}) {
   try {
     res = await fetch(`${BASE}${path}`, { ...options, headers });
   } catch (e) {
-    clientLog.add("network", `${method} ${path} 网络错误: ${e.message}`);
+    clientLog.add("network", `${method} ${path} 网络错误 rid=${requestId}: ${e.message}`);
     throw e;
   }
   // /client-log 自身的请求跳过不记（否则日志自激）
   if (path !== "/client-log") {
-    clientLog.add("api", `${method} ${path} ${res.status} ${Date.now() - startedAt}ms`);
+    clientLog.add("api", `${method} ${path} ${res.status} ${Date.now() - startedAt}ms rid=${requestId}`);
   }
   if (res.status === 401) {
-    clientLog.add("auth", `401 ${method} ${path} → 清登录态`);
+    clientLog.add("auth", `401 ${method} ${path} rid=${requestId} → 清登录态`);
     clearToken();
     window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
     let detail = "登录已过期，请重新登录";
@@ -63,6 +66,7 @@ async function request(path, options = {}) {
     } catch {
       /* 保留状态码描述 */
     }
+    clientLog.add("api_error", `${method} ${path} ${res.status} rid=${requestId} ${detail}`.slice(0, 500));
     throw new Error(detail);
   }
   if (res.status === 204) return null;
@@ -152,7 +156,7 @@ export async function downloadBackup() {
   const headers = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${BASE}/admin/backup`, { method: "POST", headers });
+  const res = await trackedFetch(`${BASE}/admin/backup`, { method: "POST", headers });
   if (!res.ok) throw new Error(`备份失败：${res.status}`);
   const blob = await res.blob();
   const cd = res.headers.get("Content-Disposition") || "";

@@ -1,5 +1,6 @@
 """笔记库接口：CRUD + 搜索筛选 + 图片直传签发。全部走 owner_uid 校验，越权 404。"""
 
+import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -285,6 +286,13 @@ async def bulk_create_notes(
         except HTTPException as e:
             await db.rollback()
             failed.append({"index": i, "error": e.detail})
+    logging.getLogger("autograde.business").info(
+        "notes_bulk uid=%s created=%s failed=%s failed_indexes=%s",
+        user.uid,
+        len(created),
+        len(failed),
+        [row["index"] for row in failed],
+    )
     return {"created": created, "failed": failed}
 
 
@@ -378,6 +386,9 @@ async def delete_note(
     await db.commit()
     if cos_enabled() and keys:
         await delete_objects(keys)
+    logging.getLogger("autograde.business").info(
+        "note_delete uid=%s note=%s images=%s", user.uid, note_id, len(keys)
+    )
 
 
 class UploadUrlIn(BaseModel):

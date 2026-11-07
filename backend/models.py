@@ -323,3 +323,20 @@ class ClientEvent(Base):
     type: Mapped[str] = mapped_column(String(16), default="")
     detail: Mapped[str] = mapped_column(String(800), default="")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)  # 服务端时间
+
+
+class OperationEvent(Base):
+    """持久操作事件：写请求与失败请求的自动审计，供诊断包按请求关联。"""
+
+    __tablename__ = "operation_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    request_id: Mapped[str] = mapped_column(String(64), index=True)
+    method: Mapped[str] = mapped_column(String(8))
+    path: Mapped[str] = mapped_column(String(300))
+    status: Mapped[int] = mapped_column(Integer)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    outcome: Mapped[str] = mapped_column(String(16), index=True)
+    detail: Mapped[str] = mapped_column(String(800), default="")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)

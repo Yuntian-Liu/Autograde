@@ -4,6 +4,7 @@ import { useState } from "react";
 import { App as AntApp } from "antd";
 import { apiPost } from "../api";
 import { clientLog } from "./clientLog";
+import { trackedFetch } from "./trackedFetch";
 import { sanitizePastedHtml } from "./noteFormat";
 import { blobExt, classifyImgSrc, dataUriToBlob, parseImgSrcs } from "./paste";
 
@@ -55,7 +56,7 @@ export function useNotePaste({ editorRef, noteId, onDirty }) {
         note_id: noteId ?? null,
       });
       // 浏览器直传 COS（流量不经过我们服务器）
-      const put = await fetch(res.upload_url, { method: "PUT", body: file });
+      const put = await trackedFetch(res.upload_url, { method: "PUT", body: file, logLabel: "COS 图片直传" });
       if (!put.ok) throw new Error(`上传失败（${put.status}）`);
       clientLog.add("ui", `笔记贴图上传：${file.name || "pasted"}（${file.size}B）`);
       insertImgHtml(res.key, URL.createObjectURL(file));

@@ -89,6 +89,9 @@ export default function Grading() {
   const [retroOpen, setRetroOpen] = useState(false); // 补录弹窗（线下已批，回填数据）
   const [retroText, setRetroText] = useState("");
   const [clearOpen, setClearOpen] = useState(false); // 清空勾选二次确认
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferTargetId, setTransferTargetId] = useState(null);
+  const [transferring, setTransferring] = useState(false);
   const [snapshotMap, setSnapshotMap] = useState({}); // studentId -> 最新反馈快照原文（落库真值）
   const [dirtyMap, setDirtyMap] = useState({}); // studentId -> 有未保存的表单编辑（脏标记）
   const [thresholds, setThresholds] = useState(null); // 生效分数线（null=用默认校准值）
@@ -163,6 +166,20 @@ export default function Grading() {
 
   const current = students.find((s) => s.id === currentId) || null;
   const currentIndex = students.findIndex((s) => s.id === currentId);
+  const transferStudents = students.filter((s) => {
+    if (s.id === currentId || dirtyMap[s.id]) return false;
+    const sub = s.submission;
+    const emptySubmission =
+      !sub ||
+      (sub.status === "待批改" &&
+        sub.score == null &&
+        !sub.rating &&
+        !sub.rating_override &&
+        !(sub.preview_wrong || []).length);
+    return emptySubmission && !s.error_question_ids.length && !s.feedback_text;
+  });
+  const transferTarget = transferStudents.find((s) => s.id === transferTargetId) || null;
+  const transferNameWidth = Math.max(4, ...transferStudents.map((s) => s.name.length));
   function stepStudent(offset) {
     const next = students[currentIndex + offset];
     if (next) setCurrentId(next.id);
@@ -656,6 +673,108 @@ export default function Grading() {
     }
   }
 
+  function openTransfer() {
+    if (!current) return;
+    setTransferTargetId(null);
+    setTransferOpen(true);
+    clientLog.add(
+      "ui",
+      `grading_transfer_open assignment=${assignment.id} source=${current.id} errors=${checkedIds.length} dirty=${Boolean(dirtyMap[current.id])}`
+    );
+  }
+
+  async function transferGrading() {
+    if (!current || !transferTarget || transferring) return;
+    setTransferring(true);
+    const finalText = showSnapshot ? snapshot : buildPlainText();
+    try {
+      const result = await apiPost(`/assignments/${assignment.id}/students/${current.id}/transfer`, {
+        target_student_id: transferTarget.id,
+        grading: {
+          status: statusDraft,
+          checked_question_ids: checkedIds,
+          rating_override: ratingOverrides[current.id] || "",
+          notes: currentNotes,
+          scores: currentScores,
+          final_text: finalText,
+          used_phrase_ids: [],
+          preview_wrong: previewChecked,
+        },
+      });
+      const fresh = await apiGet(`/assignments/${assignmentId}/students`);
+      const sourceFresh = fresh.find((s) => s.id === current.id);
+      const targetFresh = fresh.find((s) => s.id === transferTarget.id);
+      if (!sourceFresh || !targetFresh) throw new Error("迁移已保存，名单刷新失败，请刷新页面");
+
+      setStudents(fresh);
+      setSnapshotMap(Object.fromEntries(fresh.map((s) => [s.id, s.feedback_text ?? null])));
+      setCheckedMap((prev) => ({
+        ...prev,
+        [sourceFresh.id]: [...sourceFresh.error_question_ids],
+        [targetFresh.id]: [...targetFresh.error_question_ids],
+      }));
+      setNotesMap((prev) => ({
+        ...prev,
+        [sourceFresh.id]: { ...sourceFresh.error_notes },
+        [targetFresh.id]: { ...targetFresh.error_notes },
+      }));
+      setScoresMap((prev) => ({
+        ...prev,
+        [sourceFresh.id]: { ...sourceFresh.error_scores },
+        [targetFresh.id]: { ...targetFresh.error_scores },
+      }));
+      setPreviewMap((prev) => ({
+        ...prev,
+        [sourceFresh.id]: [...(sourceFresh.submission?.preview_wrong || [])],
+        [targetFresh.id]: [...(targetFresh.submission?.preview_wrong || [])],
+      }));
+      setStatusDrafts((prev) => ({
+        ...prev,
+        [sourceFresh.id]: "待批改",
+        [targetFresh.id]: targetFresh.submission?.status || statusDraft,
+      }));
+      setRatingOverrides((prev) => ({
+        ...prev,
+        [sourceFresh.id]: "",
+        [targetFresh.id]: targetFresh.submission?.rating_override || "",
+      }));
+      setLostSectionsMap((prev) => ({ ...prev, [sourceFresh.id]: "", [targetFresh.id]: "" }));
+      const pvPhrase = phrases.find(
+        (p) => p.category === "Issue 模板" && p.name === PREVIEW_ERROR_PHRASE
+      );
+      const targetPreviewCount = targetFresh.submission?.preview_wrong?.length || 0;
+      setIssuesMap((prev) => ({
+        ...prev,
+        [sourceFresh.id]: [],
+        [targetFresh.id]: pvPhrase && targetPreviewCount ? [pvPhrase.id] : [],
+      }));
+      setIssueParams((prev) => ({
+        ...prev,
+        [sourceFresh.id]: {},
+        [targetFresh.id]: pvPhrase && targetPreviewCount ? { [pvPhrase.id]: targetPreviewCount } : {},
+      }));
+      setDirtyMap((prev) => ({ ...prev, [sourceFresh.id]: false, [targetFresh.id]: false }));
+      setCurrentId(targetFresh.id);
+      setTransferOpen(false);
+      setTransferTargetId(null);
+      setSaveFailed(false);
+      clientLog.add(
+        "ui",
+        `grading_transfer_success assignment=${assignment.id} source=${sourceFresh.id} target=${targetFresh.id} errors=${targetFresh.error_question_ids.length} len=${result.target.final_text_length} fp=${result.target.final_text_fingerprint}`
+      );
+      message.success(`已迁移：${current.name} → ${transferTarget.name}`);
+    } catch (e) {
+      setSaveFailed(true);
+      clientLog.add(
+        "ui",
+        `grading_transfer_error assignment=${assignment.id} source=${current.id} target=${transferTarget.id} error=${e.message}`
+      );
+      message.error(e.message);
+    } finally {
+      setTransferring(false);
+    }
+  }
+
   useEffect(() => {
     function onKeyDown(event) {
       if (event.repeat || event.isComposing || (!event.metaKey && !event.ctrlKey)) return;
@@ -1020,13 +1139,21 @@ export default function Grading() {
                   补录保存
                 </button>
                 <AnswerFloat assignment={assignment} />
+                <button
+                  className="btn"
+                  onClick={openTransfer}
+                  disabled={saving || transferring || statusDraft === "待批改"}
+                  title="将当前整份批改转给本批次的另一名学生"
+                >
+                  迁移批改
+                </button>
                 <button className="btn danger" onClick={() => setClearOpen(true)}>
                   清空勾选
                 </button>
                 <span className="save-row-status">
                   <SaveStatus
                     dirty={Boolean(dirtyMap[current?.id])}
-                    saving={saving}
+                    saving={saving || transferring}
                     failed={saveFailed}
                   />
                 </span>
@@ -1371,6 +1498,51 @@ export default function Grading() {
         />
         <p className="login-hint">
           分数/等级仍按勾选错题自动复算；粘贴的原文原样存入反馈快照。
+        </p>
+      </Modal>
+
+      <Modal
+        centered
+        open={transferOpen}
+        onCancel={() => !transferring && setTransferOpen(false)}
+        onOk={transferGrading}
+        confirmLoading={transferring}
+        okButtonProps={{ disabled: !transferTarget }}
+        cancelButtonProps={{ disabled: transferring }}
+        maskClosable={!transferring}
+        closable={!transferring}
+        keyboard={!transferring}
+        title="迁移批改"
+        okText="确认迁移"
+        cancelText="取消"
+        width={480}
+        destroyOnHidden
+      >
+        <p>
+          {current?.name} → {transferTarget?.name || "请选择目标学生"} · {checkedIds.length} 道错题 · {statusDraft}
+        </p>
+        <Select
+          value={transferTargetId}
+          onChange={setTransferTargetId}
+          popupMatchSelectWidth
+          styles={{ popup: { root: { width: "min(420px, calc(100vw - 80px))" } } }}
+          placeholder="选择目标学生"
+          notFoundContent="没有可接收的学生"
+          options={transferStudents.map((s) => ({
+            value: s.id,
+            label: (
+              <span className="transfer-option">
+                <span className="transfer-option-name" style={{ width: `${transferNameWidth}ch` }}>
+                  {s.name}
+                </span>
+                <span className="transfer-option-code">{s.code}</span>
+              </span>
+            ),
+          }))}
+          style={{ width: "100%" }}
+        />
+        <p className="danger-text">
+          迁移后，{current?.name} 将恢复为待批改；当前错题、解析、得分与反馈将保存到目标学生。
         </p>
       </Modal>
 

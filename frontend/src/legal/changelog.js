@@ -1,10 +1,10 @@
 // 版本日志数据源（设置页「版本日志」弹窗 + 登录后更新提醒弹窗；发版时与 CHANGELOG.md 同步）
 // 结构：minor 为主条目，patch 嵌套在 patches 数组里（主界面只呈现 minor，展开后见 patch）
 // ⚠️ 公开文件：不得出现私人信息
-export const APP_VERSION = "V0.20.0";
+export const APP_VERSION = "V0.21.0";
 
 /** 协议版本（用户协议/隐私政策最后更新日期，改协议时同步递增；触发登录后协议变更提醒） */
-export const AGREEMENT_VERSION = "2026-10-31";
+export const AGREEMENT_VERSION = "2026-11-07";
 
 /** 取全站最新更新条目（最新 minor 有 patch 取最新 patch，否则取最新 minor） */
 export function getLatestUpdate() {
@@ -18,6 +18,17 @@ export function getLatestUpdate() {
 }
 
 export const CHANGELOG = [
+  {
+    version: "V0.21.0",
+    date: "2026-11-07",
+    items: [
+      "标准批改新增「迁移批改」：选错学生时，可将当前错题、逐题解析、部分得分、提交状态、预习错题与反馈完整转给同批次的另一名学生，未保存内容也能直接迁移；原学生自动恢复待批改",
+      "迁移只允许落到没有已有批改的学生，目标已占用时不会覆盖；迁移目标名单的名字列等宽、编号统一对齐，长短名字都更清爽",
+      "全站诊断升级：每次请求自动带 Request ID，写操作与失败请求持久留痕，可串联前端操作、后端结果、异常与 AI 任务，重启后仍可追溯",
+      "诊断包新增操作历史、失败汇总、日志缓冲与上传健康；日志写库或上传失败不会影响正常业务，异常保留底层错误原因",
+      "用户协议与隐私政策同步更新日志范围、保留规则与自托管服务器说明（协议版本 2026-11-07）",
+    ],
+  },
   {
     version: "V0.20.0",
     date: "2026-10-31",

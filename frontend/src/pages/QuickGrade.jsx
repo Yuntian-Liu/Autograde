@@ -183,9 +183,10 @@ export default function QuickGrade() {
     setSavingIds((prev) => new Set(prev).add(sid));
     try {
       await saveRow(sid);
-      clientLog.add("ui", `快捷批改保存：${name}`);
+      clientLog.operation("quick_grade_save", "success", { assignment: id, student: sid });
       message.success(`已保存：${name}`);
     } catch (e) {
+      clientLog.operation("quick_grade_save", "error", { assignment: id, student: sid, error: e.message });
       message.error(e.message);
     } finally {
       setSavingIds((prev) => {
@@ -205,13 +206,20 @@ export default function QuickGrade() {
       try {
         await saveRow(sid);
       } catch (e) {
-        failed.push(students.find((s) => s.id === sid)?.name || sid);
+        failed.push(sid);
+        clientLog.operation("quick_grade_save", "error", { assignment: id, student: sid, error: e.message });
       }
     }
     setSavingAll(false);
+    clientLog.operation("quick_grade_save_all", failed.length ? "partial" : "success", {
+      assignment: id,
+      total: dirtyIds.length,
+      failed: failed.join(","),
+    });
     if (failed.length) {
       setSaveFailed(true);
-      message.error(`保存失败：${failed.join("、")}`);
+      const names = failed.map((sid) => students.find((s) => s.id === sid)?.name || sid);
+      message.error(`保存失败：${names.join("、")}`);
     } else {
       setSaveFailed(false);
       message.success(`已全部保存（${dirtyIds.length} 人）`);

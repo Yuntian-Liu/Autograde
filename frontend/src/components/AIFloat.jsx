@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getToken } from "../api";
 import { clientLog } from "../utils/clientLog";
+import { trackedFetch } from "../utils/trackedFetch";
 import MdContent from "./MdContent";
 import { IconCopy } from "./icons";
 import assistantIcon from "../assets/ai-assistant.png";
@@ -101,7 +102,7 @@ export default function AIFloat({ assignmentId = null }) {
     setMessages([...history, { role: "assistant", text: "" }]);
     const started = Date.now();
     try {
-      const res = await fetch("/api/ai/chat", {
+      const res = await trackedFetch("/api/ai/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

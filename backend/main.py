@@ -25,6 +25,7 @@ from auth.router import router as auth_router
 from auth.utils import check_captcha_rate, get_client_ip
 from database import get_db, init_db
 from diagnostics import APP_VERSION, attach_log_buffer, build_diagnostics
+from operation_log import record_operation, request_id as make_request_id
 from routers import (
     ability,
     admin,
@@ -41,6 +42,7 @@ from routers import (
 )
 
 load_dotenv()
+logging.getLogger("autograde").setLevel(logging.INFO)
 
 
 @asynccontextmanager
@@ -56,16 +58,17 @@ async def lifespan(app: FastAPI):
     # 生产环境关键配置缺失时启动即警告（不阻断——降级运行便于排查）
     if config.IS_PROD:
         if config.JWT_SECRET == "dev-secret-change-me":
-            print(
-                "[WARN] 生产环境未配置 JWT_SECRET，正在使用不安全的默认值！"
-                "请用 python3 -c 'import secrets; print(secrets.token_urlsafe(48))' 生成后填入环境变量"
+            logging.getLogger("autograde.config").warning(
+                "生产环境未配置 JWT_SECRET，正在使用不安全的默认值"
             )
         if not config.RESEND_API_KEY or not config.RESEND_FROM:
-            print("[WARN] 生产环境未配置 RESEND_API_KEY / RESEND_FROM，验证码邮件将发送失败")
+            logging.getLogger("autograde.config").warning(
+                "生产环境未配置 RESEND_API_KEY / RESEND_FROM，验证码邮件将发送失败"
+            )
     yield
 
 
-app = FastAPI(title="Autograde", version="0.20.0", lifespan=lifespan)
+app = FastAPI(title="Autograde", version="0.21.0", lifespan=lifespan)
 
 # GZip：JS/CSS/JSON 压缩传输（1.8MB bundle → 约 450KB）
 from fastapi.middleware.gzip import GZipMiddleware
@@ -73,24 +76,29 @@ from fastapi.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
-# 可观测性：5xx（含未捕获异常，带堆栈）与慢请求（>3s）进服务端日志环形缓冲，诊断导出可见
+# 可观测性：请求关联 + 持久操作事件 + 5xx/慢请求环形日志
 @app.middleware("http")
 async def access_observability(request: Request, call_next):
     started = time.perf_counter()
+    request_id = make_request_id(request.headers.get("X-Request-ID"))
     try:
         response = await call_next(request)
     except anyio.EndOfStream:
-        # 客户端中途断连（页面关闭瞬间的 keepalive 上报等）：正常噪音，不进错误日志
-        return Response(status_code=499)
+        response = Response(status_code=499)
     except Exception:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        await record_operation(
+            request, request_id=request_id, status=500, duration_ms=elapsed_ms
+        )
         logging.getLogger("autograde.http").exception(
-            "未捕获异常 %s %s", request.method, request.url.path
+            "未捕获异常 rid=%s %s %s", request_id, request.method, request.url.path
         )
         raise
-    elapsed_ms = (time.perf_counter() - started) * 1000
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
     if response.status_code >= 500:
         logging.getLogger("autograde.http").error(
-            "5xx %s %s → %s（%.0fms）",
+            "5xx rid=%s %s %s → %s（%dms）",
+            request_id,
             request.method,
             request.url.path,
             response.status_code,
@@ -98,12 +106,20 @@ async def access_observability(request: Request, call_next):
         )
     elif elapsed_ms > 3000:
         logging.getLogger("autograde.http").warning(
-            "慢请求 %s %s → %s（%.0fms）",
+            "慢请求 rid=%s %s %s → %s（%dms）",
+            request_id,
             request.method,
             request.url.path,
             response.status_code,
             elapsed_ms,
         )
+    await record_operation(
+        request,
+        request_id=request_id,
+        status=response.status_code,
+        duration_ms=elapsed_ms,
+    )
+    response.headers["X-Request-ID"] = request_id
     return response
 
 

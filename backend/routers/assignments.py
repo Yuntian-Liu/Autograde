@@ -1,4 +1,6 @@
+import hashlib
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -10,7 +12,7 @@ from auth.dependencies import get_current_user
 from auth.models import User
 from codes import default_cohort
 from database import get_db
-from feedback import sync_unit_label, validate_assignment_metadata, validate_unit_fields
+from feedback import feedback_title, sync_unit_label, validate_assignment_metadata, validate_unit_fields
 from models import (
     AbilityReport,
     Assignment,
@@ -39,6 +41,8 @@ from serializers import (
 
 router = APIRouter(prefix="/api/assignments", tags=["assignments"])
 workspace_router = APIRouter(prefix="/api", tags=["temp-workspace"])
+logger = logging.getLogger("autograde.grading")
+logger.setLevel(logging.INFO)
 
 SUBMISSION_STATUSES = ("待批改", "已批改", "缺作业", "未交")
 QUESTION_MODES = ("verbatim", "ai_expand", "manual")
@@ -739,13 +743,13 @@ class GradingIn(BaseModel):
     preview_wrong: list[int] = []  # 预习错题题号（1-5，不算分）
 
 
-@router.put("/{assignment_id}/students/{student_id}/grading")
-async def save_grading(
+async def _save_grading(
     assignment_id: str,
     student_id: int,
     body: GradingIn,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    db: AsyncSession,
+    user: User,
+    commit: bool = True,
 ) -> dict:
     """批改落库：score/rating 由后端按 score_weight 复算（不信前端），
     error_records 先删后插，feedback_snapshots 存档 final_text。"""
@@ -796,7 +800,8 @@ async def save_grading(
                     FeedbackSnapshot.assignment_id == assignment_id,
                 )
             )
-            await db.commit()
+            if commit:
+                await db.commit()
         except Exception:
             await db.rollback()
             raise
@@ -923,12 +928,153 @@ async def save_grading(
                 .values(use_count=Phrase.use_count + 1)
             )
 
+        if commit:
+            await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    if commit:
+        fingerprint = hashlib.sha256(body.final_text.encode()).hexdigest()[:8]
+        logger.info(
+            "grading_save uid=%s assignment=%s student=%s status=%s errors=%s score=%s len=%s fp=%s",
+            user.uid,
+            assignment_id,
+            student_id,
+            body.status,
+            len(checked_ids),
+            sub.score,
+            len(body.final_text),
+            fingerprint,
+        )
+    return {
+        "submission": submission_brief(sub),
+        "error_question_ids": checked_ids,
+    }
+
+
+@router.put("/{assignment_id}/students/{student_id}/grading")
+async def save_grading(
+    assignment_id: str,
+    student_id: int,
+    body: GradingIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    return await _save_grading(assignment_id, student_id, body, db, user)
+
+
+class GradingTransferIn(BaseModel):
+    target_student_id: int
+    grading: GradingIn
+
+
+@router.post("/{assignment_id}/students/{source_student_id}/transfer")
+async def transfer_grading(
+    assignment_id: str,
+    source_student_id: int,
+    body: GradingTransferIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    a = await owned_assignment(db, assignment_id, user)
+    source = await db.get(Student, source_student_id)
+    target = await db.get(Student, body.target_student_id)
+    if source is None or target is None:
+        raise HTTPException(status_code=404, detail="学生不存在")
+    expected_assignment_id = a.id if a.series is not None else None
+    if any(
+        s.class_id != a.class_id or s.assignment_id != expected_assignment_id
+        for s in (source, target)
+    ):
+        raise HTTPException(status_code=400, detail="学生不属于该批次")
+
+    grading = body.grading.model_copy(deep=True)
+    if source.id == target.id:
+        raise HTTPException(status_code=400, detail="原学生与目标学生不能相同")
+    if grading.status not in SUBMISSION_STATUSES:
+        raise HTTPException(status_code=400, detail="未知提交状态")
+    if grading.status == "待批改":
+        raise HTTPException(status_code=400, detail="待批改内容无需迁移")
+
+    target_sub = (
+        await db.execute(
+            select(Submission).where(
+                Submission.student_id == target.id,
+                Submission.assignment_id == a.id,
+            )
+        )
+    ).scalars().first()
+    target_errors = (
+        await db.execute(
+            select(func.count(ErrorRecord.id))
+            .join(Question, ErrorRecord.question_id == Question.id)
+            .where(ErrorRecord.student_id == target.id, Question.assignment_id == a.id)
+        )
+    ).scalar_one()
+    target_snapshots = (
+        await db.execute(
+            select(func.count(FeedbackSnapshot.id)).where(
+                FeedbackSnapshot.student_id == target.id,
+                FeedbackSnapshot.assignment_id == a.id,
+            )
+        )
+    ).scalar_one()
+    if (
+        target_errors
+        or target_snapshots
+        or (
+            target_sub
+            and (
+                target_sub.status != "待批改"
+                or target_sub.score is not None
+                or target_sub.rating
+                or target_sub.rating_override
+                or target_sub.preview_wrong not in ("", "[]")
+            )
+        )
+    ):
+        raise HTTPException(status_code=409, detail="目标学生已有批改内容，不能覆盖")
+
+    grading.used_phrase_ids = []
+    if grading.final_text:
+        c = await db.get(Class, a.class_id)
+        first_line, separator, rest = grading.final_text.partition("\n")
+        if first_line.strip() == feedback_title(source.name, a, c):
+            grading.final_text = f"{feedback_title(target.name, a, c)}{separator}{rest}"
+
+    try:
+        target_result = await _save_grading(a.id, target.id, grading, db, user, commit=False)
+        source_result = await _save_grading(
+            a.id,
+            source.id,
+            GradingIn(status="待批改"),
+            db,
+            user,
+            commit=False,
+        )
         await db.commit()
     except Exception:
         await db.rollback()
         raise
 
+    fingerprint = hashlib.sha256(grading.final_text.encode()).hexdigest()[:8]
+    logger.info(
+        "grading_transfer uid=%s assignment=%s source=%s target=%s errors=%s status=%s fp=%s",
+        user.uid,
+        a.id,
+        source.id,
+        target.id,
+        len(target_result["error_question_ids"]),
+        grading.status,
+        fingerprint,
+    )
     return {
-        "submission": submission_brief(sub),
-        "error_question_ids": checked_ids,
+        "source": {"student_id": source.id, **source_result},
+        "target": {
+            "student_id": target.id,
+            **target_result,
+            "final_text_length": len(grading.final_text),
+            "final_text_fingerprint": fingerprint,
+        },
     }

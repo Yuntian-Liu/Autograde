@@ -8,6 +8,7 @@ import SaveStatus from "../components/SaveStatus";
 import PageSkeleton from "../components/PageSkeleton";
 import { fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
+import { trackedFetch } from "../utils/trackedFetch";
 import { fp } from "../utils/contentfp";
 import { useNotePaste } from "../utils/useNotePaste";
 import { copyNoteToWechat } from "../utils/wechatExport";
@@ -236,7 +237,7 @@ export default function NoteDetail() {
       const ext = entries[i].key.rsplit(".", 1)[1] || "png";
       const name = `note-${id}-${i + 1}.${ext}`;
       try {
-        const resp = await fetch(entries[i].url);
+        const resp = await trackedFetch(entries[i].url, { logLabel: "笔记图片下载" });
         if (!resp.ok) throw new Error(String(resp.status));
         const blob = await resp.blob();
         const a = document.createElement("a");

@@ -2,6 +2,7 @@
 // 形态适配（均真机实测）：mark 标签微信不认 → 转 span+背景色；**微信只认 PNG 的 data URI，JPEG 会被静默丢弃**
 // → 非 PNG 图片一律 canvas 解码重编码为 PNG（无损，体积膨胀但 17MB 实测可通过）。
 import { contentToHtml, stripMarks } from "./noteFormat";
+import { trackedFetch } from "./trackedFetch";
 
 const WX_MARK_OPEN = '<span style="background-color:rgb(255,224,122)">';
 
@@ -41,7 +42,7 @@ export async function copyNoteToWechat(note, { onProgress } = {}) {
       continue;
     }
     try {
-      const resp = await fetch(url);
+      const resp = await trackedFetch(url, { logLabel: "微信复制图片下载" });
       if (!resp.ok) throw new Error(String(resp.status));
       dataUris[keys[i]] = await toPngDataUri(await resp.blob());
     } catch {

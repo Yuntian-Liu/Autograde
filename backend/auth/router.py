@@ -49,7 +49,8 @@ from auth.utils import (
 )
 from database import get_db
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("autograde.auth")
+logger.setLevel(logging.INFO)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -214,6 +215,7 @@ async def login_code(
         await db.delete(record)
         await db.commit()
         token = create_access_token(user.uid, user.email)
+        logger.info("login_code_success uid=%s", user.uid)
         return LoginCodeResponse(token=token, user=_user_to_public(user))
     # 新用户：不删码（register 时还要再验一次）
     return LoginCodeResponse(need_register=True)
@@ -343,6 +345,7 @@ async def login_password(
         raise HTTPException(status_code=401, detail="账号或密码错误")
 
     token = create_access_token(user.uid, user.email)
+    logger.info("login_password_success uid=%s", user.uid)
     return LoginCodeResponse(token=token, user=_user_to_public(user))
 
 

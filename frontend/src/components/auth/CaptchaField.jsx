@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { trackedFetch } from "../../utils/trackedFetch";
 
 // 自托管图形验证码：dev 模式（is_prod=false）后端 bypass，本组件渲染空并上报 null 占位
 export default function CaptchaField({ onChange, refreshKey }) {
@@ -8,7 +9,7 @@ export default function CaptchaField({ onChange, refreshKey }) {
   const genRef = useRef(0);
 
   useEffect(() => {
-    fetch("/api/config")
+    trackedFetch("/api/config")
       .then((r) => r.json())
       .then((c) => {
         setIsProd(Boolean(c.is_prod));
@@ -21,7 +22,7 @@ export default function CaptchaField({ onChange, refreshKey }) {
   useEffect(() => {
     if (isProd !== true) return;
     const gen = ++genRef.current;
-    fetch("/api/captcha")
+    trackedFetch("/api/captcha")
       .then((r) => r.json())
       .then((c) => {
         if (gen === genRef.current) {
@@ -41,7 +42,7 @@ export default function CaptchaField({ onChange, refreshKey }) {
       {captcha && (
         <img className="captcha-img" src={captcha.image} alt="人机验证" title="点击换一张" onClick={() => {
           const gen = ++genRef.current;
-          fetch("/api/captcha")
+          trackedFetch("/api/captcha")
             .then((r) => r.json())
             .then((c) => {
               if (gen === genRef.current) {
