@@ -11,6 +11,7 @@ import Grading from "./pages/Grading";
 import QuestionBatchEdit from "./pages/QuestionBatchEdit";
 import QuickGrade from "./pages/QuickGrade";
 import TempGrading from "./pages/TempGrading";
+import WeeklyReport from "./pages/WeeklyReport";
 import Notes from "./pages/Notes";
 import NoteDetail from "./pages/NoteDetail";
 import NoteImport from "./pages/NoteImport";
@@ -45,6 +46,7 @@ function RequireAuth({ children, adminOnly = false }) {
 function shellWidthClass(pathname) {
   if (pathname.startsWith("/grading") || pathname.startsWith("/login")) return "w-fluid";
   if (pathname.startsWith("/admin")) return "w-wide";
+  if (pathname === "/weekly") return "w-wide";
   if (pathname === "/notes/import") return "w-wide";
   if (/^\/notes\/\d+/.test(pathname)) return "w-narrow";
   if (/^\/classes\/\d+\/stats/.test(pathname)) return "w-wide";
@@ -96,6 +98,14 @@ export default function App() {
         element={
           <RequireAuth>
             <TempGrading />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/weekly"
+        element={
+          <RequireAuth>
+            <WeeklyReport />
           </RequireAuth>
         }
       />

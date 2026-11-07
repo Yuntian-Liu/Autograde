@@ -160,7 +160,7 @@ async def aggregate_batch(db: AsyncSession, assignment: Assignment) -> dict:
         rank_score = score if status in GRADED_STATUSES else 0.0 if status == "未交" else None
         if status in GRADED_STATUSES and rank_score is None:
             rank_score = 0.0
-        created_at = submission.created_at if submission else None
+        created_at = (submission.graded_at or submission.created_at) if submission else None
         row = {
             "student_id": student.id,
             "name": student.name,

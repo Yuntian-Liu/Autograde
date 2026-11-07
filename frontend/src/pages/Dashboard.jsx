@@ -150,6 +150,10 @@ export default function Dashboard() {
               <span className="dashboard-shortcut-title">笔记库</span>
               <span className="dashboard-shortcut-sub">批改反馈与图文笔记</span>
             </Link>
+            <Link className="dashboard-shortcut" to="/weekly">
+              <span className="dashboard-shortcut-title">助教周报</span>
+              <span className="dashboard-shortcut-sub">工作量、关注名单与错题热力</span>
+            </Link>
             <Link className="dashboard-shortcut" to="/temp">
               <span className="dashboard-shortcut-title">临时批改</span>
               <span className="dashboard-shortcut-sub">独立名单与作业批次</span>

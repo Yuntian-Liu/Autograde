@@ -535,6 +535,54 @@ async def _chat_web_search_stream(messages: list[dict]) -> AsyncGenerator[dict, 
     }
 
 
+_WEEKLY_HEADINGS = ["本周一句话", "数据亮点", "异常与关注", "下周观察点"]
+_WEEKLY_SYSTEM = """你是英语助教个人周报的撰写者。根据提供的确定性统计，输出四段 Markdown，标题严格依次为「## 本周一句话」「## 数据亮点」「## 异常与关注」「## 下周观察点」。每段 1-3 个要点，必须引用具体数字和批次/板块名称，突出变化、异常与值得关注的信息。禁止提供备课或教学建议，禁止因果臆测，禁止空泛鼓励，不得把相关性写成原因。数据不足时明确说明，不得补造。"""
+
+
+async def analyze_weekly_stream(evidence_text: str) -> AsyncGenerator[dict, None]:
+    client = _client(max_retries=0)
+    stream = await client.chat.completions.create(
+        model=_model(),
+        messages=[
+            {"role": "system", "content": _WEEKLY_SYSTEM},
+            {"role": "user", "content": f"{evidence_text}\n\n请按系统要求输出四段 Markdown 助教周报。"},
+        ],
+        temperature=0.3,
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+    buf = ""
+    usage = None
+    finish_reason = None
+    timer = _StreamTimer()
+    async for chunk in stream:
+        if chunk.choices:
+            fr = chunk.choices[0].finish_reason
+            if fr:
+                finish_reason = fr
+            timer.on_chunk(chunk.choices[0].delta)
+            delta = chunk.choices[0].delta.content
+            if delta:
+                buf += delta
+                yield {"type": "progress", "recv_chars": len(buf)}
+        u = _usage_dict(chunk)
+        if u:
+            usage = u
+    content = buf.strip()
+    headings = [line.strip() for line in content.splitlines() if line.startswith("#")]
+    expected = [f"## {heading}" for heading in _WEEKLY_HEADINGS]
+    if not content or headings != expected:
+        raise AIParseError("输出未按要求包含四段 Markdown 周报", raw=buf[:500])
+    yield {
+        "type": "done",
+        "data": {"content": content},
+        "usage": usage,
+        "finish_reason": finish_reason,
+        "text_chars": len(buf),
+        "metrics": timer.metrics(),
+    }
+
+
 async def chat_stream(messages: list[dict], web_search: bool = False) -> AsyncGenerator[dict, None]:
     """AI 助教通用问答：流式直答，无 system 角色设定（碳碳定：单纯接入模型能力）。
     内容安全由模型侧承担；计时/用量/缓存拆分与全站 AI 调用同口径。"""
@@ -584,6 +632,7 @@ __all__ = [
     "AIUnavailable",
     "analyze_ability_stream",
     "analyze_batch_analysis_stream",
+    "analyze_weekly_stream",
     "chat_stream",
     "draft_explanation",
     "ensure_available",

@@ -6,7 +6,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -142,6 +142,7 @@ class Submission(Base):
     rating_override: Mapped[str] = mapped_column(String(4), default="")
     # 预习错题题号（JSON 数组，如 [1,3]）；不算分，仅驱动「预习有错题」话术计数
     preview_wrong: Mapped[str] = mapped_column(Text, default="")
+    graded_at: Mapped[datetime | None] = mapped_column(default=utcnow, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
@@ -298,6 +299,30 @@ class BatchAnalysisReport(Base):
         ForeignKey("assignments.id", ondelete="CASCADE"), unique=True, index=True
     )
     owner_uid: Mapped[int] = mapped_column(Integer, index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    model: Mapped[str] = mapped_column(String(64), default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_hit_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_miss_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    reasoning_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_yuan: Mapped[float] = mapped_column(Float, default=0.0)
+    price_tier: Mapped[str] = mapped_column(String(8), default="")
+    total_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class WeeklyReport(Base):
+    """AI 助教周报：每个用户、班级范围和自然周保留最新一份。"""
+
+    __tablename__ = "weekly_reports"
+    __table_args__ = (UniqueConstraint("owner_uid", "class_id", "week_start"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_uid: Mapped[int] = mapped_column(Integer, index=True)
+    class_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    week_start: Mapped[str] = mapped_column(String(10), index=True)
     content: Mapped[str] = mapped_column(Text, default="")
     model: Mapped[str] = mapped_column(String(64), default="")
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)

@@ -1,0 +1,69 @@
+.weekly-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s4); margin: var(--s3) 0 var(--s5); }
+.weekly-title-row h1 { margin: 0; }
+.weekly-title-row .btn { display: inline-flex; align-items: center; gap: var(--s2); }
+.weekly-week { margin-top: var(--s2); color: var(--ink-2); font-size: var(--t-body); }
+.weekly-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s3); }
+.weekly-week-controls { display: flex; gap: var(--s2); }
+.weekly-metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--s3); margin-bottom: var(--s5); }
+.weekly-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); }
+.weekly-chart { width: 100%; height: 240px; }
+.weekly-focus-list { display: flex; flex-direction: column; gap: var(--s3); }
+.weekly-focus { display: grid; grid-template-columns: minmax(200px, 0.8fr) minmax(0, 2fr); gap: var(--s4); padding: var(--s3) 0; border-top: 1px solid var(--line); color: inherit; text-decoration: none; }
+.weekly-focus:first-child { border-top: 0; padding-top: 0; }
+.weekly-focus:hover strong { color: var(--accent); }
+.weekly-focus-name { display: flex; flex-direction: column; gap: var(--s1); }
+.weekly-focus-name strong { font-family: var(--font-display); font-size: var(--t-title); }
+.weekly-focus-name span { color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-caption); overflow-wrap: anywhere; }
+.weekly-focus-reasons { display: flex; flex-direction: column; gap: var(--s2); }
+.weekly-reason { display: flex; align-items: flex-start; gap: var(--s2); line-height: 1.6; }
+.weekly-reason .tag-pill { flex: none; }
+.sec-title-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s3); }
+.sec-title-row .sec-title { margin-bottom: 0; }
+.weekly-ai-meta { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); margin-bottom: var(--s4); color: var(--ink-2); font-size: var(--t-caption); }
+.heat-scroll { overflow-x: auto; padding-bottom: var(--s2); }
+.heat-grid { display: grid; min-width: max-content; border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+.heat-row { display: contents; }
+.heat-head, .heat-section, .heat-cell { min-height: 48px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.heat-head { display: flex; align-items: center; padding: var(--s2) var(--s3); background: var(--bg-soft); color: var(--ink-2); font-size: var(--t-caption); font-weight: 600; }
+.heat-section { display: flex; align-items: center; padding: var(--s2) var(--s3); background: var(--surface); font-weight: 500; }
+.heat-cell { display: flex; align-items: center; justify-content: center; gap: var(--s2); border-top: 0; border-left: 0; padding: var(--s2); font: inherit; cursor: pointer; transition: background var(--dur) var(--ease); }
+.heat-cell:disabled { cursor: default; color: var(--ink-3); background: var(--surface); }
+.heat-cell strong { font-family: var(--font-mono); }
+.heat-cell span { font-family: var(--font-mono); font-size: var(--t-micro); }
+.heat-zero { background: var(--surface); color: var(--ink-3); }
+.heat-low { background: var(--accent-bg); color: var(--accent-hover); }
+.heat-mid { background: var(--accent-line); color: var(--ink); }
+.heat-high { background: var(--warning); color: var(--surface); }
+.heat-max { background: var(--danger); color: var(--surface); }
+.heat-cell:not(:disabled):hover { outline: 2px solid var(--accent); outline-offset: -2px; }
+.weekly-heat-summary { margin-bottom: var(--s3); color: var(--ink-2); }
+.weekly-question { display: grid; grid-template-columns: 90px 180px minmax(0, 1fr); gap: var(--s3); align-items: start; padding: var(--s3) 0; border-top: 1px solid var(--line); }
+.weekly-question-names { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.weekly-question-names a { color: var(--accent); text-decoration: none; }
+
+@media (max-width: 1100px) {
+  .weekly-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .weekly-title-row, .weekly-toolbar { flex-direction: column; align-items: stretch; }
+  .weekly-title-row .btn { align-self: flex-start; }
+  .weekly-week-controls { align-self: flex-start; }
+  .weekly-chart-grid { grid-template-columns: 1fr; }
+  .weekly-focus { grid-template-columns: 1fr; gap: var(--s2); }
+  .weekly-question { grid-template-columns: 70px 1fr; }
+  .weekly-question-names { grid-column: 1 / -1; }
+}
+@media (max-width: 520px) {
+  .weekly-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); }
+}
+
+@media print {
+  .app-header, .no-print, .ai-float, .ai-panel, .ant-tabs-nav, .ant-message, .ant-modal-mask, .ant-modal-wrap { display: none !important; }
+  .shell, .wrap, .wrap-wide { max-width: none !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+  .page-enter { animation: none !important; transform: none !important; }
+  .weekly-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .weekly-chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .block { break-inside: avoid; }
+  .weekly-focus { break-inside: avoid; }
+  .weekly-print-area { display: block !important; }
+}

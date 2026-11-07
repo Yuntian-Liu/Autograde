@@ -1,10 +1,10 @@
 // 版本日志数据源（设置页「版本日志」弹窗 + 登录后更新提醒弹窗；发版时与 CHANGELOG.md 同步）
 // 结构：minor 为主条目，patch 嵌套在 patches 数组里（主界面只呈现 minor，展开后见 patch）
 // ⚠️ 公开文件：不得出现私人信息
-export const APP_VERSION = "V0.21.0";
+export const APP_VERSION = "V0.22.0";
 
 /** 协议版本（用户协议/隐私政策最后更新日期，改协议时同步递增；触发登录后协议变更提醒） */
-export const AGREEMENT_VERSION = "2026-11-07";
+export const AGREEMENT_VERSION = "2026-11-07.2";
 
 /** 取全站最新更新条目（最新 minor 有 patch 取最新 patch，否则取最新 minor） */
 export function getLatestUpdate() {
@@ -18,6 +18,17 @@ export function getLatestUpdate() {
 }
 
 export const CHANGELOG = [
+  {
+    version: "V0.22.0",
+    date: "2026-11-07",
+    items: [
+      "新增「助教周报」：按自然周汇总完成批改、错题、定稿解析、平均分、AI 调用与成本，并对比上周；默认全部正式班级，可切换单班",
+      "新增「错题热力」：最近 8 个批次按板块展示错误率，点击格子展开逐题统计和答错学生，可直接进入对应批改详情",
+      "新增关注名单：连续未交或缺项、成绩明显下滑、同板块重复出错均给出具体数据依据，不再逐班逐批翻记录",
+      "新增可选 AI 本周观察：生成前预估费用，生成后展示实耗；按班级范围和自然周保存最新一份，失败不影响任何统计数据",
+      "周报支持打印 / 保存 PDF；用户协议与隐私政策同步补充 AI 周报的数据范围与保存规则（协议版本 2026-11-07.2）",
+    ],
+  },
   {
     version: "V0.21.0",
     date: "2026-11-07",

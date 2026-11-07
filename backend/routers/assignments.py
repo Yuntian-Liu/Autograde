@@ -24,6 +24,7 @@ from models import (
     Question,
     Student,
     Submission,
+    utcnow,
 )
 from rating import get_thresholds, rating_for
 from routers.classes import StudentsBatchIn, _import_students
@@ -790,6 +791,7 @@ async def _save_grading(
                 sub = Submission(student_id=student_id, assignment_id=assignment_id)
                 db.add(sub)
             sub.status = "待批改"
+            sub.graded_at = None
             sub.score = None
             sub.rating = ""
             sub.rating_override = ""
@@ -882,6 +884,7 @@ async def _save_grading(
             sub = Submission(student_id=student_id, assignment_id=assignment_id)
             db.add(sub)
         sub.status = body.status
+        sub.graded_at = utcnow()
         sub.score = score
         sub.rating = rating
         sub.rating_override = rating_override

@@ -42,11 +42,12 @@ from models import (
     Setting,
     Student,
     Submission,
+    WeeklyReport,
 )
 
-APP_VERSION = "0.21.0"
+APP_VERSION = "0.22.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
-AGREEMENT_VERSION = "2026-11-07"
+AGREEMENT_VERSION = "2026-11-07.2"
 _STARTED_AT = datetime.now(timezone.utc)
 
 MAX_LOG_ENTRIES = 500
@@ -485,6 +486,23 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                 await db.execute(
                     select(func.count(BatchAnalysisReport.id)).where(
                         BatchAnalysisReport.owner_uid == user.uid
+                    )
+                )
+            ).scalar_one(),
+            "weekly_reports": (
+                await db.execute(
+                    select(func.count(WeeklyReport.id)).where(WeeklyReport.owner_uid == user.uid)
+                )
+            ).scalar_one(),
+            "graded_at_missing_processed": (
+                await db.execute(
+                    select(func.count(Submission.id))
+                    .join(Assignment, Submission.assignment_id == Assignment.id)
+                    .join(Class, Assignment.class_id == Class.id)
+                    .where(
+                        Class.owner_uid == user.uid,
+                        Submission.status.in_(("已批改", "缺作业", "未交")),
+                        Submission.graded_at.is_(None),
                     )
                 )
             ).scalar_one(),

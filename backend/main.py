@@ -39,6 +39,7 @@ from routers import (
     phrases,
     questions,
     students,
+    weekly,
 )
 
 load_dotenv()
@@ -68,7 +69,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Autograde", version="0.21.0", lifespan=lifespan)
+app = FastAPI(title="Autograde", version="0.22.0", lifespan=lifespan)
 
 # GZip：JS/CSS/JSON 压缩传输（1.8MB bundle → 约 450KB）
 from fastapi.middleware.gzip import GZipMiddleware
@@ -162,6 +163,7 @@ app.include_router(ability.reports_router)
 app.include_router(phrases.router)
 app.include_router(notes.router)
 app.include_router(client_log.router)
+app.include_router(weekly.router)
 
 
 # ---- 图形验证码（公开；生成接口限流防刷）----

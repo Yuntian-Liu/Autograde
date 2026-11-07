@@ -33,6 +33,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_columns)
+        await conn.execute(text("UPDATE submissions SET graded_at=created_at WHERE graded_at IS NULL"))
     from builtin_phrases import ensure_builtin_rating_phrases
     from slug_ids import backfill_slugs
     from codes import backfill_codes
