@@ -6,6 +6,7 @@ import zhCN from "antd/locale/zh_CN";
 import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider } from "./contexts/AuthContext";
+import { ScoreViewProvider } from "./contexts/ScoreViewContext";
 import { antdTheme } from "./theme";
 import "katex/dist/katex.min.css"; // AI 助教 LaTeX 公式（字体按需加载，不出公式零开销）
 // 字体自托管（fontsource）：不进网络、unicode-range 按需加载、基线一致
@@ -30,7 +31,9 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <AntApp>
         <ErrorBoundary>
           <AuthProvider>
-            <RouterProvider router={router} />
+            <ScoreViewProvider>
+              <RouterProvider router={router} />
+            </ScoreViewProvider>
           </AuthProvider>
         </ErrorBoundary>
       </AntApp>

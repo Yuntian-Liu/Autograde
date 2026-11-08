@@ -1,4 +1,5 @@
 import { fmtTime } from "../meta";
+import { gpaForRating } from "../gpa";
 
 const EXPORT_KINDS = {
   ranking: { label: "学生成绩", filename: "学生成绩" },
@@ -21,7 +22,7 @@ export function createAssignmentCsv(data, kind) {
   let headers;
   let rows;
   if (kind === "ranking") {
-    headers = ["排名", "SID", "姓名", "状态", "分数", "批改时间"];
+    headers = ["排名", "SID", "姓名", "状态", "分数", "最终等级", "GPA", "批改时间"];
     const ranks = new Map((data.ranking || []).map((row) => [row.student_id, row.rank]));
     rows = (data.students || data.ranking || []).map((row) => [
       ranks.get(row.student_id) ?? row.rank ?? "",
@@ -29,6 +30,10 @@ export function createAssignmentCsv(data, kind) {
       row.name,
       row.status,
       row.status === "待批改" ? "" : Number(row.rank_score ?? row.score ?? 0).toFixed(2),
+      row.rating || "",
+      row.status === "待批改" || row.gpa === null || row.gpa === undefined
+        ? ""
+        : Number(row.gpa ?? gpaForRating(row.rating)).toFixed(2),
       row.graded_at ? fmtTime(row.graded_at) : "",
     ]);
   } else {

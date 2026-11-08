@@ -19,6 +19,7 @@ from models import (
     Submission,
     utcnow,
 )
+from rating import gpa_for_rating
 from serializers import (
     GRADED_STATUSES,
     PROCESSED_STATUSES,
@@ -161,12 +162,15 @@ async def aggregate_batch(db: AsyncSession, assignment: Assignment) -> dict:
         if status in GRADED_STATUSES and rank_score is None:
             rank_score = 0.0
         created_at = (submission.graded_at or submission.created_at) if submission else None
+        rating = (submission.rating_override or submission.rating) if submission else ""
         row = {
             "student_id": student.id,
             "name": student.name,
             "code": student.code,
             "status": status,
             "score": score,
+            "rating": rating,
+            "gpa": gpa_for_rating(rating) if score is not None else None,
             "rank_score": rank_score,
             "graded_at": _iso(created_at),
         }
@@ -193,6 +197,11 @@ async def aggregate_batch(db: AsyncSession, assignment: Assignment) -> dict:
         for row in student_rows
         if row["status"] in GRADED_STATUSES and row["score"] is not None and row["score"] > 0
     )
+    valid_gpas = sorted(
+        float(row["gpa"])
+        for row in student_rows
+        if row["status"] in GRADED_STATUSES and row["score"] is not None and row["score"] > 0 and row["gpa"] is not None
+    )
     summary = {
         "total_students": len(student_rows),
         "graded_count": graded_count,
@@ -203,6 +212,10 @@ async def aggregate_batch(db: AsyncSession, assignment: Assignment) -> dict:
         "median_score": round(float(median(valid_scores)), 2) if valid_scores else None,
         "max_score": max(valid_scores) if valid_scores else None,
         "min_score": min(valid_scores) if valid_scores else None,
+        "avg_gpa": round(sum(valid_gpas) / len(valid_gpas), 2) if valid_gpas else None,
+        "median_gpa": round(float(median(valid_gpas)), 2) if valid_gpas else None,
+        "max_gpa": max(valid_gpas) if valid_gpas else None,
+        "min_gpa": min(valid_gpas) if valid_gpas else None,
     }
 
     questions = (
@@ -310,6 +323,7 @@ async def aggregate_batch(db: AsyncSession, assignment: Assignment) -> dict:
         "summary": summary,
         "ranking": ranking,
         "valid_scores": valid_scores,
+        "valid_gpas": valid_gpas,
         "sections": sections,
         "_students": student_rows,
         "_errors": errors_by_student,
@@ -335,6 +349,7 @@ async def build_assignment_analysis(
         "ranking": data["ranking"],
         "students": data["_students"],
         "valid_scores": data["valid_scores"],
+        "valid_gpas": data["valid_gpas"],
         "sections": data["sections"],
         "ai_report": batch_analysis_report_out(report) if report else None,
     }

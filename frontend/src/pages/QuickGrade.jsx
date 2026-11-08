@@ -9,6 +9,9 @@ import Confetti from "../components/Confetti";
 import SaveStatus from "../components/SaveStatus";
 import StudentImportModal from "../components/StudentImportModal";
 import PageSkeleton from "../components/PageSkeleton";
+import ScoreViewToggle from "../components/ScoreViewToggle";
+import { useScoreView } from "../contexts/ScoreViewContext";
+import { fmtGpa, gpaForRating } from "../gpa";
 import { STATUS_META, scoreTone, seriesLabel } from "../meta";
 import { ratingFor } from "../rating";
 import { clientLog } from "../utils/clientLog";
@@ -24,6 +27,7 @@ export default function QuickGrade() {
   const navigate = useNavigate();
   const { message, modal } = AntApp.useApp();
   const { user } = useAuth();
+  const { isGpa } = useScoreView();
 
   const [assignment, setAssignment] = useState(null);
   const [students, setStudents] = useState([]);
@@ -368,15 +372,18 @@ export default function QuickGrade() {
         {!tempEmpty && (assignment.sections.length > 0 || previewReady) && (
           <section className="block">
             <div className="sec-title sec-title-row">
-              标错矩阵
-              <SaveStatus dirty={dirtyCount > 0} saving={savingAll} failed={saveFailed} />
-              <button
-                className="btn primary"
-                onClick={saveAll}
-                disabled={savingAll || dirtyCount === 0}
-              >
-                {savingAll ? "保存中…" : `全部保存${dirtyCount ? `（${dirtyCount} 人有改动）` : ""}`}
-              </button>
+              <span>标错矩阵</span>
+              <span className="score-view-tools">
+                <ScoreViewToggle />
+                <SaveStatus dirty={dirtyCount > 0} saving={savingAll} failed={saveFailed} />
+                <button
+                  className="btn primary"
+                  onClick={saveAll}
+                  disabled={savingAll || dirtyCount === 0}
+                >
+                  {savingAll ? "保存中…" : `全部保存${dirtyCount ? `（${dirtyCount} 人有改动）` : ""}`}
+                </button>
+              </span>
             </div>
             <div className="qg-scroll" onMouseLeave={() => setHover({ row: null, col: null })}>
               <table className="qg-table">
@@ -406,7 +413,7 @@ export default function QuickGrade() {
                         </th>
                       </Fragment>
                     )}
-                    <th className="qg-right qg-scorecol">分数</th>
+                    <th className="qg-right qg-scorecol">{isGpa ? "GPA" : "分数"}</th>
                     <th className="qg-right qg-ratingcol">等级</th>
                     <th className="qg-right qg-savecol" />
                   </tr>
@@ -466,11 +473,11 @@ export default function QuickGrade() {
                                     {s.recent_scores.map((r) => (
                                       <span className="qg-tip-row" key={r.unit_label}>
                                         <span>{r.unit_label}</span>
-                                        <b>{Number(r.score).toFixed(2)}</b>
+                                        <b>{isGpa ? fmtGpa(r.gpa) : Number(r.score).toFixed(2)}</b>
                                       </span>
                                     ))}
-                                    {s.recent_avg_5 != null && (
-                                      <span className="qg-tip-avg">近 5 次平均 {s.recent_avg_5}</span>
+                                    {(isGpa ? s.recent_avg_gpa != null : s.recent_avg_5 != null) && (
+                                      <span className="qg-tip-avg">{isGpa ? "近 5 次平均 GPA" : "近 5 次平均"} {isGpa ? fmtGpa(s.recent_avg_gpa) : s.recent_avg_5}</span>
                                     )}
                                     <span className="qg-tip-go">进入标准批改（定位该生）</span>
                                   </span>
@@ -523,8 +530,9 @@ export default function QuickGrade() {
                         )}
                         <td
                           className={`qg-right qg-scorecol qg-score ${scoreTone(score)} ${rowHot ? "qg-rowhead" : ""}`}
+                          title={isGpa ? `原分数 ${score}` : undefined}
                         >
-                          {score}
+                          {isGpa ? fmtGpa(gpaForRating(ratingFor(Number(score), thresholds || undefined))) : score}
                         </td>
                         <td className={`qg-right qg-ratingcol ${rowHot ? "qg-rowhead" : ""}`}>
                           <span className={`qg-ratecap ${scoreTone(score)}`}>

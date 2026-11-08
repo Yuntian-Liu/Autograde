@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 
 from feedback import effective_metadata, feedback_type, unit_progress
 from models import Assignment, Class, Phrase, Question, Student, Submission
+from rating import gpa_for_submission
 
 GRADED_STATUSES = ("已批改", "缺作业")  # 有分数的状态
 PROCESSED_STATUSES = ("已批改", "缺作业", "未交")  # 已处理：唯一未处理状态是「待批改」
@@ -137,6 +138,7 @@ def submission_brief(sub: Submission) -> dict:
         "score": sub.score,
         "rating": sub.rating,
         "rating_override": sub.rating_override,
+        "gpa": gpa_for_submission(sub),
         "preview_wrong": parse_int_list(sub.preview_wrong),
     }
 

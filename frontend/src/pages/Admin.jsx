@@ -8,6 +8,7 @@ import AppHeader from "../components/AppHeader";
 import CodeChip from "../components/CodeChip";
 import PageSkeleton from "../components/PageSkeleton";
 import { RATING_THRESHOLDS } from "../rating";
+import { GPA_BY_RATING } from "../gpa";
 import { fmtBytes, fmtTime } from "../meta";
 import { useAuth } from "../contexts/AuthContext";
 import { clientLog } from "../utils/clientLog";
@@ -1055,7 +1056,7 @@ function RatingPanel() {
   return (
     <section className="block">
       <div className="sec-title sec-title-row">
-        十二档分数线（左闭右开）
+        <span>十二档分数线（左闭右开 · 4.33 满绩）</span>
         <span>
           <button
             className="btn sm"
@@ -1075,6 +1076,7 @@ function RatingPanel() {
       {rows.map((r, i) => (
         <div className="settings-row static" key={r.rating}>
           <span>{r.rating}</span>
+          <span className="mono">GPA {GPA_BY_RATING[r.rating].toFixed(2)}</span>
           <span className="settings-value">
             ≥{" "}
             <InputNumber

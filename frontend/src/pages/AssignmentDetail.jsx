@@ -9,7 +9,10 @@ import QuestionCard from "../components/QuestionCard";
 import QuestionEditModal from "../components/QuestionEdit";
 import { AiEntryModal, ManualEntryModal } from "../components/QuestionEntry";
 import PageSkeleton from "../components/PageSkeleton";
+import ScoreViewToggle from "../components/ScoreViewToggle";
 import PreviewEntry from "../components/PreviewEntry";
+import { useScoreView } from "../contexts/ScoreViewContext";
+import { fmtGpa } from "../gpa";
 import StudentImportModal from "../components/StudentImportModal";
 import CodeChip from "../components/CodeChip";
 import { STATUS_META, deadlineText, fmtScore, modeLabel, ratingTone, scoreTone, seriesLabel } from "../meta";
@@ -70,6 +73,7 @@ export default function AssignmentDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { message } = AntApp.useApp();
+  const { isGpa } = useScoreView();
   const [assignment, setAssignment] = useState(null);
   const [students, setStudents] = useState([]);
   const [error, setError] = useState(null);
@@ -311,13 +315,16 @@ export default function AssignmentDetail() {
         </div>
 
         <section className="block">
-          <div className={isTemp ? "sec-title sec-title-row" : "sec-title"}>
-            {isTemp ? "本批名单" : "学生提交状态"}
-            {isTemp && (
-              <button className="btn" onClick={() => setImportOpen(true)}>
-                添加本批名单
-              </button>
-            )}
+          <div className="sec-title sec-title-row">
+            <span>{isTemp ? "本批名单" : "学生提交状态"}</span>
+            <span className="score-view-tools">
+              <ScoreViewToggle />
+              {isTemp && (
+                <button className="btn" onClick={() => setImportOpen(true)}>
+                  添加本批名单
+                </button>
+              )}
+            </span>
           </div>
           {students.map((s) => {
             const sub = s.submission;
@@ -333,8 +340,8 @@ export default function AssignmentDetail() {
                 <span className={`tag-pill ${STATUS_PILL[status] || "todo"}`}>
                   {STATUS_PILL_TEXT[status] || "待批"}
                 </span>
-                <span className={`mono score-col ${sub && sub.score !== null ? scoreTone(sub.score) : ""}`}>
-                  {sub && sub.score !== null ? fmtScore(sub.score) : "—"}
+                <span className={`mono score-col ${sub && sub.score !== null ? scoreTone(sub.score) : ""}`} title={isGpa ? `原分数 ${fmtScore(sub?.score)}` : undefined}>
+                  {sub && sub.score !== null ? isGpa ? fmtGpa(sub.gpa) : fmtScore(sub.score) : "—"}
                 </span>
                 <span className={`mono rating-col ${sub && sub.rating ? ratingTone(sub.rating_override || sub.rating) : ""}`}>
                   {sub && sub.rating ? `· ${sub.rating_override || sub.rating}` : ""}

@@ -269,6 +269,8 @@ a.row:hover { background: var(--bg-soft); }
 .qrow-head { display: flex; gap: var(--s2); align-items: center; }
 .qrow-head .grow { flex: 1; }
 .qrow-del { margin-left: auto; }
+.score-view-tools { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--s2); flex-wrap: wrap; }
+.score-view-toggle { flex: none; }
 
 /* AI 调用真实阶段：不使用虚假百分比进度 */
 .ai-call-status { display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3); margin-top: var(--s3); border: 1px solid var(--accent-line); border-radius: var(--r-md); background: var(--accent-bg); }
@@ -1417,7 +1419,7 @@ mark.search-hit {
 .lb-bar { flex: 1; height: 6px; background: var(--accent-bg); border-radius: 999px; overflow: hidden; }
 .lb-fill { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
 .lb-rowscore { font-family: var(--font-mono); font-size: var(--t-strong); min-width: 6ch; text-align: right; flex: none; }
-.lb-rowsub { font-family: var(--font-mono); font-size: var(--t-micro); color: var(--ink-3); flex: none; }
+.lb-rowsub { font-family: var(--font-mono); font-size: var(--t-micro); color: var(--ink-3); flex: 0 1 auto; white-space: normal; text-align: right; }
 
 /* ---------- 能力分析报告（V0.15.0） ---------- */
 /* 雷达图：入场从中心放大淡入；网格 hairline、平色填充（无渐变） */

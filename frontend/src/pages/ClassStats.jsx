@@ -17,6 +17,9 @@ import {
 import { apiGet } from "../api";
 import AppHeader from "../components/AppHeader";
 import PageSkeleton from "../components/PageSkeleton";
+import ScoreViewToggle from "../components/ScoreViewToggle";
+import { useScoreView } from "../contexts/ScoreViewContext";
+import { fmtGpa } from "../gpa";
 import { fmtScore, seriesLabel } from "../meta";
 import { batchStatus, computeLeaderboard } from "../utils/leaderboard";
 
@@ -29,6 +32,7 @@ export default function ClassStats() {
   const [mode, setMode] = useState("live"); // live 实时 / hist 历次
   const [upto, setUpto] = useState(null); // 历次：截至第 N 次（已完成批次序号）
   const [weighted, setWeighted] = useState(true); // 历次：含提交率 / 纯分数
+  const { isGpa } = useScoreView();
 
   useEffect(() => {
     Promise.all([apiGet(`/classes/${id}/stats`), apiGet(`/classes/${id}/leaderboard`)])
@@ -56,6 +60,8 @@ export default function ClassStats() {
   const trend = data.assignments.map((a) => ({
     label: a.unit_label,
     avg: a.avg_score,
+    avgGpa: a.avg_gpa,
+    value: isGpa ? a.avg_gpa : a.avg_score,
     submitted: a.submitted,
     total: a.total_students,
   }));
@@ -77,9 +83,12 @@ export default function ClassStats() {
     live: mode === "live",
     upto: effUpto,
     weighted,
+    view: isGpa ? "gpa" : "score",
   });
   const lbEmpty = lbRows.length === 0 || lbRows[0].total === 0;
-  const maxScore = lbRows.length ? Math.max(...lbRows.map((r) => r.score)) : 0;
+  const scoreOf = (row) => isGpa ? row.gpa_score : row.score;
+  const avgOf = (row) => isGpa ? row.avg_gpa : row.avg;
+  const maxScore = lbRows.length ? Math.max(...lbRows.map(scoreOf)) : 0;
   // 领奖台：金中银左铜右，一名一人（同分按批改先后顺延，见 leaderboard.js）；人不够时留空台阶
   const MEDAL = { 1: "🥇", 2: "🥈", 3: "🥉" };
   const podiumCols = [2, 1, 3].map((rank) => ({
@@ -100,7 +109,10 @@ export default function ClassStats() {
         <Link className="back" to={`/classes/${c.id}`}>
           <IconChevronLeft />返回班级
         </Link>
-        <h1 style={{ marginTop: "var(--s3)" }}>{c.name} · 班级统计</h1>
+        <div className="sec-title-row" style={{ marginTop: "var(--s3)" }}>
+          <h1>{c.name} · 班级统计</h1>
+          <ScoreViewToggle />
+        </div>
 
         {/* 排行榜 */}
         <section className="block">
@@ -152,9 +164,9 @@ export default function ClassStats() {
                         >
                           <span className="lb-medal-emoji">{MEDAL[rank]}</span>
                           <span className="lb-name">{player.name}</span>
-                          <span className="lb-score">{player.score.toFixed(2)}</span>
+                          <span className="lb-score" title={`分数视图 ${fmtScore(player.score)}`}>{fmtGpa(scoreOf(player))}</span>
                           <span className="lb-sub">
-                            均分 {fmtScore(player.avg)} · 交 {player.submitted}/{player.total}
+                            {isGpa ? "平均 GPA" : "均分"} {isGpa ? fmtGpa(avgOf(player)) : fmtScore(avgOf(player))} · 交 {player.submitted}/{player.total}
                           </span>
                         </Link>
                       )}
@@ -177,12 +189,12 @@ export default function ClassStats() {
                   <span className="lb-bar">
                     <span
                       className="lb-fill"
-                      style={{ width: `${maxScore > 0 ? (r.score / maxScore) * 100 : 0}%` }}
+                      style={{ width: `${maxScore > 0 ? (scoreOf(r) / maxScore) * 100 : 0}%` }}
                     />
                   </span>
-                  <span className="lb-rowscore">{r.score.toFixed(2)}</span>
+                  <span className="lb-rowscore" title={`分数视图 ${fmtScore(r.score)}`}>{fmtGpa(scoreOf(r))}</span>
                   <span className="lb-rowsub">
-                    均分 {fmtScore(r.avg)} · 交 {r.submitted}/{r.total}
+                    {isGpa ? "平均 GPA" : "均分"} {isGpa ? fmtGpa(avgOf(r)) : fmtScore(avgOf(r))} · 交 {r.submitted}/{r.total}
                   </span>
                 </Link>
               ))}
@@ -192,7 +204,7 @@ export default function ClassStats() {
 
         {/* 历次平均分趋势 */}
         <section className="block">
-          <div className="sec-title">历次平均分</div>
+          <div className="sec-title">{isGpa ? "历次平均 GPA" : "历次平均分"}</div>
           {trend.length === 0 ? (
             <div className="row">暂无数据</div>
           ) : (
@@ -201,18 +213,17 @@ export default function ClassStats() {
                 <LineChart data={trend} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} width={36} />
+                  <YAxis domain={[0, isGpa ? 4.33 : 100]} tick={{ fontSize: 11 }} width={36} />
                   <Tooltip
-                    formatter={(v, name, item) =>
-                      name === "平均分"
-                        ? [`${Number(v).toFixed(2)}（${item.payload.submitted}/${item.payload.total} 人）`, name]
-                        : [v, name]
-                    }
+                    formatter={(v, name, item) => [
+                      `${Number(v).toFixed(2)}（${item.payload.submitted}/${item.payload.total} 人）${isGpa ? ` · 原均分 ${fmtScore(item.payload.avg)}` : ""}`,
+                      name,
+                    ]}
                   />
                   <Line
                     type="monotone"
-                    dataKey="avg"
-                    name="平均分"
+                    dataKey="value"
+                    name={isGpa ? "平均 GPA" : "平均分"}
                     stroke="var(--accent)"
                     strokeWidth={2}
                     connectNulls={false}

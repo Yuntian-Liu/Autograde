@@ -7,6 +7,9 @@ import AppHeader from "../components/AppHeader";
 import AICallStatus from "../components/AICallStatus";
 import WeeklyInsight from "../components/WeeklyInsight";
 import PageSkeleton from "../components/PageSkeleton";
+import ScoreViewToggle from "../components/ScoreViewToggle";
+import { useScoreView } from "../contexts/ScoreViewContext";
+import { fmtGpa } from "../gpa";
 import { IconChevronLeft, IconDownload } from "../components/icons";
 import { fmtScore, fmtTime } from "../meta";
 import { clientLog } from "../utils/clientLog";
@@ -76,6 +79,7 @@ function Heatmap({ data, onSelect }) {
 
 export default function WeeklyReport() {
   const { message, modal } = AntApp.useApp();
+  const { isGpa } = useScoreView();
   const [classes, setClasses] = useState([]);
   const [classId, setClassId] = useState(0);
   const [week, setWeek] = useState(null);
@@ -201,6 +205,7 @@ export default function WeeklyReport() {
             style={{ width: 180 }}
             options={[{ value: 0, label: "全部正式班级" }, ...classes.map((c) => ({ value: c.id, label: c.name }))]}
           />
+          <ScoreViewToggle />
           {tab === "week" && (
             <div className="weekly-week-controls">
               <button className="btn" onClick={() => setWeek(weekShift(data.week.start, -7))}>上一周</button>
@@ -224,7 +229,13 @@ export default function WeeklyReport() {
               <Metric label="完成批改" value={`${current.graded_submissions} 份`} delta={deltaText(current.graded_submissions, previous.graded_submissions, " 份")} />
               <Metric label="勾选错题" value={`${current.error_count} 题`} delta={deltaText(current.error_count, previous.error_count, " 题")} />
               <Metric label="定稿解析" value={`${current.finalized_notes} 条`} delta={deltaText(current.finalized_notes, previous.finalized_notes, " 条")} />
-              <Metric label="平均分" value={current.avg_score == null ? "—" : fmtScore(current.avg_score)} delta={current.avg_score == null || previous.avg_score == null ? "暂无对比" : deltaText(current.avg_score, previous.avg_score, " 分")} />
+              <Metric
+                label={isGpa ? "平均 GPA" : "平均分"}
+                value={isGpa ? fmtGpa(current.avg_gpa) : fmtScore(current.avg_score)}
+                delta={isGpa
+                  ? current.avg_gpa == null || previous.avg_gpa == null ? "暂无对比" : deltaText(current.avg_gpa, previous.avg_gpa)
+                  : current.avg_score == null || previous.avg_score == null ? "暂无对比" : deltaText(current.avg_score, previous.avg_score, " 分")}
+              />
               <Metric label="AI 调用" value={`${current.ai_calls} 次`} delta={deltaText(current.ai_calls, previous.ai_calls, " 次")} />
               <Metric label="AI 成本" value={`¥${current.ai_cost_yuan.toFixed(4)}`} delta={deltaText(current.ai_cost_yuan, previous.ai_cost_yuan, " 元")} />
             </section>

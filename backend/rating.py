@@ -16,7 +16,29 @@ DEFAULT_THRESHOLDS: list[tuple[str, float]] = [
 
 RATINGS = [r for r, _ in DEFAULT_THRESHOLDS]
 
+GPA_BY_RATING = {
+    "A+": 4.33, "A": 4.00, "A-": 3.67,
+    "B+": 3.33, "B": 3.00, "B-": 2.67,
+    "C+": 2.33, "C": 2.00, "C-": 1.67,
+    "D": 1.33, "E": 1.00, "F": 0.00,
+}
+
 SETTINGS_KEY = "rating_thresholds"
+
+
+def gpa_for_rating(rating: str) -> float | None:
+    return GPA_BY_RATING.get(rating)
+
+
+def gpa_for_submission(submission) -> float | None:
+    if submission.score is None:
+        return None
+    return gpa_for_rating(submission.rating_override or submission.rating)
+
+
+def average_gpa(submissions) -> float | None:
+    values = [gpa for submission in submissions if (gpa := gpa_for_submission(submission)) is not None]
+    return round(sum(values) / len(values), 2) if values else None
 
 
 def parse_thresholds(raw: str | None) -> list[tuple[str, float]]:

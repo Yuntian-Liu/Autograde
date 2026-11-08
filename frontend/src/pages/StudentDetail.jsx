@@ -18,6 +18,9 @@ import AbilityReportModal from "../components/AbilityReportModal";
 import AppHeader from "../components/AppHeader";
 import CodeChip from "../components/CodeChip";
 import PageSkeleton from "../components/PageSkeleton";
+import ScoreViewToggle from "../components/ScoreViewToggle";
+import { useScoreView } from "../contexts/ScoreViewContext";
+import { fmtGpa } from "../gpa";
 import { fmtScore, fmtTime, scoreColorVar, scoreTone, seriesLabel } from "../meta";
 import { rangeLabel } from "../utils/ability";
 import { batchStatus, computeLeaderboard } from "../utils/leaderboard";
@@ -34,6 +37,7 @@ export default function StudentDetail() {
   const [reports, setReports] = useState(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [error, setError] = useState(null);
+  const { isGpa } = useScoreView();
 
   function loadReports() {
     return apiGet(`/students/${studentId}/ability-reports`).then(setReports);
@@ -59,30 +63,36 @@ export default function StudentDetail() {
     () => (stats?.history || []).filter((h) => GRADED.has(h.status) && h.score !== null),
     [stats]
   );
+  const recent5 = scored.slice(-5);
   const recentAvg5 = scored.length
-    ? (scored.slice(-5).reduce((sum, h) => sum + h.score, 0) / Math.min(5, scored.length)).toFixed(2)
+    ? (recent5.reduce((sum, h) => sum + h.score, 0) / recent5.length).toFixed(2)
+    : null;
+  const recentGpas = recent5.filter((h) => h.gpa !== null && h.gpa !== undefined);
+  const recentAvgGpa = recentGpas.length
+    ? recentGpas.reduce((sum, h) => sum + h.gpa, 0) / recentGpas.length
     : null;
   const lastScore = scored.length ? scored[scored.length - 1].score : null;
+  const lastGpa = scored.length ? scored[scored.length - 1].gpa : null;
 
-  // 折线数据：未交/待批改的点断开不连（score 置 null，connectNulls=false）
   const trendData = useMemo(
     () =>
-      (stats?.history || []).map((h) => ({
-        label: h.unit_label,
-        score: GRADED.has(h.status) && h.score !== null ? Number(h.score) : null,
-        status: h.status,
-      })),
-    [stats]
+      (stats?.history || []).map((h) => {
+        const score = GRADED.has(h.status) && h.score !== null ? Number(h.score) : null;
+        const gpa = score !== null && h.gpa !== null && h.gpa !== undefined ? Number(h.gpa) : null;
+        return { label: h.unit_label, score, gpa, value: isGpa ? gpa : score, status: h.status };
+      }),
+    [stats, isGpa]
   );
 
   // 班级排名（实时口径）与名次走势（历次·含提交率，按已完成批次逐个截断重算）
   const sid = Number(studentId);
+  const view = isGpa ? "gpa" : "score";
   const liveRank = useMemo(() => {
     if (!lb) return null;
-    const rows = computeLeaderboard(lb.batches, lb.students, { live: true });
+    const rows = computeLeaderboard(lb.batches, lb.students, { live: true, view });
     const me = rows.find((r) => r.student_id === sid);
     return me ? { rank: me.rank, total: rows.length } : null;
-  }, [lb, sid]);
+  }, [lb, sid, view]);
   const rankTrend = useMemo(() => {
     if (!lb) return [];
     const done = lb.batches.filter((b) => batchStatus(b) === "已完成");
@@ -91,12 +101,13 @@ export default function StudentDetail() {
         live: false,
         upto: i + 1,
         weighted: true,
+        view,
       });
       const me = rows.find((r) => r.student_id === sid);
-      // 当时无有效成绩的点置 null（断开）
-      return { label: `第 ${i + 1} 次`, rank: me && me.avg !== null ? me.rank : null };
+      const hasScore = me && (isGpa ? me.avg_gpa !== null : me.avg !== null);
+      return { label: `第 ${i + 1} 次`, rank: hasScore ? me.rank : null };
     });
-  }, [lb, sid]);
+  }, [lb, sid, view, isGpa]);
 
   if (error)
     return (
@@ -136,13 +147,13 @@ export default function StudentDetail() {
               {s.note && <span>{s.note}</span>}
             </div>
             <div className="stu-stats">
-              <div className="stat">
-                <div className="k">近 5 次平均</div>
-                <div className="v">{fmtScore(recentAvg5)}</div>
+              <div className="stat" title={isGpa ? `原平均分 ${recentAvg5 || "—"}` : undefined}>
+                <div className="k">{isGpa ? "近 5 次平均 GPA" : "近 5 次平均"}</div>
+                <div className="v">{isGpa ? fmtGpa(recentAvgGpa) : fmtScore(recentAvg5)}</div>
               </div>
-              <div className="stat">
-                <div className="k">上一次</div>
-                <div className="v">{fmtScore(lastScore)}</div>
+              <div className="stat" title={isGpa ? `原分数 ${fmtScore(lastScore)}` : undefined}>
+                <div className="k">{isGpa ? "上一次 GPA" : "上一次"}</div>
+                <div className="v">{isGpa ? fmtGpa(lastGpa) : fmtScore(lastScore)}</div>
               </div>
               <div className="stat">
                 <div className="k">作业次数</div>
@@ -156,13 +167,17 @@ export default function StudentDetail() {
                   </div>
                 </div>
               )}
+              <div className="stat">
+                <div className="k">视图</div>
+                <ScoreViewToggle />
+              </div>
             </div>
           </div>
         </div>
 
         {/* 历次作业趋势 */}
         <section className="block">
-          <div className="sec-title">历次成绩趋势</div>
+          <div className="sec-title">{isGpa ? "历次 GPA 趋势" : "历次成绩趋势"}</div>
           {trendData.length === 0 ? (
             <div className="row">暂无数据</div>
           ) : (
@@ -171,22 +186,22 @@ export default function StudentDetail() {
                 <LineChart data={trendData} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} width={36} />
+                  <YAxis domain={[0, isGpa ? 4.33 : 100]} tick={{ fontSize: 11 }} width={36} />
                   <Tooltip
                     formatter={(v, _n, item) => [
-                      v === null ? "—" : Number(v).toFixed(2),
-                      `分数（${item.payload.status}）`,
+                      v === null ? "—" : `${Number(v).toFixed(2)}${isGpa ? ` · 原分数 ${fmtScore(item.payload.score)}` : ""}`,
+                      `${isGpa ? "GPA" : "分数"}（${item.payload.status}）`,
                     ]}
                   />
                   <Line
                     type="monotone"
-                    dataKey="score"
+                    dataKey="value"
                     stroke="var(--accent)"
                     strokeWidth={2}
                     connectNulls={false}
                     dot={(props) => {
                       const { cx, cy, payload, index } = props;
-                      if (payload.score === null) return <g key={index} />;
+                      if (payload.value === null) return <g key={index} />;
                       return (
                         <circle
                           key={index}
@@ -309,8 +324,8 @@ export default function StudentDetail() {
               </span>
               <span className="mono">{h.error_count} 题错</span>
               <span className="mono">{h.status}</span>
-              <span className={`mono ${h.score !== null ? scoreTone(h.score) : ""}`}>
-                {fmtScore(h.score)}
+              <span className={`mono ${h.score !== null ? scoreTone(h.score) : ""}`} title={isGpa ? `原分数 ${fmtScore(h.score)}` : undefined}>
+                {isGpa ? fmtGpa(h.gpa) : fmtScore(h.score)}
                 {h.rating ? ` · ${h.rating}` : ""}
               </span>
             </Link>

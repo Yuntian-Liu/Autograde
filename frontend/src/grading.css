@@ -121,6 +121,8 @@
   transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 .stu-note:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.score-hero-stack { display: flex; flex-direction: column; align-items: flex-end; gap: var(--s2); margin-left: auto; }
+.score-hero-stack .score-hero { margin-left: 0; }
 .score-hero {
   margin-left: auto;
   text-align: right;

@@ -18,6 +18,7 @@ from feedback import (
     validate_unit_fields,
 )
 from models import Assignment, Class, ErrorRecord, Question, Student, Submission
+from rating import average_gpa, gpa_for_rating
 from serializers import (
     GRADED_STATUSES,
     PROCESSED_STATUSES,
@@ -99,8 +100,9 @@ async def _class_stats(db: AsyncSession, class_id: int) -> dict:
         )
     ).scalar_one()
 
-    # 上批平均分：最近一个有分数记录的批次的均分
+    # 上批平均分与平均 GPA 共用同一批有效提交；GPA 逐条按保存时等级换算后再平均
     last_avg = None
+    last_avg_gpa = None
     assignment_ids = (
         await db.execute(
             select(Assignment.id)
@@ -109,23 +111,25 @@ async def _class_stats(db: AsyncSession, class_id: int) -> dict:
         )
     ).scalars().all()
     for aid in assignment_ids:
-        avg = (
+        submissions = (
             await db.execute(
-                select(func.avg(Submission.score)).where(
+                select(Submission).where(
                     Submission.assignment_id == aid,
                     Submission.status.in_(GRADED_STATUSES),
                     Submission.score.is_not(None),
                 )
             )
-        ).scalar_one()
-        if avg is not None:
-            last_avg = round(float(avg), 2)
+        ).scalars().all()
+        if submissions:
+            last_avg = round(sum(float(s.score) for s in submissions) / len(submissions), 2)
+            last_avg_gpa = average_gpa(submissions)
             break
 
     return {
         "student_count": student_count,
         "pending_count": pending_count,
         "last_avg_score": last_avg,
+        "last_avg_gpa": last_avg_gpa,
     }
 
 
@@ -460,19 +464,22 @@ async def class_leaderboard(
                 Submission.assignment_id,
                 Submission.status,
                 Submission.score,
+                Submission.rating,
+                Submission.rating_override,
                 Submission.created_at,
             )
             .join(Assignment, Submission.assignment_id == Assignment.id)
             .where(Assignment.class_id == class_id)
         )
     ).all()
-    # cells[student_id][assignment_id] = {status, score, graded_at}（graded_at 供同分时「先批完者优先」）
     cells: dict[int, dict[int, dict]] = {}
     graded_per_assignment: dict[int, int] = {}
-    for sid, aid, status, score, created in sub_rows:
+    for sid, aid, status, score, rating, override, created in sub_rows:
         cells.setdefault(sid, {})[aid] = {
             "status": status,
             "score": score,
+            "rating": override or rating,
+            "gpa": gpa_for_rating(override or rating) if score is not None else None,
             "graded_at": created.isoformat() if created else None,
         }
         if status in PROCESSED_STATUSES:
@@ -543,6 +550,20 @@ async def class_stats(
         )
     ).all()
     avg_by_assignment = {aid: round(float(v), 2) for aid, v in avg_rows}
+    gpa_submissions = (
+        await db.execute(
+            select(Submission)
+            .join(Assignment, Submission.assignment_id == Assignment.id)
+            .where(
+                Assignment.class_id == class_id,
+                Submission.status.in_(GRADED_STATUSES),
+                Submission.score.is_not(None),
+            )
+        )
+    ).scalars().all()
+    gpa_by_assignment: dict[int, list] = {}
+    for submission in gpa_submissions:
+        gpa_by_assignment.setdefault(submission.assignment_id, []).append(submission)
 
     items = []
     for a in assignments:
@@ -555,6 +576,7 @@ async def class_stats(
                 "lesson_no": a.lesson_no,
                 "class_time": a.class_time,
                 "avg_score": avg_by_assignment.get(a.id),
+                "avg_gpa": average_gpa(gpa_by_assignment.get(a.id, [])),
                 "submitted": submitted,
                 "absent": by_status.get("未交", 0),
                 "pending": by_status.get("待批改", 0) + (total_students - sum(by_status.values())),

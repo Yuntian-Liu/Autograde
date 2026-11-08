@@ -4,6 +4,9 @@ import { apiGet } from "../api";
 import AppHeader from "../components/AppHeader";
 import ClassForm from "../components/ClassForm";
 import PageSkeleton from "../components/PageSkeleton";
+import ScoreViewToggle from "../components/ScoreViewToggle";
+import { useScoreView } from "../contexts/ScoreViewContext";
+import { fmtGpa } from "../gpa";
 import { classMeta, daysUntil, scoreTone, seriesLabel } from "../meta";
 
 function batchStatus(a) {
@@ -33,6 +36,7 @@ function boardWhen(a) {
 }
 
 export default function Dashboard() {
+  const { isGpa } = useScoreView();
   const [classes, setClasses] = useState(null); // null = 加载中
   const [recent, setRecent] = useState([]);
   const [error, setError] = useState(null);
@@ -105,9 +109,12 @@ export default function Dashboard() {
         <section className="block">
           <div className="sec-title sec-title-row">
             班级
-            <button className="btn" onClick={() => setClassFormOpen(true)}>
-              + 新建班级
-            </button>
+            <span className="score-view-tools">
+              <ScoreViewToggle />
+              <button className="btn" onClick={() => setClassFormOpen(true)}>
+                + 新建班级
+              </button>
+            </span>
           </div>
           {classes.length === 0 && (
             <div className="empty-state">
@@ -133,11 +140,11 @@ export default function Dashboard() {
                   <div className={c.pending_count > 0 ? "num accent" : "num"}>{c.pending_count}</div>
                   <div className="num-label">待批改</div>
                 </span>
-                <span>
+                <span title={isGpa ? `原平均分 ${c.last_avg_score === null ? "—" : Number(c.last_avg_score).toFixed(2)}` : undefined}>
                   <div className={`num ${scoreTone(c.last_avg_score)}`}>
-                    {c.last_avg_score === null ? "—" : Number(c.last_avg_score).toFixed(2)}
+                    {isGpa ? fmtGpa(c.last_avg_gpa) : c.last_avg_score === null ? "—" : Number(c.last_avg_score).toFixed(2)}
                   </div>
-                  <div className="num-label">上批平均分</div>
+                  <div className="num-label">{isGpa ? "上批平均 GPA" : "上批平均分"}</div>
                 </span>
               </span>
             </Link>

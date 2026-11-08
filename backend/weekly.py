@@ -11,6 +11,7 @@ from auth.models import User
 from batch_analysis import aggregate_batch
 from models import Assignment, Class, ErrorRecord, LlmCallEvent, Question, Student, Submission, WeeklyReport
 from serializers import GRADED_STATUSES, class_brief
+from rating import average_gpa
 
 TZ = ZoneInfo("Asia/Shanghai")
 
@@ -91,6 +92,7 @@ async def _week_metrics(db: AsyncSession, class_ids: list[int], uid: int, start:
             for status in ("已批改", "缺作业", "未交")
         },
         "avg_score": round(sum(scores) / len(scores), 2) if scores else None,
+        "avg_gpa": average_gpa([s for s in submissions if s.status in GRADED_STATUSES and s.score is not None]),
         "top_sections": [
             {"section": name, "count": count}
             for name, count in sorted(sections.items(), key=lambda item: (-item[1], item[0]))[:5]
@@ -279,7 +281,8 @@ async def weekly_payload(db: AsyncSession, user: User, week: str | None, class_i
 
 
 def build_weekly_evidence(data: dict) -> str:
-    current, previous = data["current"], data["previous"]
+    current = {key: value for key, value in data["current"].items() if key != "avg_gpa"}
+    previous = {key: value for key, value in data["previous"].items() if key != "avg_gpa"}
     lines = [
         f"【周范围】{data['week']['start']} 至 {data['week']['end']}；班级范围：{'、'.join(c['name'] for c in data['scope']['classes']) or '无'}",
         "【本周】"

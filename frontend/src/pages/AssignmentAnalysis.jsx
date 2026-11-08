@@ -19,6 +19,9 @@ import AppHeader from "../components/AppHeader";
 import AICallStatus from "../components/AICallStatus";
 import MdContent from "../components/MdContent";
 import PageSkeleton from "../components/PageSkeleton";
+import ScoreViewToggle from "../components/ScoreViewToggle";
+import { useScoreView } from "../contexts/ScoreViewContext";
+import { GPA_BY_RATING, fmtGpa } from "../gpa";
 import { IconChevronLeft, IconDownload } from "../components/icons";
 import { fmtScore, fmtTime, seriesLabel } from "../meta";
 import { clientLog } from "../utils/clientLog";
@@ -93,16 +96,26 @@ function gradingPath(assignmentId, studentId) {
   return `/grading/${assignmentId}?student=${studentId}`;
 }
 
-function ScoreRanking({ rows, assignmentId }) {
+function ScoreRanking({ rows, assignmentId, isGpa }) {
   const ranked = (rows || [])
     .filter((row) => row.status !== "待批改")
     .sort((a, b) => Number(a.status === "未交") - Number(b.status === "未交"));
+  if (isGpa) {
+    ranked.sort((a, b) =>
+      Number(a.status === "未交") - Number(b.status === "未交") ||
+      Number(b.gpa ?? -1) - Number(a.gpa ?? -1) ||
+      (a.graded_at ? Date.parse(a.graded_at) : Infinity) - (b.graded_at ? Date.parse(b.graded_at) : Infinity) ||
+      a.name.localeCompare(b.name)
+    );
+    ranked.forEach((row, index) => { row.rank = index + 1; });
+  }
   const podiumRows = ranked.filter((row) => row.status !== "未交").slice(0, 3);
   const podiumIds = new Set(podiumRows.map((row) => row.student_id));
   const listRows = ranked.filter((row) => !podiumIds.has(row.student_id));
+  const valueOf = (row) => Number(isGpa ? row.gpa ?? 0 : row.rank_score ?? row.score ?? 0);
   const maxScore = Math.max(
     0,
-    ...podiumRows.concat(listRows).filter((row) => row.status !== "未交").map((row) => Number(row.rank_score ?? row.score ?? 0))
+    ...podiumRows.concat(listRows).filter((row) => row.status !== "未交").map(valueOf)
   );
   const podiumCols = [2, 1, 3].map((rank) => ({ rank, player: podiumRows[rank - 1] || null }));
 
@@ -118,7 +131,7 @@ function ScoreRanking({ rows, assignmentId }) {
                   <Link className="lb-player" to={gradingPath(assignmentId, player.student_id)}>
                     <span className="lb-medal-emoji">{MEDAL[rank]}</span>
                     <span className="lb-name">{player.name}</span>
-                    <span className="lb-score">{fmtScore(player.score)}</span>
+                    <span className="lb-score" title={isGpa ? `原分数 ${fmtScore(player.score)}` : undefined}>{isGpa ? fmtGpa(player.gpa) : fmtScore(player.score)}</span>
                     <span className="lb-sub">{player.status === "缺作业" ? "缺项 · 已批改" : "已批改"}</span>
                   </Link>
                 )}
@@ -132,7 +145,7 @@ function ScoreRanking({ rows, assignmentId }) {
       )}
       {listRows.map((row) => {
         const absent = row.status === "未交";
-        const barScore = absent ? 0 : Math.max(0, Number(row.rank_score ?? row.score ?? 0));
+        const barScore = absent ? 0 : Math.max(0, valueOf(row));
         return (
           <Link className="lb-row analysis-lb-row" key={row.student_id} to={gradingPath(assignmentId, row.student_id)}>
             <span className="lb-rank">{row.rank ?? "—"}</span>
@@ -140,7 +153,7 @@ function ScoreRanking({ rows, assignmentId }) {
             <span className="lb-bar">
               <span className="lb-fill" style={{ width: `${maxScore > 0 ? (barScore / maxScore) * 100 : 0}%` }} />
             </span>
-            <span className="lb-rowscore">{absent ? fmtScore(row.score ?? 0) : fmtScore(row.score)}</span>
+            <span className="lb-rowscore" title={isGpa ? `原分数 ${fmtScore(row.score)}` : undefined}>{isGpa ? fmtGpa(row.gpa) : fmtScore(row.score)}</span>
             <span className={`lb-rowsub ${absent ? "tone-bad" : ""}`}>
               {absent ? "未交" : row.status === "缺作业" ? "缺项" : "已批改"}
             </span>
@@ -175,6 +188,28 @@ function ScoreDistribution({ scores }) {
             tooltipType="none"
           />
         </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function GpaDistribution({ rows }) {
+  const counts = Object.entries(GPA_BY_RATING).map(([rating, gpa]) => ({
+    rating,
+    gpa,
+    count: (rows || []).filter((row) => row.status !== "待批改" && row.status !== "未交" && row.score > 0 && row.rating === rating).length,
+  })).filter((row) => row.count > 0);
+  if (!counts.length) return <div className="row">暂无有效成绩</div>;
+  return (
+    <div className="analysis-chart">
+      <ResponsiveContainer>
+        <BarChart data={counts}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
+          <XAxis dataKey="rating" tick={{ fontSize: "var(--t-micro)", fill: "var(--ink-2)" }} />
+          <YAxis allowDecimals={false} tick={{ fontSize: "var(--t-micro)", fill: "var(--ink-2)" }} width={36} />
+          <Tooltip formatter={(value) => [`${value} 人`, "人数"]} labelFormatter={(label, payload) => `${label} · GPA ${payload?.[0]?.payload?.gpa?.toFixed(2) || ""}`} />
+          <Bar dataKey="count" fill="var(--accent-bg)" stroke="var(--accent)" />
+        </BarChart>
       </ResponsiveContainer>
     </div>
   );
@@ -296,26 +331,27 @@ function CsvExport({ data }) {
 
 function Overview({ data, assignmentId }) {
   const { summary, ranking, valid_scores: validScores, sections } = data;
+  const { isGpa } = useScoreView();
   const hasValidScores = validScores.length > 0;
-  const score = (value) => (hasValidScores ? fmtScore(value) : "—");
+  const score = (value, gpa) => (hasValidScores ? isGpa ? fmtGpa(gpa) : fmtScore(value) : "—");
   return (
     <>
       <div className="metric-grid analysis-metrics">
         <Metric label="有效成绩人数" value={summary.valid_count} tone="tone-accent" />
         <Metric label="未交" value={summary.absent_count} tone={summary.absent_count > 0 ? "tone-bad" : ""} />
         <Metric label="待批改" value={summary.pending_count} tone={summary.pending_count > 0 ? "tone-mid" : ""} />
-        <Metric label="平均分" value={score(summary.avg_score)} />
-        <Metric label="中位数" value={score(summary.median_score)} />
-        <Metric label="最高分" value={score(summary.max_score)} />
-        <Metric label="最低分" value={score(summary.min_score)} />
+        <Metric label={isGpa ? "平均 GPA" : "平均分"} value={score(summary.avg_score, summary.avg_gpa)} />
+        <Metric label={isGpa ? "中位 GPA" : "中位数"} value={score(summary.median_score, summary.median_gpa)} />
+        <Metric label={isGpa ? "最高 GPA" : "最高分"} value={score(summary.max_score, summary.max_gpa)} />
+        <Metric label={isGpa ? "最低 GPA" : "最低分"} value={score(summary.min_score, summary.min_gpa)} />
       </div>
       <section className="block">
         <div className="sec-title">学生排名</div>
-        <ScoreRanking rows={ranking} assignmentId={assignmentId} />
+        <ScoreRanking rows={ranking} assignmentId={assignmentId} isGpa={isGpa} />
       </section>
       <section className="block">
-        <div className="sec-title">成绩分布</div>
-        <ScoreDistribution scores={validScores} />
+        <div className="sec-title">{isGpa ? "GPA 分布" : "成绩分布"}</div>
+        {isGpa ? <GpaDistribution rows={ranking} /> : <ScoreDistribution scores={validScores} />}
       </section>
       <section className="block">
         <div className="sec-title">题目统计</div>
@@ -607,7 +643,7 @@ export default function AssignmentAnalysis() {
           className="analysis-tabs"
           activeKey={activeTab}
           onChange={setActiveTab}
-          tabBarExtraContent={{ right: activeTab === "overview" ? <CsvExport data={data} /> : null }}
+          tabBarExtraContent={{ right: activeTab === "overview" ? <div className="score-view-tools"><ScoreViewToggle /><CsvExport data={data} /></div> : null }}
           items={[
             {
               key: "overview",

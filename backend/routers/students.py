@@ -10,6 +10,7 @@ from auth.dependencies import get_current_user
 from auth.models import User
 from database import get_db
 from models import AbilityReport, Assignment, ErrorRecord, FeedbackSnapshot, Question, Student, Submission
+from rating import gpa_for_submission
 from serializers import student_brief
 router = APIRouter(prefix="/api/students", tags=["students"])
 
@@ -91,6 +92,7 @@ async def student_stats(
             "status": sub.status,
             "score": sub.score,
             "rating": sub.rating_override or sub.rating,
+            "gpa": gpa_for_submission(sub),
             "error_count": err_counts.get(a.id, 0),
         }
         for a, sub in rows

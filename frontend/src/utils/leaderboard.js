@@ -16,7 +16,7 @@ export function batchStatus(b) {
   return "批改中";
 }
 
-export function computeLeaderboard(batches, students, { live = true, upto = null, weighted = true } = {}) {
+export function computeLeaderboard(batches, students, { live = true, upto = null, weighted = true, view = "score" } = {}) {
   let range;
   let useWeighted = weighted;
   if (live) {
@@ -31,9 +31,11 @@ export function computeLeaderboard(batches, students, { live = true, upto = null
   const rows = students.map((s) => {
     const cells = s.cells || {};
     let sum = 0;
+    let gpaSum = 0;
     let scored = 0;
+    let gpaCount = 0;
     let submitted = 0;
-    let lastGradedAt = null; // 计入成绩的最近一次批改时间（同分时先批完者优先）
+    let lastGradedAt = null;
     for (const b of range) {
       const cell = cells[b.assignment_id];
       if (!cell) continue;
@@ -42,6 +44,10 @@ export function computeLeaderboard(batches, students, { live = true, upto = null
         if (cell.score !== null && cell.score !== undefined) {
           sum += Number(cell.score);
           scored += 1;
+          if (cell.gpa !== null && cell.gpa !== undefined) {
+            gpaSum += Number(cell.gpa);
+            gpaCount += 1;
+          }
           if (cell.graded_at && (!lastGradedAt || cell.graded_at > lastGradedAt)) {
             lastGradedAt = cell.graded_at;
           }
@@ -49,15 +55,18 @@ export function computeLeaderboard(batches, students, { live = true, upto = null
       }
     }
     const avg = scored ? sum / scored : null;
+    const avgGpa = gpaCount ? gpaSum / gpaCount : null;
     const score = avg === null ? 0 : useWeighted && total > 0 ? (avg * submitted) / total : avg;
-    return { student_id: s.student_id, name: s.name, rank: 0, score, avg, submitted, total, lastGradedAt };
+    const gpaScore = avgGpa === null ? 0 : useWeighted && total > 0 ? (avgGpa * submitted) / total : avgGpa;
+    return { student_id: s.student_id, name: s.name, rank: 0, score, avg, avg_gpa: avgGpa, gpa_score: gpaScore, submitted, total, lastGradedAt };
   });
 
-  // 得分降序；同分比批改完成时间（早者优先，缺失靠后）；再平按名字。名次顺延不并列
+  const valueOf = (row) => view === "gpa" ? row.gpa_score : row.score;
+  const avgOf = (row) => view === "gpa" ? row.avg_gpa : row.avg;
   rows.sort(
     (a, b) =>
-      b.score - a.score ||
-      (a.avg === null ? 1 : 0) - (b.avg === null ? 1 : 0) ||
+      valueOf(b) - valueOf(a) ||
+      (avgOf(a) === null ? 1 : 0) - (avgOf(b) === null ? 1 : 0) ||
       (a.lastGradedAt ? Date.parse(a.lastGradedAt) : Infinity) -
         (b.lastGradedAt ? Date.parse(b.lastGradedAt) : Infinity) ||
       a.name.localeCompare(b.name)

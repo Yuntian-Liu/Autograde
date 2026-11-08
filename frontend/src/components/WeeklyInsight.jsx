@@ -1,4 +1,6 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useScoreView } from "../contexts/ScoreViewContext";
+import { fmtGpa } from "../gpa";
 import { fmtScore } from "../meta";
 import MdContent from "./MdContent";
 
@@ -21,11 +23,12 @@ function delta(now, before, suffix = "") {
 }
 
 function ComparisonTable({ current, previous }) {
+  const { isGpa } = useScoreView();
   const rows = [
     { label: "完成批改", now: current.graded_submissions, before: previous.graded_submissions, suffix: " 份" },
     { label: "勾选错题", now: current.error_count, before: previous.error_count, suffix: " 题" },
     { label: "定稿解析", now: current.finalized_notes, before: previous.finalized_notes, suffix: " 条" },
-    { label: "平均分", now: current.avg_score, before: previous.avg_score, suffix: " 分", score: true },
+    { label: isGpa ? "平均 GPA" : "平均分", now: isGpa ? current.avg_gpa : current.avg_score, before: isGpa ? previous.avg_gpa : previous.avg_score, suffix: isGpa ? "" : " 分", score: true, gpa: isGpa },
   ];
   return (
     <div className="weekly-insight-table-wrap">
@@ -35,8 +38,8 @@ function ComparisonTable({ current, previous }) {
           {rows.map((row) => (
             <tr key={row.label}>
               <th>{row.label}</th>
-              <td>{row.now == null ? "—" : row.score ? fmtScore(row.now) : `${row.now}${row.suffix}`}</td>
-              <td>{row.before == null ? "—" : row.score ? fmtScore(row.before) : `${row.before}${row.suffix}`}</td>
+              <td>{row.now == null ? "—" : row.gpa ? fmtGpa(row.now) : row.score ? fmtScore(row.now) : `${row.now}${row.suffix}`}</td>
+              <td>{row.before == null ? "—" : row.gpa ? fmtGpa(row.before) : row.score ? fmtScore(row.before) : `${row.before}${row.suffix}`}</td>
               <td className={row.now != null && row.before != null && row.now !== row.before ? "changed" : ""}>
                 {delta(row.now, row.before, row.suffix)}
               </td>

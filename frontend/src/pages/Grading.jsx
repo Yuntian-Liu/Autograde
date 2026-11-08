@@ -9,6 +9,7 @@ import Confetti from "../components/Confetti";
 import AIFloat from "../components/AIFloat";
 import AnswerFloat from "../components/AnswerFloat";
 import SaveStatus from "../components/SaveStatus";
+import ScoreViewToggle from "../components/ScoreViewToggle";
 import StudentImportModal from "../components/StudentImportModal";
 import QuestionEditor from "../components/QuestionEditor";
 import {
@@ -26,6 +27,8 @@ import { RATINGS, ratingFor } from "../rating";
 import { clientLog } from "../utils/clientLog";
 import { fp } from "../utils/contentfp";
 import { useAuth } from "../contexts/AuthContext";
+import { useScoreView } from "../contexts/ScoreViewContext";
+import { fmtGpa, gpaForRating } from "../gpa";
 import {
   buildFeedbackDoc,
   collapseBlankLines,
@@ -52,6 +55,7 @@ export default function Grading() {
   const navigate = useNavigate();
   const { message, modal } = AntApp.useApp();
   const { user } = useAuth();
+  const { isGpa } = useScoreView();
 
   const [assignment, setAssignment] = useState(null);
   const [students, setStudents] = useState([]);
@@ -226,6 +230,7 @@ export default function Grading() {
     totalWeight > 0 ? ((100 * (totalWeight - deductedWeight)) / totalWeight).toFixed(2) : "100.00";
   const autoRating = ratingFor(Number(score), thresholds || undefined);
   const rating = (current && ratingOverrides[current.id]) || autoRating;
+  const currentGpa = gpaForRating(rating);
 
   // 本次保存要写入的提交状态：默认沿用已入库状态，未批过时默认「已批改」
   const statusDraft = current
@@ -970,11 +975,11 @@ export default function Grading() {
                         {s.recent_scores.map((r) => (
                           <span className="qg-tip-row" key={r.unit_label}>
                             <span>{r.unit_label}</span>
-                            <b>{Number(r.score).toFixed(2)}</b>
+                            <b>{isGpa ? fmtGpa(r.gpa) : Number(r.score).toFixed(2)}</b>
                           </span>
                         ))}
-                        {s.recent_avg_5 != null && (
-                          <span className="qg-tip-avg">近 5 次平均 {s.recent_avg_5}</span>
+                        {(isGpa ? s.recent_avg_gpa != null : s.recent_avg_5 != null) && (
+                          <span className="qg-tip-avg">{isGpa ? "近 5 次平均 GPA" : "近 5 次平均"} {isGpa ? fmtGpa(s.recent_avg_gpa) : s.recent_avg_5}</span>
                         )}
                       </>
                     ) : (
@@ -1001,13 +1006,14 @@ export default function Grading() {
                           ? scoreTone(sub.score)
                           : ""
                     }`}
+                    title={isGpa ? `原分数 ${s.id === currentId ? score : fmtScore(sub?.score)}` : undefined}
                   >
                     {s.id === currentId
                       ? statusDraft === "未交"
                         ? "—"
-                        : score
+                        : isGpa ? fmtGpa(currentGpa) : score
                       : sub && sub.score !== null
-                        ? fmtScore(sub.score)
+                        ? isGpa ? fmtGpa(sub.gpa) : fmtScore(sub.score)
                         : "—"}
                   </span>
                 </div>
@@ -1033,13 +1039,13 @@ export default function Grading() {
                   </div>
                   {!isTemp && (
                     <div className="stu-stats">
-                      <div className="stat">
-                        <div className="k">近 5 次平均</div>
-                        <div className="v">{fmtScore(current.recent_avg_5)}</div>
+                      <div className="stat" title={isGpa ? `原平均分 ${fmtScore(current.recent_avg_5)}` : undefined}>
+                        <div className="k">{isGpa ? "近 5 次平均 GPA" : "近 5 次平均"}</div>
+                        <div className="v">{isGpa ? fmtGpa(current.recent_avg_gpa) : fmtScore(current.recent_avg_5)}</div>
                       </div>
-                      <div className="stat">
-                        <div className="k">上一次</div>
-                        <div className="v">{fmtScore(current.last_score)}</div>
+                      <div className="stat" title={isGpa ? `原分数 ${fmtScore(current.last_score)}` : undefined}>
+                        <div className="k">{isGpa ? "上一次 GPA" : "上一次"}</div>
+                        <div className="v">{isGpa ? fmtGpa(current.last_gpa) : fmtScore(current.last_score)}</div>
                       </div>
                       <div className="stat">
                         <div className="k">本次出勤</div>
@@ -1066,22 +1072,27 @@ export default function Grading() {
                     {current.note || "+ 添加备注（仅自己可见）"}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  className="score-hero score-hero-button"
-                  onClick={() => setBreakdownOpen(true)}
-                  title="查看实时扣分明细"
-                >
-                  <div className="lab">当前分数 · 预览</div>
-                  <div className={`num ${statusDraft === "未交" ? "" : scoreTone(score)}`}>
-                    {statusDraft === "未交" ? "—" : score}
-                  </div>
-                  <div className="of">
-                    {statusDraft === "未交"
-                      ? "未交 · 不计分"
-                      : `已勾选 ${checkedIds.length} / ${totalQuestions} 题 · 点击查明细`}
-                  </div>
-                </button>
+                <div className="score-hero-stack">
+                  <ScoreViewToggle />
+                  <button
+                    type="button"
+                    className="score-hero score-hero-button"
+                    onClick={() => setBreakdownOpen(true)}
+                    title="查看实时扣分明细"
+                  >
+                    <div className="lab">{isGpa ? "当前 GPA · 预览" : "当前分数 · 预览"}</div>
+                    <div className={`num ${statusDraft === "未交" ? "" : scoreTone(score)}`}>
+                      {statusDraft === "未交" ? "—" : isGpa ? fmtGpa(currentGpa) : score}
+                    </div>
+                    <div className="of">
+                      {statusDraft === "未交"
+                        ? "未交 · 不计分"
+                        : isGpa
+                          ? `原分数 ${score} · 点击查明细`
+                          : `已勾选 ${checkedIds.length} / ${totalQuestions} 题 · 点击查明细`}
+                    </div>
+                  </button>
+                </div>
               </div>
 
               {statusDraft !== "未交" && (

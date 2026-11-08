@@ -26,7 +26,7 @@ from models import (
     Submission,
     utcnow,
 )
-from rating import get_thresholds, rating_for
+from rating import get_thresholds, gpa_for_rating, rating_for
 from routers.classes import StudentsBatchIn, _import_students
 from serializers import (
     GRADED_STATUSES,
@@ -296,7 +296,7 @@ async def get_assignment_students(
         # 历史分数：本班其他批次中已批改/缺作业的分数，按课次倒序
         history_rows = (
             await db.execute(
-                select(Submission.score, Assignment.unit_label)
+                select(Submission.score, Assignment.unit_label, Submission.rating, Submission.rating_override)
                 .join(Assignment, Submission.assignment_id == Assignment.id)
                 .where(
                     Submission.student_id == s.id,
@@ -310,10 +310,18 @@ async def get_assignment_students(
         history_scores = [r[0] for r in history_rows]
         recent = [float(x) for x in history_scores[:5]]
         recent_avg_5 = round(sum(recent) / len(recent), 2) if recent else None
+        recent_gpas = [gpa_for_rating(override or rating) for _, _, rating, override in history_rows[:5]]
+        recent_gpas = [gpa for gpa in recent_gpas if gpa is not None]
+        recent_avg_gpa = round(sum(recent_gpas) / len(recent_gpas), 2) if recent_gpas else None
         last_score = round(float(history_scores[0]), 2) if history_scores else None
-        # 近 3 次逐条（快捷批改学生名悬浮用）
+        last_gpa = gpa_for_rating(history_rows[0][3] or history_rows[0][2]) if history_rows else None
         recent_scores = [
-            {"unit_label": lbl, "score": round(float(sc), 2)} for sc, lbl in history_rows[:3]
+            {
+                "unit_label": lbl,
+                "score": round(float(sc), 2),
+                "gpa": gpa_for_rating(override or rating),
+            }
+            for sc, lbl, rating, override in history_rows[:3]
         ]
 
         # 历史薄弱板块：按错题数取前 3
@@ -338,7 +346,9 @@ async def get_assignment_students(
                 "error_scores": error_scores,
                 "feedback_text": latest_snapshots.get(s.id),
                 "recent_avg_5": recent_avg_5,
+                "recent_avg_gpa": recent_avg_gpa,
                 "last_score": last_score,
+                "last_gpa": last_gpa,
                 "recent_scores": recent_scores,
                 "weak_sections": weak_sections,
             }
