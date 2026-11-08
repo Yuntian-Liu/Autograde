@@ -4,6 +4,7 @@ import { apiPost, clearToken, getToken, UNAUTHORIZED_EVENT } from "../api";
 import { MODE_LABELS } from "../meta";
 import { trackedFetch } from "../utils/trackedFetch";
 import { clientLog } from "../utils/clientLog";
+import AICallStatus from "./AICallStatus";
 
 const MODE_OPTIONS = Object.entries(MODE_LABELS).map(([value, label]) => ({ value, label }));
 
@@ -323,6 +324,7 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
   const [parsing, setParsing] = useState(false);
   const [doneCount, setDoneCount] = useState(0);
   const [elapsed, setElapsed] = useState(0);
+  const [progress, setProgress] = useState(null);
   const [saving, setSaving] = useState(false);
   const abortRef = useRef(null);
   const timerRef = useRef(null);
@@ -333,6 +335,7 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
       setRows(null);
       setDoneCount(0);
       setElapsed(0);
+      setProgress(null);
     }
     return () => {
       abortRef.current?.abort();
@@ -349,6 +352,7 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
     setParsing(true);
     setDoneCount(0);
     setElapsed(0);
+    setProgress({ stage: "preparing", done_count: 0, recv_chars: 0 });
     const started = Date.now();
     timerRef.current = setInterval(
       () => setElapsed(Math.floor((Date.now() - started) / 1000)),
@@ -376,7 +380,6 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
         try {
           const body = await res.json();
           if (body && body.detail) {
-            // detail 可能是字符串 / 422 校验错误数组 / 其他对象，统一归一为可读文本
             detail =
               typeof body.detail === "string"
                 ? body.detail
@@ -389,11 +392,13 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
         }
         throw new Error(detail);
       }
-      const { job_id: jobId } = await res.json();
+      const created = await res.json();
+      const jobId = created.job_id;
+      setProgress((prev) => ({ ...prev, ...created, stage: "preparing" }));
       clientLog.operation("ai_parse", "job", { assignment: assignmentId, job: jobId });
       let draft = null;
       for (;;) {
-        await new Promise((r) => setTimeout(r, 2000));
+        await new Promise((r) => setTimeout(r, 1000));
         const jr = await trackedFetch(`/api/ai/parse-jobs/${jobId}`, {
           headers: authHeaders,
           signal: controller.signal,
@@ -410,6 +415,7 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
         }
         const job = await jr.json();
         setDoneCount(job.done_count || 0);
+        setProgress(job);
         if (job.status === "done") {
           draft = job.data;
           break;
@@ -429,7 +435,10 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
         assignment: assignmentId,
         error: e.message,
       });
-      if (e.name !== "AbortError") message.error(e.message);
+      if (e.name !== "AbortError") {
+        setProgress((prev) => ({ ...prev, status: "error", error: e.message }));
+        message.error(e.message);
+      }
     } finally {
       clearInterval(timerRef.current);
       setParsing(false);
@@ -508,10 +517,8 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
             readOnly={parsing}
             placeholder="粘贴从机构 PDF / Word 转换的答案原文，AI 会剔除水印并按板块拆成题目草稿"
           />
-          {parsing && (
-            <div className="parse-progress">
-              正在解析 · 已整理 {doneCount} 题 · {elapsed}s
-            </div>
+          {(parsing || progress?.status === "error") && (
+            <AICallStatus progress={progress} elapsed={elapsed} showDoneCount />
           )}
         </>
       ) : (

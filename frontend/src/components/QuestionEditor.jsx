@@ -1,17 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { App as AntApp, Input, InputNumber, Modal } from "antd";
-import { apiPost } from "../api";
 import { modeLabel } from "../meta";
+import { streamAI } from "../utils/aiStream";
+import { clientLog } from "../utils/clientLog";
+import AICallStatus from "./AICallStatus";
 
-// 统一编辑窗（DEVELOPMENT.md 2.6）：按题目 mode 分态
-// verbatim 只读展示冻结解析 / manual 空白框填内容 / ai_expand 先填错点 → AI 起草 → 窗内可改 → 定稿
+// 统一编辑窗：直出题可个别修订；其余题由老师定稿，AI 只起草。
 export default function QuestionEditor({ question, note, score = 0, maxScore = 0, open, onClose, onSave, onUncheck }) {
   const { message } = AntApp.useApp();
   const [text, setText] = useState("");
   const [errorDesc, setErrorDesc] = useState("");
   const [drafting, setDrafting] = useState(false);
-  const [editing, setEditing] = useState(false); // verbatim：默认只读，点「修改解析」才进入编辑
-  const [scoreValue, setScoreValue] = useState(0); // 本题得分（默认全错 0，可给部分分）
+  const [editing, setEditing] = useState(false);
+  const [scoreValue, setScoreValue] = useState(0);
+  const [progress, setProgress] = useState(null);
+  const [elapsed, setElapsed] = useState(0);
+  const abortRef = useRef(null);
+  const timerRef = useRef(null);
 
   useEffect(() => {
     if (open) {
@@ -19,7 +24,13 @@ export default function QuestionEditor({ question, note, score = 0, maxScore = 0
       setErrorDesc("");
       setEditing(false);
       setScoreValue(Number(score) || 0);
+      setProgress(null);
+      setElapsed(0);
     }
+    return () => {
+      abortRef.current?.abort();
+      clearInterval(timerRef.current);
+    };
   }, [open, note, question, score]);
 
   if (!question) return null;
@@ -27,21 +38,49 @@ export default function QuestionEditor({ question, note, score = 0, maxScore = 0
   const scoreChanged = Number(scoreValue) !== Number(score || 0);
 
   function bumpScore(step) {
-    setScoreValue((value) => Math.max(0, Math.min(maxScore, Number(((Number(value) || 0) + step).toFixed(2)))));
+    setScoreValue((prev) => Math.max(0, Math.min(maxScore, Number(((prev || 0) + step).toFixed(2)))));
+  }
+
+  function cancel() {
+    abortRef.current?.abort();
+    clearInterval(timerRef.current);
+    onClose();
   }
 
   async function draft() {
     if (!errorDesc.trim()) return message.error("请先描述学生错点");
+    const controller = new AbortController();
+    abortRef.current = controller;
     setDrafting(true);
+    setElapsed(0);
+    setProgress({ stage: "preparing", recv_chars: 0 });
+    const started = Date.now();
+    timerRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    clientLog.operation("draft_explanation", "start", { question: question.id });
     try {
-      const res = await apiPost("/ai/draft-explanation", {
+      const done = await streamAI("/api/ai/draft-explanation", {
         question_id: question.id,
         error_description: errorDesc,
+      }, {
+        signal: controller.signal,
+        onEvent: (event) => {
+          if (event.type === "stage") {
+            setProgress((prev) => ({ ...prev, ...event, status: "running" }));
+          } else if (event.type === "delta") {
+            setProgress((prev) => ({ ...prev, stage: "receiving", recv_chars: event.recv_chars, status: "running" }));
+          }
+        },
       });
-      setText(res.draft);
+      setText(done.draft);
+      clientLog.operation("draft_explanation", "success", { question: question.id });
     } catch (e) {
-      message.error(e.message);
+      if (e.name !== "AbortError") {
+        setProgress((prev) => ({ ...prev, status: "error", error: e.message }));
+        clientLog.operation("draft_explanation", "error", { question: question.id, error: e.message });
+        message.error(e.message);
+      }
     } finally {
+      clearInterval(timerRef.current);
       setDrafting(false);
     }
   }
@@ -50,28 +89,22 @@ export default function QuestionEditor({ question, note, score = 0, maxScore = 0
     <Modal
       centered
       open={open}
-      onCancel={onClose}
+      onCancel={cancel}
       title={`${question.section} · 第 ${question.seq} 题 · ${modeLabel(mode)}`}
       width={520}
       destroyOnHidden
       footer={
         <div className="modal-actions">
-          <button className="btn" onClick={onUncheck}>
-            取消勾选
-          </button>
+          <button className="btn" onClick={onUncheck}>取消勾选</button>
           {mode !== "verbatim" && (
-            <button className="btn primary" onClick={() => onSave(text, scoreValue)}>
-              定稿
-            </button>
+            <button className="btn primary" onClick={() => onSave(text, scoreValue)}>定稿</button>
           )}
           {mode === "verbatim" && !editing && (
             <>
-              <button className="btn" onClick={() => setEditing(true)}>
-                修改解析
-              </button>
+              <button className="btn" onClick={() => setEditing(true)}>修改解析</button>
               <button
                 className="btn primary"
-                onClick={scoreChanged ? () => onSave(note || question.explanation || "", scoreValue) : onClose}
+                onClick={scoreChanged ? () => onSave(note || question.explanation || "", scoreValue) : cancel}
               >
                 {scoreChanged ? "保存" : "关闭"}
               </button>
@@ -88,9 +121,7 @@ export default function QuestionEditor({ question, note, score = 0, maxScore = 0
               >
                 取消修改
               </button>
-              <button className="btn primary" onClick={() => onSave(text.trim(), scoreValue)}>
-                保存解析
-              </button>
+              <button className="btn primary" onClick={() => onSave(text.trim(), scoreValue)}>保存解析</button>
             </>
           )}
         </div>
@@ -113,25 +144,16 @@ export default function QuestionEditor({ question, note, score = 0, maxScore = 0
         />
         <span className="qscore-max">/ {maxScore}</span>
         <span className="qscore-actions">
-          <button type="button" className="btn sm qscore-minus" aria-label="减 1 分" onClick={() => bumpScore(-1)}>
-            -1
-          </button>
-          <button type="button" className="btn sm qscore-minus" aria-label="减 0.5 分" onClick={() => bumpScore(-0.5)}>
-            -0.5
-          </button>
-          <button type="button" className="btn primary sm qscore-plus" aria-label="加 0.5 分" onClick={() => bumpScore(0.5)}>
-            +0.5
-          </button>
-          <button type="button" className="btn primary sm qscore-plus" aria-label="加 1 分" onClick={() => bumpScore(1)}>
-            +1
-          </button>
+          <button type="button" className="btn sm qscore-minus" aria-label="减 1 分" onClick={() => bumpScore(-1)}>-1</button>
+          <button type="button" className="btn sm qscore-minus" aria-label="减 0.5 分" onClick={() => bumpScore(-0.5)}>-0.5</button>
+          <button type="button" className="btn primary sm qscore-plus" aria-label="加 0.5 分" onClick={() => bumpScore(0.5)}>+0.5</button>
+          <button type="button" className="btn primary sm qscore-plus" aria-label="加 1 分" onClick={() => bumpScore(1)}>+1</button>
         </span>
       </div>
 
       {mode === "verbatim" && !editing && (
         <p className="frozen-text">{note || question.explanation || "（本题无冻结解析）"}</p>
       )}
-
       {mode === "verbatim" && editing && (
         <Input.TextArea
           value={text}
@@ -140,7 +162,6 @@ export default function QuestionEditor({ question, note, score = 0, maxScore = 0
           placeholder="修改本题解析（仅影响当前学生的反馈）"
         />
       )}
-
       {mode === "manual" && (
         <Input.TextArea
           value={text}
@@ -149,7 +170,6 @@ export default function QuestionEditor({ question, note, score = 0, maxScore = 0
           placeholder="填写本题的个性化点评内容"
         />
       )}
-
       {mode === "ai_expand" && (
         <>
           <div className="qrow-head" style={{ marginBottom: "var(--s3)" }}>
@@ -163,6 +183,9 @@ export default function QuestionEditor({ question, note, score = 0, maxScore = 0
               {drafting ? "起草中…" : "AI 起草"}
             </button>
           </div>
+          {(drafting || progress?.status === "error") && (
+            <AICallStatus progress={progress} elapsed={elapsed} compact />
+          )}
           <Input.TextArea
             value={text}
             onChange={(e) => setText(e.target.value)}

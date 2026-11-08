@@ -16,6 +16,7 @@ import {
 } from "recharts";
 import { apiGet, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
+import AICallStatus from "../components/AICallStatus";
 import MdContent from "../components/MdContent";
 import PageSkeleton from "../components/PageSkeleton";
 import { IconChevronLeft, IconDownload } from "../components/icons";
@@ -353,7 +354,7 @@ function AiAnalysis({ assignmentId, initialReport, hasValidData, sections }) {
   const [estimateRetry, setEstimateRetry] = useState(0);
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [recvChars, setRecvChars] = useState(0);
+  const [progress, setProgress] = useState(null);
   const runRef = useRef(0);
   const timerRef = useRef(null);
 
@@ -400,18 +401,20 @@ function AiAnalysis({ assignmentId, initialReport, hasValidData, sections }) {
     timerRef.current = timer;
     setRunning(true);
     setElapsed(0);
-    setRecvChars(0);
+    setProgress({ stage: "preparing", recv_chars: 0 });
     try {
-      const { job_id: jobId } = await apiPost("/ai/batch-analysis", {
+      const created = await apiPost("/ai/batch-analysis", {
         assignment_id: Number(assignmentId),
       });
+      const jobId = created.job_id;
+      setProgress((prev) => ({ ...prev, ...created }));
       if (runRef.current !== run) return;
       for (;;) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
         if (runRef.current !== run) return;
         const job = await apiGet(`/ai/batch-analysis-jobs/${jobId}`);
         if (runRef.current !== run) return;
-        if (job.recv_chars !== null && job.recv_chars !== undefined) setRecvChars(job.recv_chars);
+        setProgress(job);
         if (job.status === "done") {
           if (!job.result) throw new Error("分析任务未返回报告");
           setReport(job.result);
@@ -426,6 +429,7 @@ function AiAnalysis({ assignmentId, initialReport, hasValidData, sections }) {
       }
     } catch (error) {
       if (runRef.current === run) {
+        setProgress((prev) => ({ ...prev, status: "error", error: error.message }));
         clientLog.add("ui", `batch_ai_error assignment=${assignmentId} ${error.message}`.slice(0, 200));
         message.error(error.message);
       }
@@ -439,22 +443,10 @@ function AiAnalysis({ assignmentId, initialReport, hasValidData, sections }) {
   const totalActualTokens = (report?.prompt_tokens || 0) + (report?.completion_tokens || 0);
   return (
     <section className="block analysis-ai">
-      {running ? (
-        <div className="report-est">
-          <div className="report-est-row">
-            <span className="report-est-k">任务状态</span>
-            <span className="tone-accent">分析中</span>
-          </div>
-          <div className="report-est-row">
-            <span className="report-est-k">已用时长</span>
-            <span>{elapsed} 秒</span>
-          </div>
-          <div className="report-est-row">
-            <span className="report-est-k">已接收</span>
-            <span>{recvChars.toLocaleString()} 字符</span>
-          </div>
-        </div>
-      ) : report ? (
+      {(running || progress?.status === "error") && (
+        <AICallStatus progress={progress} elapsed={elapsed} />
+      )}
+      {running ? null : report ? (
         <>
           <div className="sec-title-row analysis-report-head">
             <div className="sec-title">批次分析报告</div>

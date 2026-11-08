@@ -4,7 +4,7 @@
 // 加粗规格：作业标题加粗、板块标题加粗、答案加粗（题号不加粗）；
 // 解析、Issue、评级话术不加粗。HTML 只带 <b> 不带色（家长端克制，accent 仅预览）。
 //
-// 纯文本节奏（全程无空行，板块靠加粗标题区分，紧凑一体）：
+// 纯文本节奏（正式板块紧凑排列；预习话术与参考解析之间仅普通换行）：
 //   {标题}
 //   {评级话术}（可选）
 //   {板块} 部分
@@ -14,7 +14,7 @@
 
 // 构造结构化 doc（sections 为批次题库，checkedSet/notes 为当前学生表单态或落库态）
 // issueTexts 为 [{text, format}]：format 来自话术库（title_bold 首行加粗 / body_italic 其余行倾斜）
-export function buildFeedbackDoc({ title, ratingPhrase, sections, checkedSet, notes, issueTexts }) {
+export function buildFeedbackDoc({ title, ratingPhrase, sections, checkedSet, notes, issueTexts, preview }) {
   const blocks = [];
   for (const sec of sections || []) {
     const picked = sec.questions.filter((q) => checkedSet.has(q.id));
@@ -45,7 +45,7 @@ export function buildFeedbackDoc({ title, ratingPhrase, sections, checkedSet, no
       }),
     });
   }
-  return { title, ratingPhrase: ratingPhrase || "", blocks, issues: issueTexts || [] };
+  return { title, ratingPhrase: ratingPhrase || "", blocks, issues: issueTexts || [], preview: preview || null };
 }
 
 // Issue 话术按话术 format 渲染：首行/其余行分别包标记（预览 JSX 与 HTML 复制一致生效）
@@ -64,10 +64,9 @@ export function docToText(doc) {
   const lines = [doc.title];
   if (doc.ratingPhrase) lines.push(doc.ratingPhrase);
   for (const block of doc.blocks) {
-    lines.push(sectionTitle(block.section)); // 板块标题无【】、已含「部分」不重复追加，与预览一致
+    lines.push(sectionTitle(block.section));
     for (const item of block.items) {
       if (item.kind === "answer") {
-        // 答案为空只留题号行；解析原样（内部「解析：」「词义」等结构是素材自己的）
         lines.push(item.answer ? `${item.seq}. ${item.answer}` : `${item.seq}.`);
         lines.push(item.explanation);
       } else {
@@ -75,7 +74,14 @@ export function docToText(doc) {
       }
     }
   }
-  for (const text of doc.issues) lines.push(text);
+  for (const text of doc.issues) lines.push(text.text);
+  if (doc.preview) {
+    lines.push(doc.preview.text, "以下是参考解析，小朋友可以对照参考哦：");
+    for (const item of doc.preview.items) {
+      lines.push(`${item.seq}. ${item.answer}`);
+      if (item.explanation) lines.push(item.explanation);
+    }
+  }
   return lines.join("\n").trim();
 }
 
@@ -88,8 +94,7 @@ export function sectionTitle(section) {
   return section.endsWith("部分") ? section : `${section} 部分`;
 }
 
-// HTML 形态（微信笔记粘贴的实证配方）：<b> 加粗（V1 实测在微信存活）+ 单层 <br> 分行、
-// 无任何包裹 div（pre-wrap 会触发微信重排/吞换行）。不塞空行。
+// 微信笔记粘贴只带 <b>/<i> 与 <br>；预习引导前仅普通换行。
 export function docToHtml(doc) {
   const lines = [`<b>${esc(doc.title)}</b>`];
   if (doc.ratingPhrase) lines.push(esc(doc.ratingPhrase));
@@ -112,17 +117,27 @@ export function docToHtml(doc) {
       lines.push(h);
     }
   }
+  if (doc.preview) {
+    for (const l of issueLinesOf(doc.preview)) {
+      let h = esc(l.text);
+      if (l.bold) h = `<b>${h}</b>`;
+      else if (l.italic) h = `<i>${h}</i>`;
+      lines.push(h);
+    }
+    lines.push("以下是参考解析，小朋友可以对照参考哦：");
+    for (const item of doc.preview.items) {
+      lines.push(`${item.seq}. <b>${esc(item.answer)}</b>`);
+      if (item.explanation) lines.push(...item.explanation.split("\n").map(esc));
+    }
+  }
   return lines.join("<br>");
 }
 
-// 快照判定：快照与当前数据是否同一份（= 正常保存可结构化重渲染；否则是补录/历史快照）
-// 逐行比对太脆（评级话术随机、问候语已剥离），改为：每个板块标题与每题的内容标记
-// 都以「行首锚定」逐字出现在快照里即视为一致。比较前两侧 trim，避免空白差异误判。
+// 快照匹配覆盖正式板块与预习反馈，任一当前内容缺失则回退存档原文。
 export function snapshotMatchesDoc(snapshot, doc) {
   if (!snapshot) return false;
-  const hay = "\n" + snapshot.trim(); // 行首锚定，防「3.」误中「13.」
+  const hay = "\n" + snapshot.trim();
   for (const block of doc.blocks) {
-    // 兼容新旧两种板块标题写法（【x 部分】为 V0.4.0 前存量）
     if (!hay.includes(`\n【${block.section} 部分】`) && !hay.includes(`\n${block.section} 部分`)) {
       return false;
     }
@@ -136,10 +151,16 @@ export function snapshotMatchesDoc(snapshot, doc) {
       if (!hay.includes(`\n${marker}`)) return false;
     }
   }
+  if (doc.preview) {
+    if (!hay.includes("\n以下是参考解析，小朋友可以对照参考哦：")) return false;
+    for (const item of doc.preview.items) {
+      if (!hay.includes(`\n${item.seq}. ${item.answer}`)) return false;
+    }
+  }
   return true;
 }
 
-// 快照回退纯文本展示：连续空行全部去掉（存档原文不动，仅显示层）
+// 快照展示最多保留一个空行，与当前预习反馈节奏一致。
 export function collapseBlankLines(text) {
-  return text.replace(/\n{2,}/g, "\n");
+  return text.replace(/\n{3,}/g, "\n\n");
 }

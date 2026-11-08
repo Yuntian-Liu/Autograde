@@ -35,6 +35,7 @@ from serializers import (
     assignment_status,
     assignment_student_condition,
     class_brief,
+    parse_options,
     question_brief,
     student_brief,
     submission_brief,
@@ -367,6 +368,7 @@ class AssignmentPatch(BaseModel):
     preview_unit_no: int | None = None
     preview_half: str | None = None
     preview_answers: list[str] | None = None  # 预习答题卡：恰好 5 个 A/B/C/D
+    preview_explanations: list[str] | None = None  # 恰好 5 条，允许空解析
     lesson_no: int | None = None
     class_time: str | None = None
     content: str | None = None
@@ -413,18 +415,31 @@ async def update_assignment(
     )
     if error:
         raise HTTPException(status_code=400, detail=error)
-    if body.preview_answers is not None:
+    if body.preview_answers is not None or body.preview_explanations is not None:
         if not a.has_preview:
-            raise HTTPException(status_code=400, detail="该批次无预习，不能录入预习答案")
-        answers = [str(x).strip().upper() for x in body.preview_answers]
+            raise HTTPException(status_code=400, detail="该批次无预习，不能录入预习答案与解析")
+        raw_answers = body.preview_answers if body.preview_answers is not None else parse_options(a.preview_answers)
+        answers = [str(x).strip().upper() for x in raw_answers]
         if len(answers) != 5 or any(x not in ("A", "B", "C", "D") for x in answers):
             raise HTTPException(status_code=400, detail="预习答案须为恰好 5 个 A/B/C/D")
+        raw_explanations = (
+            body.preview_explanations
+            if body.preview_explanations is not None
+            else parse_options(a.preview_explanations)
+        )
+        if body.preview_explanations is None and not raw_explanations:
+            raw_explanations = [""] * 5
+        explanations = [str(x) for x in raw_explanations]
+        if len(explanations) != 5:
+            raise HTTPException(status_code=400, detail="预习解析须为恰好 5 条，无解析可留空")
         a.preview_answers = json.dumps(answers, ensure_ascii=False)
+        a.preview_explanations = json.dumps(explanations, ensure_ascii=False)
     if not a.has_preview:
         a.preview_half = ""
-        if a.preview_answers:
-            # 关掉预习：答题卡与该批次所有学生的预习错题一并失效
+        if a.preview_answers or a.preview_explanations:
+            # 关掉预习：答题卡、解析与该批次所有学生的预习错题一并失效
             a.preview_answers = ""
+            a.preview_explanations = ""
             subs = (
                 await db.execute(
                     select(Submission).where(Submission.assignment_id == assignment_id)

@@ -45,9 +45,9 @@ from models import (
     WeeklyReport,
 )
 
-APP_VERSION = "0.22.0"
+APP_VERSION = "0.23.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
-AGREEMENT_VERSION = "2026-11-07.2"
+AGREEMENT_VERSION = "2026-11-08"
 _STARTED_AT = datetime.now(timezone.utc)
 
 MAX_LOG_ENTRIES = 500
@@ -123,6 +123,8 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
             "assignment_id": e.assignment_id,
             "student_id": e.student_id,
             "model": e.model,
+            "job_id": e.job_id,
+            "provider_request_id": e.provider_request_id,
             "prompt_tokens": e.prompt_tokens,
             "completion_tokens": e.completion_tokens,
             # 缓存拆分与延迟（V0.15.0）：模型慢/超时/成本异常排查的直接证据
@@ -513,6 +515,16 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                     select(func.count(Assignment.id))
                     .join(Class, Assignment.class_id == Class.id)
                     .where(Class.owner_uid == user.uid, Assignment.preview_answers != "")
+                )
+            ).scalar_one(),
+            "preview_explained_assignments": (
+                await db.execute(
+                    select(func.count(Assignment.id))
+                    .join(Class, Assignment.class_id == Class.id)
+                    .where(
+                        Class.owner_uid == user.uid,
+                        Assignment.preview_explanations.not_in(("", "[]", '["", "", "", "", ""]')),
+                    )
                 )
             ).scalar_one(),
             "preview_wrong_records": (

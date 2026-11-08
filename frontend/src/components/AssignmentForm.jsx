@@ -231,7 +231,7 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
             {editing && !hasPreview && (assignment?.preview_answers || []).length === 5 && (
               <>
                 <span className="flab" />
-                <span className="form-warn">关闭预习将清空已录的预习答案与全体学生的预习错题记录</span>
+                <span className="form-warn">关闭预习将清空已录的预习答案、解析与全体学生的预习错题记录</span>
               </>
             )}
             {hasPreview && (

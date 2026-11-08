@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { getToken } from "../api";
 import { clientLog } from "../utils/clientLog";
-import { trackedFetch } from "../utils/trackedFetch";
+import { streamAI } from "../utils/aiStream";
+import AICallStatus from "./AICallStatus";
 import MdContent from "./MdContent";
 import { IconCopy } from "./icons";
 import assistantIcon from "../assets/ai-assistant.png";
@@ -27,13 +27,6 @@ function fmtMs(ms) {
   return ms < 60000 ? `${(ms / 1000).toFixed(1)} 秒` : `${Math.floor(ms / 60000)} 分 ${Math.round((ms % 60000) / 1000)} 秒`;
 }
 
-// 思考计时三段递进文案（参照 Stellaris）：秒数着色提示等待程度
-function thinkStage(sec) {
-  if (sec >= 60) return { text: "仍在思考，请再稍候", cls: "danger" };
-  if (sec >= 15) return { text: "思考时间较长", cls: "warn" };
-  return { text: "思考中", cls: "" };
-}
-
 export default function AIFloat({ assignmentId = null }) {
   const [pos, setPos] = useState(() =>
     clampPos(window.innerWidth - ICON_SIZE - 24, window.innerHeight - ICON_SIZE - 24, ICON_SIZE, ICON_SIZE)
@@ -44,7 +37,8 @@ export default function AIFloat({ assignmentId = null }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [webSearch, setWebSearch] = useState(false); // 网络搜索：默认关闭，用户主动开启
-  const [thinkSec, setThinkSec] = useState(null); // 思考计时（秒；null=未在思考）
+  const [thinkSec, setThinkSec] = useState(null);
+  const [progress, setProgress] = useState(null);
   const [copiedIdx, setCopiedIdx] = useState(-1); // 刚复制过的消息序号
   const dragRef = useRef(null); // {startX,startY,baseX,baseY,moved}
   const listRef = useRef(null);
@@ -96,78 +90,48 @@ export default function AIFloat({ assignmentId = null }) {
     setInput("");
     setBusy(true);
     setThinkSec(0);
+    setProgress({ stage: "preparing", recv_chars: 0 });
     thinkTimer.current = setInterval(() => setThinkSec((s) => s + 1), 1000);
     clientLog.add("ui", `chat_send len=${text.length} web=${webSearch ? 1 : 0}`);
     const history = [...messages, { role: "user", text }];
     setMessages([...history, { role: "assistant", text: "" }]);
     const started = Date.now();
     try {
-      const res = await trackedFetch("/api/ai/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken()}`,
+      const done = await streamAI("/api/ai/chat", {
+        messages: history.map((m) => ({ role: m.role, content: m.text })).slice(-20),
+        assignment_id: assignmentId,
+        web_search: webSearch,
+      }, {
+        onEvent: (event) => {
+          if (event.type === "stage") {
+            setProgress((prev) => ({ ...prev, ...event, status: "running" }));
+          } else if (event.type === "delta") {
+            setProgress((prev) => ({ ...prev, stage: "receiving", recv_chars: event.recv_chars, status: "running" }));
+            setMessages((ms) => {
+              const next = [...ms];
+              next[next.length - 1] = { ...next[next.length - 1], text: next[next.length - 1].text + event.text };
+              return next;
+            });
+          }
         },
-        body: JSON.stringify({
-          messages: history.map((m) => ({ role: m.role, content: m.text })).slice(-20),
-          assignment_id: assignmentId,
-          web_search: webSearch,
-        }),
       });
-      if (!res.ok) {
-        let detail = `${res.status}`;
-        try {
-          const b = await res.json();
-          if (typeof b?.detail === "string") detail = b.detail;
-        } catch { /* 保留状态码 */ }
-        throw new Error(detail);
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const frames = buf.split("\n\n");
-        buf = frames.pop();
-        for (const frame of frames) {
-          const line = frame.trim();
-          if (!line.startsWith("data:")) continue;
-          let ev;
-          try {
-            ev = JSON.parse(line.slice(5));
-          } catch {
-            continue;
-          }
-          if (ev.type === "delta") {
-            setMessages((ms) => {
-              const next = [...ms];
-              next[next.length - 1] = { ...next[next.length - 1], text: next[next.length - 1].text + ev.text };
-              return next;
-            });
-          } else if (ev.type === "done") {
-            const u = ev.usage || {};
-            const meta = {
-              elapsed: fmtMs(ev.metrics?.total_ms || Date.now() - started),
-              tokens: (u.prompt_tokens || 0) + (u.completion_tokens || 0),
-              cost: ev.cost_yuan,
-              tier: ev.price_tier,
-              webSearchCount: ev.web_search_count || 0,
-            };
-            setMessages((ms) => {
-              const next = [...ms];
-              next[next.length - 1] = { ...next[next.length - 1], meta };
-              return next;
-            });
-            clientLog.add("ui", `chat_done tokens=${meta.tokens} ${meta.elapsed}`);
-          } else if (ev.type === "error") {
-            throw new Error(ev.message);
-          }
-        }
-      }
+      const usage = done.usage || {};
+      const meta = {
+        elapsed: fmtMs(done.metrics?.total_ms || Date.now() - started),
+        tokens: (usage.prompt_tokens || 0) + (usage.completion_tokens || 0),
+        cost: done.cost_yuan,
+        tier: done.price_tier,
+        webSearchCount: done.web_search_count || 0,
+      };
+      setMessages((ms) => {
+        const next = [...ms];
+        next[next.length - 1] = { ...next[next.length - 1], meta };
+        return next;
+      });
+      clientLog.add("ui", `chat_done tokens=${meta.tokens} ${meta.elapsed}`);
     } catch (e) {
       clientLog.add("ui", `chat_error ${e.message}`.slice(0, 200));
+      setProgress((prev) => ({ ...prev, status: "error", error: e.message }));
       setMessages((ms) => {
         const next = [...ms];
         next[next.length - 1] = { role: "assistant", text: `出错了：${e.message}`, meta: null };
@@ -229,20 +193,10 @@ export default function AIFloat({ assignmentId = null }) {
                 </div>
               );
             })}
-            {busy && messages[messages.length - 1]?.text === "" && (
+            {busy && (
               <div className="ai-msg assistant">
                 <div className="ai-bubble ai-thinking">
-                  {(() => {
-                    const st = thinkStage(thinkSec ?? 0);
-                    return (
-                      <>
-                        {st.text}
-                        {thinkSec !== null && (
-                          <span className={`ai-think-sec${st.cls ? ` ${st.cls}` : ""}`}> · {thinkSec}s</span>
-                        )}
-                      </>
-                    );
-                  })()}
+                  <AICallStatus progress={progress} elapsed={thinkSec || 0} compact />
                 </div>
               </div>
             )}

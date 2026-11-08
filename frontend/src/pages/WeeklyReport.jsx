@@ -4,7 +4,8 @@ import { App as AntApp, Modal, Select, Tabs } from "antd";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiGet, apiPost } from "../api";
 import AppHeader from "../components/AppHeader";
-import MdContent from "../components/MdContent";
+import AICallStatus from "../components/AICallStatus";
+import WeeklyInsight from "../components/WeeklyInsight";
 import PageSkeleton from "../components/PageSkeleton";
 import { IconChevronLeft, IconDownload } from "../components/icons";
 import { fmtScore, fmtTime } from "../meta";
@@ -85,6 +86,7 @@ export default function WeeklyReport() {
   const [estimating, setEstimating] = useState(false);
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [progress, setProgress] = useState(null);
 
   useEffect(() => {
     apiGet("/classes").then(setClasses).catch(() => {});
@@ -116,7 +118,7 @@ export default function WeeklyReport() {
         content: `预计 ${estimate.est_total_tokens.toLocaleString()} tokens · ¥${estimate.est_cost_yuan.toFixed(4)} · 约 ${estimate.est_seconds} 秒（${estimate.price_tier === "offpeak" ? "谷时" : "峰时"}）`,
         okText: "开始生成",
         cancelText: "取消",
-        onOk: startJob,
+        onOk: () => { startJob(); },
       });
     } catch (e) {
       clientLog.operation("weekly_ai_estimate", "error", { week, class: classId, error: e.message });
@@ -130,20 +132,25 @@ export default function WeeklyReport() {
     if (running) return;
     setRunning(true);
     setElapsed(0);
+    setProgress({ stage: "preparing", recv_chars: 0 });
     const startedAt = Date.now();
     const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000);
     try {
-      const { job_id: jobId } = await apiPost("/ai/weekly-report", { week, class_id: classId });
+      const created = await apiPost("/ai/weekly-report", { week, class_id: classId });
+      const jobId = created.job_id;
+      setProgress((prev) => ({ ...prev, ...created }));
       clientLog.operation("weekly_ai_start", "success", { week, class: classId, job: jobId });
       for (;;) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
         const job = await apiGet(`/ai/weekly-report-jobs/${jobId}`);
+        setProgress(job);
         if (job.status === "done") {
           setData((prev) => ({ ...prev, ai_report: job.result }));
           clientLog.operation("weekly_ai_done", "success", {
             week,
             class: classId,
             job: jobId,
+            stage: job.stage,
             tokens: (job.result.prompt_tokens || 0) + (job.result.completion_tokens || 0),
           });
           message.success("本周观察已生成并保存");
@@ -152,6 +159,7 @@ export default function WeeklyReport() {
         if (job.status === "error") throw new Error(job.error || "生成失败");
       }
     } catch (e) {
+      setProgress((prev) => ({ ...prev, status: "error", error: e.message }));
       clientLog.operation("weekly_ai_error", "error", { week, class: classId, error: e.message });
       message.error(e.message);
     } finally {
@@ -272,9 +280,12 @@ export default function WeeklyReport() {
               <div className="sec-title-row">
                 <div className="sec-title">AI 本周观察</div>
                 <button className="btn no-print" onClick={generate} disabled={estimating || running || !current.graded_submissions}>
-                  {running ? `生成中 · ${elapsed}s` : estimating ? "预估中…" : report ? "重新生成" : "生成观察"}
+                  {running ? "生成中" : estimating ? "预估中…" : report ? "重新生成" : "生成观察"}
                 </button>
               </div>
+              {(running || progress?.status === "error") && (
+                <AICallStatus progress={progress} elapsed={elapsed} />
+              )}
               {report ? (
                 <>
                   <div className="weekly-ai-meta">
@@ -283,9 +294,9 @@ export default function WeeklyReport() {
                     <span>¥{report.cost_yuan.toFixed(4)}（{report.price_tier === "offpeak" ? "谷时" : report.price_tier ? "峰时" : "—"}）</span>
                     <span>{fmtTime(report.updated_at)}</span>
                   </div>
-                  <MdContent text={report.content} />
+                  <WeeklyInsight content={report.content} current={current} previous={previous} />
                 </>
-              ) : <div className="row">尚未生成本周观察，以上统计无需 AI 即可使用。</div>}
+              ) : !running && <div className="row">尚未生成本周观察，以上统计无需 AI 即可使用。</div>}
             </section>
           </div>
         ) : (

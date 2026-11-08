@@ -181,6 +181,8 @@ async def record_llm_call(
     think_ms: int = 0,
     total_ms: int = 0,
     web_search_count: int = 0,
+    job_id: str = "",
+    provider_request_id: str = "",
 ) -> dict | None:
     """埋点一条 AI 调用；按调用时刻判峰谷并结算成本（含缓存命中拆分）；
     单价快照同行写入（发票原则）；独立 session，失败静默（只日志）。
@@ -208,6 +210,8 @@ async def record_llm_call(
                     assignment_id=assignment_id,
                     student_id=student_id,
                     model=model,
+                    job_id=job_id or "",
+                    provider_request_id=(provider_request_id or "")[:128],
                     prompt_tokens=prompt_tokens or 0,
                     completion_tokens=completion_tokens or 0,
                     cache_hit_tokens=cache_hit_tokens or 0,
@@ -477,6 +481,8 @@ def _event_out(e: LlmCallEvent, ctx: dict | None = None, nickname: str = "") -> 
         "created_at": e.created_at.isoformat() if e.created_at else None,
         "feature": e.feature,
         "model": e.model,
+        "job_id": e.job_id,
+        "provider_request_id": e.provider_request_id,
         "caller": {"uid": e.uid, "nickname": nickname},
         "context": ctx or None,
         "prompt_tokens": e.prompt_tokens,

@@ -97,13 +97,14 @@ async def create_weekly_report(body: WeeklyIn, user: User = Depends(get_current_
         "week": data["week"]["start"],
         "class_id": body.class_id,
         "status": "running",
+        "stage": "preparing",
+        "model": ai_model(),
         "recv_chars": 0,
         "created": time.time(),
     }
     logger.info("weekly_report_start job=%s uid=%s week=%s class=%s", job_id, user.uid, data["week"]["start"], body.class_id)
-    asyncio.create_task(_run_weekly_job(job_id, user.uid, body)
-    )
-    return {"job_id": job_id}
+    asyncio.create_task(_run_weekly_job(job_id, user.uid, body))
+    return {"job_id": job_id, "model": ai_model()}
 
 
 async def _run_weekly_job(job_id: str, uid: int, body: WeeklyIn) -> None:
@@ -117,6 +118,7 @@ async def _run_weekly_job(job_id: str, uid: int, body: WeeklyIn) -> None:
     content = None
     llm_started = False
     recorded = False
+    provider_request_id = ""
 
     async def settle_call():
         return await record_llm_call(
@@ -130,6 +132,8 @@ async def _run_weekly_job(job_id: str, uid: int, body: WeeklyIn) -> None:
             cache_hit_tokens=(usage or {}).get("cache_hit_tokens", 0),
             cache_miss_tokens=(usage or {}).get("cache_miss_tokens", 0),
             reasoning_tokens=(usage or {}).get("reasoning_tokens", 0),
+            job_id=job_id,
+            provider_request_id=provider_request_id,
             **{key: metrics.get(key, 0) for key in ("ttft_ms", "think_ms", "total_ms")},
         )
 
@@ -139,8 +143,15 @@ async def _run_weekly_job(job_id: str, uid: int, body: WeeklyIn) -> None:
             _, evidence = await _evidence(db, user, body)
         llm_started = True
         async for event in analyze_weekly_stream(evidence):
-            if event["type"] == "progress":
+            if event.get("provider_request_id"):
+                provider_request_id = event["provider_request_id"]
+                job["provider_request_id"] = provider_request_id
+            if event["type"] == "stage":
+                job["stage"] = event["stage"]
+            elif event["type"] == "progress":
+                job["stage"] = event.get("stage", "receiving")
                 job["recv_chars"] = event["recv_chars"]
+                text_chars = event["recv_chars"]
             elif event["type"] == "done":
                 usage = event.get("usage")
                 finish_reason = event.get("finish_reason")
@@ -151,6 +162,7 @@ async def _run_weekly_job(job_id: str, uid: int, body: WeeklyIn) -> None:
             raise AIParseError("输出为空")
         settle = await settle_call()
         recorded = True
+        job["stage"] = "saving"
         async with SessionLocal() as db:
             report = (
                 await db.execute(
@@ -176,6 +188,7 @@ async def _run_weekly_job(job_id: str, uid: int, body: WeeklyIn) -> None:
             report.total_ms = metrics.get("total_ms", 0)
             await db.commit()
         job["status"] = "done"
+        job["stage"] = "done"
         job["result"] = weekly_report_out(report)
         logger.info("weekly_report_done job=%s uid=%s tokens=%s/%s", job_id, uid, (usage or {}).get("prompt_tokens", 0), (usage or {}).get("completion_tokens", 0))
     except APITimeoutError:
@@ -197,6 +210,8 @@ async def _run_weekly_job(job_id: str, uid: int, body: WeeklyIn) -> None:
         job["error"] = "服务内部错误，请重试"
         logger.exception("weekly_report_error job=%s", job_id)
     finally:
+        if job["status"] == "error":
+            job["error_stage"] = job.get("stage", "preparing")
         if llm_started and not recorded:
             await settle_call()
 
@@ -207,9 +222,18 @@ async def get_weekly_report_job(job_id: str, user: User = Depends(get_current_us
     job = _WEEKLY_JOBS.get(job_id)
     if not job or job["uid"] != user.uid:
         raise HTTPException(status_code=404, detail="任务不存在或已过期，请重新发起")
-    result = {"status": job["status"], "recv_chars": job.get("recv_chars", 0)}
+    result = {
+        "status": job["status"],
+        "stage": job.get("stage", "preparing"),
+        "model": job.get("model") or ai_model(),
+        "job_id": job_id,
+        "elapsed_seconds": int(time.time() - job["created"]),
+        "recv_chars": job.get("recv_chars", 0),
+        "provider_request_id": job.get("provider_request_id", ""),
+    }
     if job["status"] == "done":
         result["result"] = job["result"]
     elif job["status"] == "error":
         result["error"] = job["error"]
+        result["error_stage"] = job.get("error_stage", "")
     return result

@@ -102,6 +102,7 @@ def assignment_brief(a: Assignment) -> dict:
         "preview_unit_no": a.preview_unit_no,
         "preview_half": a.preview_half,
         "preview_answers": parse_options(a.preview_answers),
+        "preview_explanations": parse_options(a.preview_explanations),
         "unit_progress": unit_progress(a),
         "lesson_no": a.lesson_no,
         "class_time": a.class_time,

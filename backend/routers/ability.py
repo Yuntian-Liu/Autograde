@@ -79,7 +79,6 @@ def _report_out(r: AbilityReport) -> dict:
 
 
 async def _run_ability_job(job_id: str, uid: int, student_id: int, start: str, end: str) -> None:
-    """后台跑分析：构建证据 → AI 起草；成本埋点在 finally（自带 session）。"""
     from database import SessionLocal
 
     job = _ABILITY_JOBS[job_id]
@@ -87,6 +86,7 @@ async def _run_ability_job(job_id: str, uid: int, student_id: int, start: str, e
     finish_reason = None
     text_chars = 0
     metrics: dict = {}
+    provider_request_id = ""
     try:
         async with SessionLocal() as db:
             s = await db.get(Student, student_id)
@@ -98,14 +98,22 @@ async def _run_ability_job(job_id: str, uid: int, student_id: int, start: str, e
             job["error"] = "该学生在所选时间范围内没有作业数据，无法生成报告"
             return
         async for event in analyze_ability_stream(s.name, class_label, evidence["evidence_text"]):
-            if event["type"] == "progress":
+            if event.get("provider_request_id"):
+                provider_request_id = event["provider_request_id"]
+                job["provider_request_id"] = provider_request_id
+            if event["type"] == "stage":
+                job["stage"] = event["stage"]
+            elif event["type"] == "progress":
+                job["stage"] = event.get("stage", "receiving")
                 job["recv_chars"] = event["recv_chars"]
+                text_chars = event["recv_chars"]
             elif event["type"] == "done":
                 usage = event["usage"]
                 finish_reason = event["finish_reason"]
                 text_chars = event["text_chars"]
                 metrics = event.get("metrics") or {}
                 job["status"] = "done"
+                job["stage"] = "done"
                 job["data"] = {
                     **event["data"],
                     "range_start": start,
@@ -132,6 +140,8 @@ async def _run_ability_job(job_id: str, uid: int, student_id: int, start: str, e
         job["error"] = "服务内部错误，请重试"
         logging.getLogger("autograde.ai").exception("能力报告任务异常 job=%s", job_id)
     finally:
+        if job["status"] == "error":
+            job["error_stage"] = job.get("stage", "preparing")
         settle = await record_llm_call(
             uid=uid,
             feature="ability_report",
@@ -144,9 +154,10 @@ async def _run_ability_job(job_id: str, uid: int, student_id: int, start: str, e
             cache_hit_tokens=(usage or {}).get("cache_hit_tokens", 0),
             cache_miss_tokens=(usage or {}).get("cache_miss_tokens", 0),
             reasoning_tokens=(usage or {}).get("reasoning_tokens", 0),
+            job_id=job_id,
+            provider_request_id=provider_request_id,
             **{k: metrics.get(k, 0) for k in ("ttft_ms", "think_ms", "total_ms")},
         )
-        # 结算结果回填进草稿数据（报告页 meta 显示本次生成成本）
         if settle and job.get("status") == "done" and job.get("data") is not None:
             job["data"]["cost_yuan"] = settle["cost_yuan"]
             job["data"]["price_tier"] = settle["price_tier"]
@@ -157,7 +168,6 @@ async def create_ability_report(
     body: AbilityReportIn,
     user: User = Depends(get_current_user),
 ) -> dict:
-    """建能力分析任务并立即返回 job_id；结果走 GET /ability-jobs/{job_id} 轮询。"""
     from database import SessionLocal
 
     async with SessionLocal() as db:
@@ -173,27 +183,37 @@ async def create_ability_report(
     _ABILITY_JOBS[job_id] = {
         "uid": user.uid,
         "status": "running",
+        "stage": "preparing",
+        "model": ai_model(),
+        "recv_chars": 0,
         "created": time.time(),
     }
+    logging.getLogger("autograde.ai").info("能力报告任务创建 job=%s student=%s", job_id, body.student_id)
     asyncio.create_task(
         _run_ability_job(job_id, user.uid, body.student_id, body.range_start.strip(), body.range_end.strip())
     )
-    return {"job_id": job_id}
+    return {"job_id": job_id, "model": ai_model()}
 
 
 @router.get("/ability-jobs/{job_id}")
 async def get_ability_job(job_id: str, user: User = Depends(get_current_user)) -> dict:
-    """轮询分析任务：running（带 elapsed 秒）/ done（带草稿 data）/ error。"""
     job = _ABILITY_JOBS.get(job_id)
     if not job or job["uid"] != user.uid:
         raise HTTPException(status_code=404, detail="任务不存在或已过期，请重新发起")
-    out = {"status": job["status"], "elapsed": int(time.time() - job["created"])}
-    if job["status"] == "running":
-        out["recv_chars"] = job.get("recv_chars", 0)
+    out = {
+        "status": job["status"],
+        "stage": job.get("stage", "preparing"),
+        "model": job.get("model") or ai_model(),
+        "job_id": job_id,
+        "elapsed_seconds": int(time.time() - job["created"]),
+        "recv_chars": job.get("recv_chars", 0),
+        "provider_request_id": job.get("provider_request_id", ""),
+    }
     if job["status"] == "done":
         out["data"] = job["data"]
     elif job["status"] == "error":
         out["error"] = job["error"]
+        out["error_stage"] = job.get("error_stage", "")
     return out
 
 

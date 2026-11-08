@@ -77,8 +77,9 @@ class Assignment(Base):
     has_preview: Mapped[bool] = mapped_column(Boolean, default=False)  # 仅 lesson_type=Day 时有意义
     preview_unit_no: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 预习单元号
     preview_half: Mapped[str] = mapped_column(String(1), default="")  # 预习上下册：A / B
-    # 预习答案答题卡（JSON 数组 5 个 A/B/C/D，空串 = 未录入）；纯对答案用，不算分不出解析
+    # 预习答题卡（JSON 数组，固定 5 题）；答案与解析分离，不计分、不进正式题库
     preview_answers: Mapped[str] = mapped_column(Text, default="")
+    preview_explanations: Mapped[str] = mapped_column(Text, default="")
     lesson_no: Mapped[int] = mapped_column(Integer)  # 第几次课
     class_time: Mapped[str] = mapped_column(String(32), default="")  # 本次上课时间，如 2026-09-12 14:00
     content: Mapped[str] = mapped_column(String(128), default="")  # 作业内容，如「伴学手册」
@@ -197,6 +198,8 @@ class LlmCallEvent(Base):
     feature: Mapped[str] = mapped_column(String(32))  # parse_questions / draft_explanation
     assignment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 批次维度
     model: Mapped[str] = mapped_column(String(64), default="")
+    job_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    provider_request_id: Mapped[str] = mapped_column(String(128), default="")
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cost_yuan: Mapped[float] = mapped_column(Float, default=0.0)  # 按当时单价结算，改价不改历史

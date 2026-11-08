@@ -188,8 +188,9 @@ export default function Grading() {
   const checkedSet = useMemo(() => new Set(checkedIds), [checkedIds]);
   const currentNotes = current ? notesMap[current.id] || {} : {};
   const currentScores = current ? scoresMap[current.id] || {} : {};
-  // 预习：答题卡答案 + 当前学生预习错题集合（不计分，仅驱动「预习有错题」计数）
+  // 预习：独立答题卡与解析 + 当前学生错题集合（不计分，驱动计数与参考解析反馈）
   const previewAnswers = assignment?.preview_answers || [];
+  const previewExplanations = assignment?.preview_explanations || [];
   const previewChecked = current ? previewMap[current.id] || [] : [];
   const previewSet = useMemo(() => new Set(previewChecked), [previewChecked]);
 
@@ -493,25 +494,35 @@ export default function Grading() {
         if (n && p.name === PREVIEW_ERROR_PHRASE) {
           text = text.replace("错了1个小题", `错了${n}个小题`);
         }
-        return { text, format: p.format || "" };
+        return { text, format: p.format || "", name: p.name };
       });
-    if (statusDraft === "未交" && urging) lines.push({ text: urging, format: "" });
+    if (statusDraft === "未交" && urging) lines.push({ text: urging, format: "", name: "" });
     return lines;
   }, [current, assignment, issuesMap, issueParams, issuePhrases, statusDraft, urging]);
 
-  const doc = useMemo(
-    () =>
-      buildFeedbackDoc({
-        title: feedbackTitle(),
-        ratingPhrase,
-        sections: assignment?.sections,
-        checkedSet,
-        notes: currentNotes,
-        issueTexts,
-      }),
+  const doc = useMemo(() => {
+    const previewIssue = issueTexts.find((item) => item.name === PREVIEW_ERROR_PHRASE);
+    const preview = previewIssue && previewChecked.length
+      ? {
+          ...previewIssue,
+          items: previewChecked.map((seq) => ({
+            seq,
+            answer: previewAnswers[seq - 1] || "",
+            explanation: previewExplanations[seq - 1] || "",
+          })),
+        }
+      : null;
+    return buildFeedbackDoc({
+      title: feedbackTitle(),
+      ratingPhrase,
+      sections: assignment?.sections,
+      checkedSet,
+      notes: currentNotes,
+      issueTexts: issueTexts.filter((item) => item.name !== PREVIEW_ERROR_PHRASE),
+      preview,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [assignment, current, checkedSet, currentNotes, ratingPhrase, issueTexts]
-  );
+  }, [assignment, current, checkedSet, currentNotes, ratingPhrase, issueTexts, previewChecked, previewAnswers, previewExplanations]);
 
   // 快照判定：一致（正常保存）→ 结构化重渲染；不一致（补录/历史）→ 回退纯文本
   const snapshotMatches = showSnapshot && snapshotMatchesDoc(snapshot, doc);
@@ -1371,6 +1382,25 @@ export default function Grading() {
                     ))}
                   </p>
                 ))}
+                {doc.preview && (
+                  <div className="preview-feedback">
+                    <p>
+                      {issueLinesOf(doc.preview).map((line, index) => (
+                        <span key={index}>
+                          {index > 0 && "\n"}
+                          {line.bold ? <strong>{line.text}</strong> : line.italic ? <em>{line.text}</em> : line.text}
+                        </span>
+                      ))}
+                    </p>
+                    <p className="preview-guide">以下是参考解析，小朋友可以对照参考哦：</p>
+                    {doc.preview.items.map((item) => (
+                      <div className="qitem" key={item.seq}>
+                        <div className="qitem-answer">{item.seq}. <b>{item.answer}</b></div>
+                        {item.explanation && <div className="qitem-expl">{item.explanation}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </div>

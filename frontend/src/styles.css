@@ -270,13 +270,21 @@ a.row:hover { background: var(--bg-soft); }
 .qrow-head .grow { flex: 1; }
 .qrow-del { margin-left: auto; }
 
-/* AI 解析进度（SSE 实时刷新） */
-.parse-progress {
-  margin-top: var(--s2);
-  font-family: var(--font-mono);
-  font-size: var(--t-caption);
-  color: var(--accent);
-}
+/* AI 调用真实阶段：不使用虚假百分比进度 */
+.ai-call-status { display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3); margin-top: var(--s3); border: 1px solid var(--accent-line); border-radius: var(--r-md); background: var(--accent-bg); }
+.ai-call-main { display: flex; align-items: center; gap: var(--s2); color: var(--accent-hover); }
+.ai-call-main > span:last-child { margin-left: auto; font-family: var(--font-mono); font-size: var(--t-caption); }
+.ai-call-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--accent); animation: aiPulse 1.4s var(--ease) infinite; }
+.ai-call-metrics { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); color: var(--ink-2); font-size: var(--t-caption); font-family: var(--font-mono); }
+.ai-call-status.error { border-color: var(--danger); background: var(--surface); }
+.ai-call-status.error .ai-call-main, .ai-call-error { color: var(--danger); }
+.ai-call-status.error .ai-call-dot { background: var(--danger); animation: none; }
+.ai-call-error { font-size: var(--t-caption); overflow-wrap: anywhere; }
+.ai-call-ids { color: var(--ink-2); font-size: var(--t-caption); }
+.ai-call-ids summary { width: max-content; cursor: pointer; color: var(--accent); }
+.ai-call-ids span { display: block; margin-top: var(--s1); font-family: var(--font-mono); overflow-wrap: anywhere; }
+.ai-call-status.compact { padding: var(--s2); margin-top: var(--s2); }
+@keyframes aiPulse { 50% { opacity: 0.35; } }
 
 /* ---------- 统一编辑窗 ---------- */
 .qinfo {
@@ -1345,6 +1353,12 @@ mark.search-hit {
 }
 .pv-opt:hover { border-color: var(--accent); color: var(--accent); }
 .pv-opt.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.preview-entry-toolbar { display: flex; justify-content: flex-end; margin-bottom: var(--s3); }
+.preview-ai-entry { padding: var(--s3); margin-bottom: var(--s4); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-soft); }
+.preview-entry-list { display: flex; flex-direction: column; gap: var(--s3); }
+.preview-question { padding: var(--s3); border: 1px solid var(--line); border-radius: var(--r-md); }
+.preview-question-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s2); }
+.preview-question-head .pv-seq { width: auto; color: var(--ink); font-weight: 600; }
 
 /* 表单内警示（如关闭预习将清空答题卡） */
 .form-warn { font-size: var(--t-caption); color: var(--warning); }

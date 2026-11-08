@@ -82,6 +82,7 @@ async def _run_batch_analysis_job(job_id: str, uid: int, assignment_id: int) -> 
     content = None
     llm_started = False
     recorded = False
+    provider_request_id = ""
 
     async def settle_call():
         return await record_llm_call(
@@ -96,6 +97,8 @@ async def _run_batch_analysis_job(job_id: str, uid: int, assignment_id: int) -> 
             cache_hit_tokens=(usage or {}).get("cache_hit_tokens", 0),
             cache_miss_tokens=(usage or {}).get("cache_miss_tokens", 0),
             reasoning_tokens=(usage or {}).get("reasoning_tokens", 0),
+            job_id=job_id,
+            provider_request_id=provider_request_id,
             **{key: metrics.get(key, 0) for key in ("ttft_ms", "think_ms", "total_ms")},
         )
 
@@ -118,8 +121,15 @@ async def _run_batch_analysis_job(job_id: str, uid: int, assignment_id: int) -> 
         async for event in analyze_batch_analysis_stream(
             class_brief(class_, assignment)["name"], assignment.unit_label, evidence
         ):
-            if event["type"] == "progress":
+            if event.get("provider_request_id"):
+                provider_request_id = event["provider_request_id"]
+                job["provider_request_id"] = provider_request_id
+            if event["type"] == "stage":
+                job["stage"] = event["stage"]
+            elif event["type"] == "progress":
+                job["stage"] = event.get("stage", "receiving")
                 job["recv_chars"] = event["recv_chars"]
+                text_chars = event["recv_chars"]
             elif event["type"] == "done":
                 usage = event.get("usage")
                 finish_reason = event.get("finish_reason")
@@ -131,6 +141,7 @@ async def _run_batch_analysis_job(job_id: str, uid: int, assignment_id: int) -> 
 
         settle = await settle_call()
         recorded = True
+        job["stage"] = "saving"
         async with SessionLocal() as db:
             assignment = await db.get(Assignment, assignment_id)
             class_ = await db.get(Class, assignment.class_id) if assignment else None
@@ -150,6 +161,7 @@ async def _run_batch_analysis_job(job_id: str, uid: int, assignment_id: int) -> 
                 price_tier=(settle or {}).get("price_tier", ""),
             )
         job["status"] = "done"
+        job["stage"] = "done"
         job["result"] = batch_analysis_report_out(report)
         logger.info(
             "批次分析完成 job=%s assignment=%s tokens=%s/%s",
@@ -178,6 +190,8 @@ async def _run_batch_analysis_job(job_id: str, uid: int, assignment_id: int) -> 
         job["error"] = "服务内部错误，请重试"
         logging.getLogger("autograde.ai").exception("批次分析任务异常 job=%s", job_id)
     finally:
+        if job["status"] == "error":
+            job["error_stage"] = job.get("stage", "preparing")
         if llm_started and not recorded:
             await settle_call()
 
@@ -245,12 +259,14 @@ async def create_batch_analysis(
         "uid": user.uid,
         "assignment_id": body.assignment_id,
         "status": "running",
+        "stage": "preparing",
+        "model": ai_model(),
         "recv_chars": 0,
         "created": time.time(),
     }
     logger.info("批次分析任务创建 job=%s assignment=%s uid=%s", job_id, body.assignment_id, user.uid)
     asyncio.create_task(_run_batch_analysis_job(job_id, user.uid, body.assignment_id))
-    return {"job_id": job_id}
+    return {"job_id": job_id, "model": ai_model()}
 
 
 @ai_router.get("/batch-analysis-jobs/{job_id}")
@@ -261,9 +277,18 @@ async def get_batch_analysis_job(
     job = _BATCH_ANALYSIS_JOBS.get(job_id)
     if not job or job["uid"] != user.uid:
         raise HTTPException(status_code=404, detail="任务不存在或已过期，请重新发起")
-    result = {"status": job["status"], "recv_chars": job.get("recv_chars", 0)}
+    result = {
+        "status": job["status"],
+        "stage": job.get("stage", "preparing"),
+        "model": job.get("model") or ai_model(),
+        "job_id": job_id,
+        "elapsed_seconds": int(time.time() - job["created"]),
+        "recv_chars": job.get("recv_chars", 0),
+        "provider_request_id": job.get("provider_request_id", ""),
+    }
     if job["status"] == "done":
         result["result"] = job["result"]
     elif job["status"] == "error":
         result["error"] = job["error"]
+        result["error_stage"] = job.get("error_stage", "")
     return result

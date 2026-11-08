@@ -2,7 +2,7 @@
 
 - env：OPENAI_API_KEY（自行填入 .env）/ OPENAI_BASE_URL（预置 DeepSeek）/ AI_MODEL
 - AI 只做一次性加工与起草：parse_questions_stream 流式拆题返回草稿（不落库），
-  draft_explanation 基于题目+答案+错点起草讲解（人定稿后才入库）。
+  draft_explanation_stream 基于题目+答案+错点起草讲解（人定稿后才入库）。
 - key 未配置时抛 AIUnavailable，路由层转 503；超时 300s，路由层转 504，绝不让服务崩。
 """
 
@@ -52,6 +52,21 @@ def _client(max_retries: int | None = None) -> AsyncOpenAI:
 
 def _model() -> str:
     return os.getenv("AI_MODEL", "").strip() or DEFAULT_MODEL
+
+
+def _provider_request_id(raw_response) -> str:
+    headers = getattr(raw_response, "headers", {}) or {}
+    return str(headers.get("x-request-id", "") or "")[:128]
+
+
+async def _open_chat_stream(client: AsyncOpenAI, **kwargs):
+    raw = await client.chat.completions.with_raw_response.create(**kwargs)
+    return raw.parse(), _provider_request_id(raw)
+
+
+async def _open_responses_stream(client: AsyncOpenAI, **kwargs):
+    raw = await client.responses.with_raw_response.create(**kwargs)
+    return raw.parse(), _provider_request_id(raw)
 
 
 _PARSE_SYSTEM = """你是英语助教的题库录入助手。用户会粘贴一段从机构 PDF/Word 转换而来的作业答案原文，请把它结构化为严格 JSON。
@@ -250,10 +265,11 @@ class _StreamTimer:
 
 
 async def parse_questions_stream(raw_text: str) -> AsyncGenerator[dict, None]:
-    """流式拆题：边收边推 progress 事件（已闭合题目数，按 "seq" 出现次数近似），
-    结束后推 done 事件带完整解析结果与 token 用量。不落库，人工验收后才冻结。"""
-    client = _client()
-    stream = await client.chat.completions.create(
+    """流式拆题：推送真实连接阶段、接收字符数与近似题数，人工验收后才冻结。"""
+    client = _client(max_retries=0)
+    yield {"type": "stage", "stage": "connecting", "model": _model()}
+    stream, provider_request_id = await _open_chat_stream(
+        client,
         model=_model(),
         messages=[
             {"role": "system", "content": _PARSE_SYSTEM},
@@ -261,8 +277,9 @@ async def parse_questions_stream(raw_text: str) -> AsyncGenerator[dict, None]:
         ],
         temperature=0,
         stream=True,
-        stream_options={"include_usage": True},  # 末 chunk 带 usage，供成本记录
+        stream_options={"include_usage": True},
     )
+    yield {"type": "stage", "stage": "connected", "provider_request_id": provider_request_id}
     buf = ""
     done = 0
     usage = None
@@ -273,17 +290,24 @@ async def parse_questions_stream(raw_text: str) -> AsyncGenerator[dict, None]:
             fr = chunk.choices[0].finish_reason
             if fr:
                 finish_reason = fr
-            timer.on_chunk(chunk.choices[0].delta)
-            delta = chunk.choices[0].delta.content
-            if delta:
-                buf += delta
-                count = buf.count('"seq"')
-                if count != done:
-                    done = count
-                    yield {"type": "progress", "done": count}
-        u = _usage_dict(chunk)  # 独立检查：usage 挂在末尾 chunk，不假定 choices 为空
+            delta = chunk.choices[0].delta
+            timer.on_chunk(delta)
+            if getattr(delta, "reasoning_content", None):
+                yield {"type": "stage", "stage": "thinking"}
+            content = delta.content
+            if content:
+                buf += content
+                done = buf.count('"seq"')
+                yield {
+                    "type": "progress",
+                    "done": done,
+                    "recv_chars": len(buf),
+                    "stage": "receiving",
+                }
+        u = _usage_dict(chunk)
         if u:
             usage = u
+    yield {"type": "stage", "stage": "validating"}
     yield {
         "type": "done",
         "data": _validate_sections(buf),
@@ -291,13 +315,13 @@ async def parse_questions_stream(raw_text: str) -> AsyncGenerator[dict, None]:
         "finish_reason": finish_reason,
         "text_chars": len(buf),
         "metrics": timer.metrics(),
+        "provider_request_id": provider_request_id,
     }
 
 
-async def draft_explanation(question: Question, error_description: str) -> str:
-    """基于题干 + 标准答案 + 老师描述的错点，起草讲解文本（窗内可改，人定稿）。"""
-    client = _client()
-    t0 = time.monotonic()  # 非流式短调用：只记 total_ms
+async def draft_explanation_stream(question: Question, error_description: str) -> AsyncGenerator[dict, None]:
+    """流式起草讲解：连接与接收状态可见，正文仍由老师修改定稿。"""
+    client = _client(max_retries=0)
     user = (
         f"题目：{question.stem or '（见原题）'}\n"
         f"标准答案：{question.standard_answer}\n"
@@ -305,20 +329,49 @@ async def draft_explanation(question: Question, error_description: str) -> str:
         f"学生错点：{error_description}\n"
         "请起草讲解。"
     )
-    resp = await client.chat.completions.create(
+    yield {"type": "stage", "stage": "connecting", "model": _model()}
+    stream, provider_request_id = await _open_chat_stream(
+        client,
         model=_model(),
         messages=[
             {"role": "system", "content": _DRAFT_SYSTEM},
             {"role": "user", "content": user},
         ],
         temperature=0.7,
+        stream=True,
+        stream_options={"include_usage": True},
     )
-    text = (resp.choices[0].message.content or "").strip()
-    return {
-        "text": text,
-        "usage": _usage_dict(resp),
-        "finish_reason": resp.choices[0].finish_reason,
-        "metrics": {"ttft_ms": 0, "think_ms": 0, "total_ms": int((time.monotonic() - t0) * 1000)},
+    yield {"type": "stage", "stage": "connected", "provider_request_id": provider_request_id}
+    buf = ""
+    usage = None
+    finish_reason = None
+    timer = _StreamTimer()
+    async for chunk in stream:
+        if chunk.choices:
+            fr = chunk.choices[0].finish_reason
+            if fr:
+                finish_reason = fr
+            delta = chunk.choices[0].delta
+            timer.on_chunk(delta)
+            if getattr(delta, "reasoning_content", None):
+                yield {"type": "stage", "stage": "thinking"}
+            content = delta.content
+            if content:
+                buf += content
+                yield {"type": "delta", "text": content, "recv_chars": len(buf)}
+        current_usage = _usage_dict(chunk)
+        if current_usage:
+            usage = current_usage
+    if not buf.strip():
+        raise AIParseError("输出为空", raw=buf)
+    yield {
+        "type": "done",
+        "text": buf.strip(),
+        "usage": usage,
+        "finish_reason": finish_reason,
+        "text_chars": len(buf),
+        "metrics": timer.metrics(),
+        "provider_request_id": provider_request_id,
     }
 
 
@@ -364,17 +417,16 @@ def validate_ability_data(data: dict) -> dict:
 
 
 async def analyze_ability_stream(student_name: str, class_label: str, evidence_text: str) -> AsyncGenerator[dict, None]:
-    """基于三层证据材料流式生成能力分析报告草稿（严格 JSON，人定稿后才入库）。
-
-    必须流式：推理模型产出完整报告要数分钟，非流式调用 300s 整体超时会误杀；
-    流式下超时按 chunk 间隔计，思考再久也不断。边收边推 recv_chars 供进度展示。"""
-    client = _client(max_retries=0)  # 超时不自动重试（重试 = 用户干等两轮），重试权交给用户
+    """流式生成能力报告草稿；真实连接、推理、接收与校验阶段供轮询展示。"""
+    client = _client(max_retries=0)
     user = (
         f"学生：{student_name}（{class_label}）\n\n"
         f"{evidence_text}\n\n"
         "请按系统要求输出能力分析报告 JSON。"
     )
-    stream = await client.chat.completions.create(
+    yield {"type": "stage", "stage": "connecting", "model": _model()}
+    stream, provider_request_id = await _open_chat_stream(
+        client,
         model=_model(),
         messages=[
             {"role": "system", "content": _ABILITY_SYSTEM},
@@ -384,6 +436,7 @@ async def analyze_ability_stream(student_name: str, class_label: str, evidence_t
         stream=True,
         stream_options={"include_usage": True},
     )
+    yield {"type": "stage", "stage": "connected", "provider_request_id": provider_request_id}
     buf = ""
     usage = None
     finish_reason = None
@@ -393,14 +446,18 @@ async def analyze_ability_stream(student_name: str, class_label: str, evidence_t
             fr = chunk.choices[0].finish_reason
             if fr:
                 finish_reason = fr
-            timer.on_chunk(chunk.choices[0].delta)
-            delta = chunk.choices[0].delta.content
-            if delta:
-                buf += delta
-                yield {"type": "progress", "recv_chars": len(buf)}
+            delta = chunk.choices[0].delta
+            timer.on_chunk(delta)
+            if getattr(delta, "reasoning_content", None):
+                yield {"type": "stage", "stage": "thinking"}
+            content = delta.content
+            if content:
+                buf += content
+                yield {"type": "progress", "recv_chars": len(buf), "stage": "receiving"}
         u = _usage_dict(chunk)
         if u:
             usage = u
+    yield {"type": "stage", "stage": "validating"}
     try:
         data = validate_ability_data(_extract_json(buf))
     except AIParseError as e:
@@ -412,19 +469,22 @@ async def analyze_ability_stream(student_name: str, class_label: str, evidence_t
         "finish_reason": finish_reason,
         "text_chars": len(buf),
         "metrics": timer.metrics(),
+        "provider_request_id": provider_request_id,
     }
 
 
 async def analyze_batch_analysis_stream(
     class_label: str, assignment_label: str, evidence_text: str
 ) -> AsyncGenerator[dict, None]:
-    """流式生成五段 Markdown 批次分析；超时按 chunk 间隔计，正文长度用于任务轮询进度。"""
+    """流式生成五段 Markdown 批次分析，并推送真实连接与接收阶段。"""
     client = _client(max_retries=0)
     user = (
         f"班级：{class_label}\n批次：{assignment_label}\n\n"
         f"{evidence_text}\n\n请按系统要求输出五段 Markdown 批次分析报告。"
     )
-    stream = await client.chat.completions.create(
+    yield {"type": "stage", "stage": "connecting", "model": _model()}
+    stream, provider_request_id = await _open_chat_stream(
+        client,
         model=_model(),
         messages=[
             {"role": "system", "content": _BATCH_ANALYSIS_SYSTEM},
@@ -434,6 +494,7 @@ async def analyze_batch_analysis_stream(
         stream=True,
         stream_options={"include_usage": True},
     )
+    yield {"type": "stage", "stage": "connected", "provider_request_id": provider_request_id}
     buf = ""
     usage = None
     finish_reason = None
@@ -443,14 +504,18 @@ async def analyze_batch_analysis_stream(
             fr = chunk.choices[0].finish_reason
             if fr:
                 finish_reason = fr
-            timer.on_chunk(chunk.choices[0].delta)
-            delta = chunk.choices[0].delta.content
-            if delta:
-                buf += delta
-                yield {"type": "progress", "recv_chars": len(buf)}
+            delta = chunk.choices[0].delta
+            timer.on_chunk(delta)
+            if getattr(delta, "reasoning_content", None):
+                yield {"type": "stage", "stage": "thinking"}
+            content_delta = delta.content
+            if content_delta:
+                buf += content_delta
+                yield {"type": "progress", "recv_chars": len(buf), "stage": "receiving"}
         u = _usage_dict(chunk)
         if u:
             usage = u
+    yield {"type": "stage", "stage": "validating"}
     content = buf.strip()
     headings = [line.strip() for line in content.splitlines() if line.startswith("#")]
     expected = [f"## {heading}" for heading in _BATCH_ANALYSIS_HEADINGS]
@@ -463,6 +528,7 @@ async def analyze_batch_analysis_stream(
         "finish_reason": finish_reason,
         "text_chars": len(buf),
         "metrics": timer.metrics(),
+        "provider_request_id": provider_request_id,
     }
 
 
@@ -490,12 +556,15 @@ def _responses_usage_dict(response) -> dict | None:
 
 async def _chat_web_search_stream(messages: list[dict]) -> AsyncGenerator[dict, None]:
     client = _client(max_retries=0)
-    stream = await client.responses.create(
+    yield {"type": "stage", "stage": "connecting", "model": _model()}
+    stream, provider_request_id = await _open_responses_stream(
+        client,
         model=_model(),
         input=[{"role": m["role"], "content": m["content"]} for m in messages],
         stream=True,
         tools=[{"type": "web_search"}],
     )
+    yield {"type": "stage", "stage": "connected", "provider_request_id": provider_request_id}
     usage = None
     finish_reason = None
     text_chars = 0
@@ -504,11 +573,15 @@ async def _chat_web_search_stream(messages: list[dict]) -> AsyncGenerator[dict, 
     async for event in stream:
         timer.on_response_event(event)
         event_type = getattr(event, "type", "")
-        if event_type == "response.output_text.delta":
+        if event_type.startswith("response.reasoning"):
+            yield {"type": "stage", "stage": "thinking"}
+        elif event_type == "response.web_search_call.in_progress":
+            yield {"type": "stage", "stage": "searching"}
+        elif event_type == "response.output_text.delta":
             delta = getattr(event, "delta", "")
             if delta:
                 text_chars += len(delta)
-                yield {"type": "delta", "text": delta}
+                yield {"type": "delta", "text": delta, "recv_chars": text_chars}
         elif event_type == "response.web_search_call.completed":
             web_search_count += 1
         elif event_type == "response.completed":
@@ -532,16 +605,19 @@ async def _chat_web_search_stream(messages: list[dict]) -> AsyncGenerator[dict, 
         "text_chars": text_chars,
         "metrics": timer.metrics(),
         "web_search_count": web_search_count,
+        "provider_request_id": provider_request_id,
     }
 
 
 _WEEKLY_HEADINGS = ["本周一句话", "数据亮点", "异常与关注", "下周观察点"]
-_WEEKLY_SYSTEM = """你是英语助教个人周报的撰写者。根据提供的确定性统计，输出四段 Markdown，标题严格依次为「## 本周一句话」「## 数据亮点」「## 异常与关注」「## 下周观察点」。每段 1-3 个要点，必须引用具体数字和批次/板块名称，突出变化、异常与值得关注的信息。禁止提供备课或教学建议，禁止因果臆测，禁止空泛鼓励，不得把相关性写成原因。数据不足时明确说明，不得补造。"""
+_WEEKLY_SYSTEM = """你是英语助教个人周报的撰写者。根据提供的确定性统计，输出四段 Markdown，标题严格依次为「## 本周一句话」「## 数据亮点」「## 异常与关注」「## 下周观察点」。每段 1-3 个简洁要点，关键数字、批次与板块名称用 **粗体** 标出，突出变化、异常与值得关注的信息。禁止提供备课或教学建议，禁止因果臆测，禁止空泛鼓励，不得把相关性写成原因。数据不足时明确说明，不得补造。"""
 
 
 async def analyze_weekly_stream(evidence_text: str) -> AsyncGenerator[dict, None]:
     client = _client(max_retries=0)
-    stream = await client.chat.completions.create(
+    yield {"type": "stage", "stage": "connecting", "model": _model()}
+    stream, provider_request_id = await _open_chat_stream(
+        client,
         model=_model(),
         messages=[
             {"role": "system", "content": _WEEKLY_SYSTEM},
@@ -551,6 +627,7 @@ async def analyze_weekly_stream(evidence_text: str) -> AsyncGenerator[dict, None
         stream=True,
         stream_options={"include_usage": True},
     )
+    yield {"type": "stage", "stage": "connected", "provider_request_id": provider_request_id}
     buf = ""
     usage = None
     finish_reason = None
@@ -560,14 +637,18 @@ async def analyze_weekly_stream(evidence_text: str) -> AsyncGenerator[dict, None
             fr = chunk.choices[0].finish_reason
             if fr:
                 finish_reason = fr
-            timer.on_chunk(chunk.choices[0].delta)
-            delta = chunk.choices[0].delta.content
-            if delta:
-                buf += delta
-                yield {"type": "progress", "recv_chars": len(buf)}
+            delta = chunk.choices[0].delta
+            timer.on_chunk(delta)
+            if getattr(delta, "reasoning_content", None):
+                yield {"type": "stage", "stage": "thinking"}
+            content_delta = delta.content
+            if content_delta:
+                buf += content_delta
+                yield {"type": "progress", "recv_chars": len(buf), "stage": "receiving"}
         u = _usage_dict(chunk)
         if u:
             usage = u
+    yield {"type": "stage", "stage": "validating"}
     content = buf.strip()
     headings = [line.strip() for line in content.splitlines() if line.startswith("#")]
     expected = [f"## {heading}" for heading in _WEEKLY_HEADINGS]
@@ -580,6 +661,7 @@ async def analyze_weekly_stream(evidence_text: str) -> AsyncGenerator[dict, None
         "finish_reason": finish_reason,
         "text_chars": len(buf),
         "metrics": timer.metrics(),
+        "provider_request_id": provider_request_id,
     }
 
 
@@ -591,13 +673,16 @@ async def chat_stream(messages: list[dict], web_search: bool = False) -> AsyncGe
             yield event
         return
     client = _client(max_retries=0)
-    stream = await client.chat.completions.create(
+    yield {"type": "stage", "stage": "connecting", "model": _model()}
+    stream, provider_request_id = await _open_chat_stream(
+        client,
         model=_model(),
         messages=[{"role": m["role"], "content": m["content"]} for m in messages],
         temperature=0.7,
         stream=True,
         stream_options={"include_usage": True},
     )
+    yield {"type": "stage", "stage": "connected", "provider_request_id": provider_request_id}
     usage = None
     finish_reason = None
     text_chars = 0
@@ -607,11 +692,14 @@ async def chat_stream(messages: list[dict], web_search: bool = False) -> AsyncGe
             fr = chunk.choices[0].finish_reason
             if fr:
                 finish_reason = fr
-            timer.on_chunk(chunk.choices[0].delta)
-            delta = chunk.choices[0].delta.content
-            if delta:
-                text_chars += len(delta)
-                yield {"type": "delta", "text": delta}
+            delta = chunk.choices[0].delta
+            timer.on_chunk(delta)
+            if getattr(delta, "reasoning_content", None):
+                yield {"type": "stage", "stage": "thinking"}
+            content = delta.content
+            if content:
+                text_chars += len(content)
+                yield {"type": "delta", "text": content, "recv_chars": text_chars}
         u = _usage_dict(chunk)
         if u:
             usage = u
@@ -622,6 +710,7 @@ async def chat_stream(messages: list[dict], web_search: bool = False) -> AsyncGe
         "text_chars": text_chars,
         "metrics": timer.metrics(),
         "web_search_count": 0,
+        "provider_request_id": provider_request_id,
     }
 
 
@@ -634,7 +723,7 @@ __all__ = [
     "analyze_batch_analysis_stream",
     "analyze_weekly_stream",
     "chat_stream",
-    "draft_explanation",
+    "draft_explanation_stream",
     "ensure_available",
     "parse_questions_stream",
     "validate_ability_data",

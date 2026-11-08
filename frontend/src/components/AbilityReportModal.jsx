@@ -3,6 +3,7 @@ import { App as AntApp, Button, DatePicker, Input, InputNumber, Modal } from "an
 import { apiGet, apiPost } from "../api";
 import { ABILITY_DIMS } from "../utils/ability";
 import { clientLog } from "../utils/clientLog";
+import AICallStatus from "./AICallStatus";
 
 // 能力报告生成弹窗：选范围 → 任务制轮询（ESA 60s 免疫）→ 草稿编辑定稿 → 存档。
 // 草稿不落库（AI 起草、人定稿铁律）；tags/evidence 只读，文本与分数可改。
@@ -17,7 +18,7 @@ export default function AbilityReportModal({ open, onClose, studentId, onSaved }
   const [estimate, setEstimate] = useState(null);
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [recvChars, setRecvChars] = useState(0);
+  const [progress, setProgress] = useState(null);
   const [draft, setDraft] = useState(null); // AI 草稿（含 range/assignment_count/usage）
   const [saving, setSaving] = useState(false);
   const abortRef = useRef(null);
@@ -47,7 +48,7 @@ export default function AbilityReportModal({ open, onClose, studentId, onSaved }
       setRange(null);
       setEstimate(null);
       setElapsed(0);
-      setRecvChars(0);
+      setProgress(null);
     }
     return () => {
       abortRef.current?.abort();
@@ -60,30 +61,35 @@ export default function AbilityReportModal({ open, onClose, studentId, onSaved }
     abortRef.current = controller;
     setRunning(true);
     setElapsed(0);
-    setRecvChars(0);
+    setProgress({ stage: "preparing", recv_chars: 0 });
     const started = Date.now();
     timerRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
     clientLog.add("ui", `report_generate student=${studentId}`);
     try {
-      const { job_id: jobId } = await apiPost("/ai/ability-report", {
+      const created = await apiPost("/ai/ability-report", {
         student_id: Number(studentId),
         range_start: toDay(range?.[0]),
         range_end: toDay(range?.[1]),
       });
+      const jobId = created.job_id;
+      setProgress((prev) => ({ ...prev, ...created }));
       for (;;) {
-        await new Promise((r) => setTimeout(r, 2000));
+        await new Promise((r) => setTimeout(r, 1000));
         if (controller.signal.aborted) return;
         const job = await apiGet(`/ai/ability-jobs/${jobId}`);
-        if (job.recv_chars != null) setRecvChars(job.recv_chars);
+        setProgress(job);
         if (job.status === "done") {
-          clientLog.add("ui", `report_job_done student=${studentId} ${job.elapsed}s`);
+          clientLog.add("ui", `report_job_done student=${studentId} ${job.elapsed_seconds}s`);
           setDraft(job.data);
           break;
         }
         if (job.status === "error") throw new Error(job.error || "分析失败");
       }
     } catch (e) {
-      if (e.name !== "AbortError") message.error(e.message);
+      if (e.name !== "AbortError") {
+        setProgress((prev) => ({ ...prev, status: "error", error: e.message }));
+        message.error(e.message);
+      }
     } finally {
       clearInterval(timerRef.current);
       setRunning(false);
@@ -185,11 +191,12 @@ export default function AbilityReportModal({ open, onClose, studentId, onSaved }
               disabled={estimate !== null && !estimate.has_data}
               onClick={generate}
             >
-              {running
-                ? `分析中 · 已用 ${elapsed} 秒${recvChars > 0 ? ` · 已接收 ${recvChars.toLocaleString()} 字符` : ""}`
-                : "开始分析"}
+              {running ? "分析中" : "开始分析"}
             </Button>
           </div>
+          {(running || progress?.status === "error") && (
+            <AICallStatus progress={progress} elapsed={elapsed} />
+          )}
         </div>
       )}
 
