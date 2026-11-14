@@ -24,9 +24,18 @@ from models import (
     Question,
     Student,
     Submission,
+    TrackingItem,
+    TrackingMark,
     utcnow,
 )
 from rating import get_thresholds, gpa_for_rating, rating_for
+from tracking import (
+    TrackingItemIn,
+    clear_main_manual_mark,
+    custom_tracking_items,
+    replace_tracking_items,
+    tracking_item_brief,
+)
 from routers.classes import StudentsBatchIn, _import_students
 from serializers import (
     GRADED_STATUSES,
@@ -237,6 +246,9 @@ async def get_assignment(
         **await _assignment_progress(db, a),
         "class": class_brief(c, a) if c else None,
         "sections": sections,
+        "tracking_items": [
+            tracking_item_brief(item) for item in await custom_tracking_items(db, a.id)
+        ],
         "total_weight": round(sum(q.score_weight for q in questions), 2),
     }
 
@@ -387,6 +399,7 @@ class AssignmentPatch(BaseModel):
     level: int | None = None
     term: str | None = None
     note: str | None = Field(default=None, max_length=128)
+    tracking_items: list[TrackingItemIn] | None = None
 
 
 @router.patch("/{assignment_id}")
@@ -458,7 +471,26 @@ async def update_assignment(
             for sub in subs:
                 sub.preview_wrong = ""
     sync_unit_label(a)
-    await db.commit()
+    try:
+        tracking_change = None
+        if body.tracking_items is not None:
+            tracking_change = await replace_tracking_items(db, a.id, body.tracking_items)
+        await db.commit()
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        await db.rollback()
+        raise
+    if tracking_change:
+        logger.info(
+            "tracking_config uid=%s assignment=%s updated=%s inserted=%s removed=%s",
+            user.uid,
+            a.id,
+            tracking_change["updated"],
+            tracking_change["inserted"],
+            tracking_change["removed"],
+        )
     return assignment_brief(a)
 
 
@@ -471,6 +503,9 @@ async def delete_assignment(
     a = await owned_assignment(db, assignment_id, user)
     assignment_id = a.id  # slug 入口归一化为主键，正文查询不受影响
     question_ids = select(Question.id).where(Question.assignment_id == assignment_id)
+    tracking_item_ids = select(TrackingItem.id).where(TrackingItem.assignment_id == assignment_id)
+    await db.execute(delete(TrackingMark).where(TrackingMark.item_id.in_(tracking_item_ids)))
+    await db.execute(delete(TrackingItem).where(TrackingItem.assignment_id == assignment_id))
     await db.execute(delete(ErrorRecord).where(ErrorRecord.question_id.in_(question_ids)))
     await db.execute(delete(Submission).where(Submission.assignment_id == assignment_id))
     await db.execute(
@@ -914,6 +949,8 @@ async def _save_grading(
         sub.rating = rating
         sub.rating_override = rating_override
         sub.preview_wrong = json.dumps(preview_wrong)
+        if body.status == "未交":
+            await clear_main_manual_mark(db, assignment_id, student_id)
 
         # 错题记录：先删该学生该批次旧记录，再插新
         await db.execute(

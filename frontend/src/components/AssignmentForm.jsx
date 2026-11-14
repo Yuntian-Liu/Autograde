@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { App as AntApp, DatePicker, Input, InputNumber, Modal, Select, Switch } from "antd";
 import dayjs from "dayjs";
 import { apiPatch, apiPost } from "../api";
+import { clientLog } from "../utils/clientLog";
 
 // 册 → 单元号范围（与后端 feedback.py TERM_UNIT_RANGE 一致）：A=U1-6 上册，B=U7-12 下册
 const TERM_UNIT_RANGE = { A: [1, 6], B: [7, 12] };
@@ -23,7 +24,7 @@ function unitInRange(value, term) {
 
 // 批次创建/编辑表单：课型默认值按班级系列预填（WW→L，NG→Day），可切换
 export default function AssignmentForm({ open, onClose, classInfo, assignment, onSaved, temp = false }) {
-  const { message } = AntApp.useApp();
+  const { message, modal } = AntApp.useApp();
   const editing = Boolean(assignment);
   const initialTerm = classInfo?.term || "A";
   const initialUnit = (TERM_UNIT_RANGE[initialTerm] || [1, 12])[0];
@@ -41,6 +42,7 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
   const [hasPreview, setHasPreview] = useState(false);
   const [previewUnitNo, setPreviewUnitNo] = useState(initialUnit);
   const [previewHalf, setPreviewHalf] = useState(initialTerm);
+  const [trackingItems, setTrackingItems] = useState([]);
   const [saving, setSaving] = useState(false);
   const activeTerm = temp ? term : classInfo?.term;
   const [lo, hi] = TERM_UNIT_RANGE[activeTerm] || [1, 12];
@@ -56,6 +58,9 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
     setLevel(temp ? assignmentClass?.level ?? 1 : classInfo.level ?? 1);
     setTerm(nextTerm || "A");
     setNote(temp ? assignment?.note || "" : "");
+    setTrackingItems(
+      (assignment?.tracking_items || []).map((item) => ({ id: item.id, name: item.name }))
+    );
     if (assignment) {
       setUnitNo(assignment.unit_no);
       setLessonType(assignment.lesson_type);
@@ -92,10 +97,48 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
     setPreviewHalf(value);
   }
 
+  function moveTrackingItem(index, offset) {
+    setTrackingItems((current) => {
+      const target = index + offset;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  function removeTrackingItem(index) {
+    const item = trackingItems[index];
+    const remove = () => setTrackingItems((current) => current.filter((_, i) => i !== index));
+    if (!item?.id) {
+      remove();
+      return;
+    }
+    modal.confirm({
+      title: "删除提交项目",
+      content: `删除「${item.name}」将同时清除该项目下所有学生的登记。`,
+      okText: "确认删除",
+      cancelText: "取消",
+      okButtonProps: { danger: true },
+      centered: true,
+      zIndex: 1010,
+      onOk: remove,
+    });
+  }
+
   async function submit() {
     if (saving) return;
     if (hasPreview && (previewUnitNo === null || !previewHalf)) {
       message.error("开启预习时必须填写预习单元号与上下册");
+      return;
+    }
+    const trackingNames = trackingItems.map((item) => item.name.trim());
+    if (trackingNames.some((name) => !name)) {
+      message.error("提交项目名称不能为空");
+      return;
+    }
+    if (new Set(trackingNames.map((name) => name.toLocaleLowerCase())).size !== trackingNames.length) {
+      message.error("提交项目不能重名");
       return;
     }
     const payload = {
@@ -108,19 +151,36 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
       lesson_no: temp ? 0 : lessonNo,
       class_time: temp ? "" : classDate && classHM ? `${classDate.format("YYYY-MM-DD")} ${classHM}` : "",
       content: content.trim(),
+      tracking_items: editing
+        ? trackingItems.map((item) => ({ id: item.id, name: item.name.trim() }))
+        : trackingNames,
       ...(temp ? { series, level, term, note: note.trim() } : {}),
     };
     setSaving(true);
     try {
+      let saved;
       if (editing) {
-        await apiPatch(`/assignments/${assignment.id}`, payload);
+        saved = await apiPatch(`/assignments/${assignment.id}`, payload);
       } else {
-        await apiPost(`/classes/${classInfo.id}/assignments`, payload);
+        saved = await apiPost(`/classes/${classInfo.id}/assignments`, payload);
       }
+      const original = assignment?.tracking_items || [];
+      const keepIds = new Set(trackingItems.map((item) => item.id).filter(Boolean));
+      clientLog.operation("tracking_config", "success", {
+        assignment: saved.id,
+        added: trackingItems.filter((item) => !item.id).length,
+        removed: original.filter((item) => !keepIds.has(item.id)).length,
+        total: trackingItems.length,
+      });
       message.success(editing ? "批次已更新" : "批次已创建");
       onSaved();
       onClose();
     } catch (e) {
+      clientLog.operation("tracking_config", "error", {
+        assignment: assignment?.id,
+        total: trackingItems.length,
+        error: e.message,
+      });
       message.error(e.message);
     } finally {
       setSaving(false);
@@ -137,7 +197,7 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
       title={editing ? "编辑批次" : "新建批次"}
       okText={editing ? "保存" : "创建"}
       cancelText="取消"
-      width={440}
+      width={560}
       destroyOnHidden
     >
       <div className="form-grid">
@@ -256,6 +316,58 @@ export default function AssignmentForm({ open, onClose, classInfo, assignment, o
             )}
           </>
         )}
+      </div>
+      <div className="tracking-config">
+        <div className="tracking-config-head">
+          <span className="flab">提交项目</span>
+          <button
+            type="button"
+            className="btn"
+            disabled={saving}
+            onClick={() => setTrackingItems((current) => [...current, { id: null, name: "" }])}
+          >
+            添加项目
+          </button>
+        </div>
+        {trackingItems.map((item, index) => (
+          <div className="tracking-config-row" key={item.id || `new-${index}`}>
+            <Input
+              value={item.name}
+              maxLength={64}
+              placeholder="如 Workbook"
+              disabled={saving}
+              onChange={(e) =>
+                setTrackingItems((current) =>
+                  current.map((entry, i) => (i === index ? { ...entry, name: e.target.value } : entry))
+                )
+              }
+            />
+            <button
+              type="button"
+              className="btn tracking-order-btn"
+              disabled={saving || index === 0}
+              onClick={() => moveTrackingItem(index, -1)}
+            >
+              上移
+            </button>
+            <button
+              type="button"
+              className="btn tracking-order-btn"
+              disabled={saving || index === trackingItems.length - 1}
+              onClick={() => moveTrackingItem(index, 1)}
+            >
+              下移
+            </button>
+            <button
+              type="button"
+              className="btn danger tracking-order-btn"
+              disabled={saving}
+              onClick={() => removeTrackingItem(index)}
+            >
+              删除
+            </button>
+          </div>
+        ))}
       </div>
     </Modal>
   );

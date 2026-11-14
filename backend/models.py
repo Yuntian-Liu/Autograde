@@ -1,4 +1,4 @@
-"""Autograde 数据模型 —— 9 张表，对应 DEVELOPMENT.md「三、数据模型草案」。
+"""Autograde 数据模型。
 
 字段以文档为准；created_at 等为工程化补充。
 所有枚举值直接用中文字符串入库（一切皆为数据，前端不做翻译层）。
@@ -144,6 +144,31 @@ class Submission(Base):
     # 预习错题题号（JSON 数组，如 [1,3]）；不算分，仅驱动「预习有错题」话术计数
     preview_wrong: Mapped[str] = mapped_column(Text, default="")
     graded_at: Mapped[datetime | None] = mapped_column(default=utcnow, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class TrackingItem(Base):
+    """批次提交登记列：每批一个固定主作业项，其余为老师自定义项目。"""
+
+    __tablename__ = "tracking_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    assignment_id: Mapped[int] = mapped_column(ForeignKey("assignments.id"), index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    is_main: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class TrackingMark(Base):
+    """学生手动提交打勾；有行即已交，无行即待提交。"""
+
+    __tablename__ = "tracking_marks"
+    __table_args__ = (UniqueConstraint("item_id", "student_id", name="uq_tracking_mark_student"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("tracking_items.id"), index=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 

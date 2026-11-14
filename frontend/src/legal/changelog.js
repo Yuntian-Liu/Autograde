@@ -1,10 +1,10 @@
 // 版本日志数据源（设置页「版本日志」弹窗 + 登录后更新提醒弹窗；发版时与 CHANGELOG.md 同步）
 // 结构：minor 为主条目，patch 嵌套在 patches 数组里（主界面只呈现 minor，展开后见 patch）
 // ⚠️ 公开文件：不得出现私人信息
-export const APP_VERSION = "V0.24.0";
+export const APP_VERSION = "V0.25.0";
 
 /** 协议版本（用户协议/隐私政策最后更新日期，改协议时同步递增；触发登录后协议变更提醒） */
-export const AGREEMENT_VERSION = "2026-11-08";
+export const AGREEMENT_VERSION = "2026-11-14";
 
 /** 取全站最新更新条目（最新 minor 有 patch 取最新 patch，否则取最新 minor） */
 export function getLatestUpdate() {
@@ -18,6 +18,18 @@ export function getLatestUpdate() {
 }
 
 export const CHANGELOG = [
+  {
+    version: "V0.25.0",
+    date: "2026-11-14",
+    items: [
+      "新增批次「提交登记」：新建或编辑批次时可自定义 Workbook、Reciting、Dictation、Essay 等项目，支持改名、排序与删除，本批名单共用",
+      "批次详情新增全班提交矩阵，逐人逐项目以「待提交 / 打勾」呈现，表头显示已交人数；项目较多时可横向滚动，姓名保持可见",
+      "标准批改与快捷批改均可登记当前学生，点击即自动保存并明确显示结果；保存中关闭或返回会强提醒，不影响未保存的批改草稿",
+      "矩阵与弹窗固定显示保存中、已同步或失败；标准批改同步状态移至等级行最右侧，保存操作区保持单行",
+      "主作业支持手动登记与批改自动打勾；自定义登记独立于成绩、GPA、排名、反馈和批改进度，清空题库也不会丢失",
+      "新增「复制表格」：按当前顺序生成 TSV，直接粘贴到腾讯文档或 Excel 即可按行列展开；诊断与隐私说明同步更新（协议版本 2026-11-14）",
+    ],
+  },
   {
     version: "V0.24.0",
     date: "2026-11-08",

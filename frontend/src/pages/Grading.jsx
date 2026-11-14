@@ -12,6 +12,8 @@ import SaveStatus from "../components/SaveStatus";
 import ScoreViewToggle from "../components/ScoreViewToggle";
 import StudentImportModal from "../components/StudentImportModal";
 import QuestionEditor from "../components/QuestionEditor";
+import TrackingModal from "../components/TrackingModal";
+import useTracking from "../utils/useTracking";
 import {
   STATUS_META,
   deadlineText,
@@ -99,6 +101,15 @@ export default function Grading() {
   const [snapshotMap, setSnapshotMap] = useState({}); // studentId -> 最新反馈快照原文（落库真值）
   const [dirtyMap, setDirtyMap] = useState({}); // studentId -> 有未保存的表单编辑（脏标记）
   const [thresholds, setThresholds] = useState(null); // 生效分数线（null=用默认校准值）
+  const [trackingOpen, setTrackingOpen] = useState(false);
+  const {
+    tracking,
+    error: trackingError,
+    saveFailed: trackingSaveFailed,
+    reload: reloadTracking,
+    toggleCell: toggleTrackingCell,
+    pendingCells: trackingPendingCells,
+  } = useTracking(assignmentId);
 
   useEffect(() => {
     Promise.all([
@@ -282,18 +293,21 @@ export default function Grading() {
     if (list.length) setRatingPickId(list[Math.floor(Math.random() * list.length)].id);
   }, [ratingGroup, currentId, ratingPhrases]);
 
-  // 防丢保护：任何学生有未保存改动（含预习勾选）时，所有离开路径都要确认
-  const blocking = Object.values(dirtyMap).some(Boolean);
+  // 防丢保护：未保存批改或登记请求进行中时，所有离开路径都要确认
+  const trackingSaving = trackingPendingCells.size > 0;
+  const blocking = Object.values(dirtyMap).some(Boolean) || trackingSaving;
 
   // ① 页面内导航拦截（返回批次/面包屑/任意路由跳转；useBlocker 需 data router）
   const blocker = useBlocker(blocking);
   useEffect(() => {
     if (blocker.state !== "blocked") return;
     modal.confirm({
-      title: "有未保存的修改",
-      content: "确定离开？未保存的修改将丢失。",
+      title: trackingSaving ? "登记正在保存" : "有未保存的修改",
+      content: trackingSaving
+        ? "保存尚未完成，确定离开？这次登记的结果可能无法确认。"
+        : "确定离开？未保存的修改将丢失。",
       okText: "离开",
-      cancelText: "继续批改",
+      cancelText: "继续等待",
       centered: true,
       okButtonProps: { danger: true },
       onOk: () => blocker.proceed(),
@@ -662,6 +676,7 @@ export default function Grading() {
         preview_wrong: previewChecked,
       });
       const fresh = await apiGet(`/assignments/${assignmentId}/students`);
+      await reloadTracking();
       setStudents(fresh);
       maybeCelebrate(fresh);
       // 快照回显：落库后预览立即显示存档原文；dirty 清除
@@ -718,6 +733,7 @@ export default function Grading() {
         },
       });
       const fresh = await apiGet(`/assignments/${assignmentId}/students`);
+      await reloadTracking();
       const sourceFresh = fresh.find((s) => s.id === current.id);
       const targetFresh = fresh.find((s) => s.id === transferTarget.id);
       if (!sourceFresh || !targetFresh) throw new Error("迁移已保存，名单刷新失败，请刷新页面");
@@ -1114,6 +1130,13 @@ export default function Grading() {
                       ? `已手动覆盖为 ${rating} · 自动预选 ${autoRating}`
                       : `已按 ${score} 自动预选 ${autoRating} · 可手动调整`}
                   </span>
+                  <span className="rating-save-status">
+                    <SaveStatus
+                      dirty={Boolean(dirtyMap[current?.id])}
+                      saving={saving || transferring}
+                      failed={saveFailed}
+                    />
+                  </span>
                 </div>
               )}
 
@@ -1146,12 +1169,12 @@ export default function Grading() {
                   options={STATUS_OPTIONS}
                   style={{ width: 110 }}
                 />
-                <button className="btn primary" onClick={() => saveGrading()} disabled={saving}>
+                <button className="btn primary" onClick={() => saveGrading()} disabled={saving || trackingSaving}>
                   {saving ? "保存中…" : "保存批改"}
                 </button>
                 <button
                   className="btn"
-                  disabled={saving}
+                  disabled={saving || trackingSaving}
                   title="线下已批改：勾选错题只为算分存档，反馈粘贴已发送的原文"
                   onClick={() => {
                     setRetroText("");
@@ -1161,10 +1184,13 @@ export default function Grading() {
                   补录保存
                 </button>
                 <AnswerFloat assignment={assignment} />
+                <button className="btn" onClick={() => setTrackingOpen(true)}>
+                  提交登记
+                </button>
                 <button
                   className="btn"
                   onClick={openTransfer}
-                  disabled={saving || transferring || statusDraft === "待批改"}
+                  disabled={saving || trackingSaving || transferring || statusDraft === "待批改"}
                   title="将当前整份批改转给本批次的另一名学生"
                 >
                   迁移批改
@@ -1172,13 +1198,15 @@ export default function Grading() {
                 <button className="btn danger" onClick={() => setClearOpen(true)}>
                   清空勾选
                 </button>
-                <span className="save-row-status">
-                  <SaveStatus
-                    dirty={Boolean(dirtyMap[current?.id])}
-                    saving={saving || transferring}
-                    failed={saveFailed}
-                  />
-                </span>
+                {statusDraft === "未交" && (
+                  <span className="save-row-status">
+                    <SaveStatus
+                      dirty={Boolean(dirtyMap[current?.id])}
+                      saving={saving || transferring}
+                      failed={saveFailed}
+                    />
+                  </span>
+                )}
               </div>
 
               {issuePhrases.length > 0 && (
@@ -1603,6 +1631,17 @@ export default function Grading() {
           将清空当前学生（{current?.name}）的全部勾选与已定稿内容。
         </p>
       </Modal>
+
+      <TrackingModal
+        open={trackingOpen}
+        onClose={() => setTrackingOpen(false)}
+        student={tracking?.students.find((student) => student.id === currentId) || null}
+        items={tracking?.items || []}
+        pendingCells={trackingPendingCells}
+        onToggle={toggleTrackingCell}
+        error={trackingError}
+        saveFailed={trackingSaveFailed}
+      />
 
       <Modal
         centered

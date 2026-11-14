@@ -19,6 +19,7 @@ from feedback import (
 )
 from models import Assignment, Class, ErrorRecord, Question, Student, Submission
 from rating import average_gpa, gpa_for_rating
+from tracking import create_tracking_items
 from serializers import (
     GRADED_STATUSES,
     PROCESSED_STATUSES,
@@ -84,6 +85,7 @@ class AssignmentCreate(BaseModel):
     level: int | None = None
     term: str | None = None
     note: str = Field(default="", max_length=128)
+    tracking_items: list[str] = []
 
 
 async def _class_stats(db: AsyncSession, class_id: int) -> dict:
@@ -433,8 +435,17 @@ async def create_assignment(
     a.slug = await unique_slug(db)
     a.code = await issue_code(db, "A", c, a)
     sync_unit_label(a)
-    db.add(a)
-    await db.commit()
+    try:
+        db.add(a)
+        await db.flush()
+        create_tracking_items(db, a.id, body.tracking_items)
+        await db.commit()
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        await db.rollback()
+        raise
     return assignment_brief(a)
 
 

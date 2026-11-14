@@ -172,6 +172,7 @@
 .grade-pick button:hover { border-color: var(--accent); color: var(--accent); }
 .grade-pick button.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
 .auto-tag { font-size: var(--t-caption); color: var(--accent); }
+.rating-save-status { margin-left: auto; display: inline-flex; align-items: center; }
 
 /* 失分板块行：评级话术 {lost_sections} 的编辑入口（自动预填 + 点击改写） */
 .lost-row {

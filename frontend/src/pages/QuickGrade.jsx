@@ -10,6 +10,8 @@ import SaveStatus from "../components/SaveStatus";
 import StudentImportModal from "../components/StudentImportModal";
 import PageSkeleton from "../components/PageSkeleton";
 import ScoreViewToggle from "../components/ScoreViewToggle";
+import TrackingModal from "../components/TrackingModal";
+import useTracking from "../utils/useTracking";
 import { useScoreView } from "../contexts/ScoreViewContext";
 import { fmtGpa, gpaForRating } from "../gpa";
 import { STATUS_META, scoreTone, seriesLabel } from "../meta";
@@ -41,7 +43,16 @@ export default function QuickGrade() {
   const [saveFailed, setSaveFailed] = useState(false); // 上次批量保存有失败（状态灯红灯）
   const [thresholds, setThresholds] = useState(null); // 生效分数线（null=用默认校准值）
   const [celebrate, setCelebrate] = useState(false); // 全班改完撒花（每次进页最多一次）
+  const [trackingStudentId, setTrackingStudentId] = useState(null);
   const celebratedRef = useRef(false);
+  const {
+    tracking,
+    error: trackingError,
+    saveFailed: trackingSaveFailed,
+    reload: reloadTracking,
+    toggleCell: toggleTrackingCell,
+    pendingCells: trackingPendingCells,
+  } = useTracking(id);
 
   const load = useCallback(() => {
     Promise.all([
@@ -177,6 +188,7 @@ export default function QuickGrade() {
       preview_wrong: [...(previewWrongMap[sid] || [])].sort((a, b) => a - b),
     });
     const fresh = await apiGet(`/assignments/${id}/students`);
+    await reloadTracking();
     setStudents(fresh);
     maybeCelebrate(fresh);
     setDirtyMap((prev) => ({ ...prev, [sid]: false }));
@@ -230,18 +242,21 @@ export default function QuickGrade() {
     }
   }
 
-  // 防丢保护：任何学生有未保存改动（含预习格）时，所有离开路径都要确认
-  const blocking = Object.values(dirtyMap).some(Boolean);
+  // 防丢保护：未保存批改或登记请求进行中时，所有离开路径都要确认
+  const trackingSaving = trackingPendingCells.size > 0;
+  const blocking = Object.values(dirtyMap).some(Boolean) || trackingSaving;
 
   // ① 页面内导航拦截（返回批次/面包屑/任意路由跳转；useBlocker 需 data router）
   const blocker = useBlocker(blocking);
   useEffect(() => {
     if (blocker.state !== "blocked") return;
     modal.confirm({
-      title: "有未保存的修改",
-      content: "确定离开？未保存的修改将丢失。",
+      title: trackingSaving ? "登记正在保存" : "有未保存的修改",
+      content: trackingSaving
+        ? "保存尚未完成，确定离开？这次登记的结果可能无法确认。"
+        : "确定离开？未保存的修改将丢失。",
       okText: "离开",
-      cancelText: "继续批改",
+      cancelText: "继续等待",
       centered: true,
       okButtonProps: { danger: true },
       onOk: () => blocker.proceed(),
@@ -379,7 +394,7 @@ export default function QuickGrade() {
                 <button
                   className="btn primary"
                   onClick={saveAll}
-                  disabled={savingAll || dirtyCount === 0}
+                  disabled={savingAll || trackingSaving || dirtyCount === 0}
                 >
                   {savingAll ? "保存中…" : `全部保存${dirtyCount ? `（${dirtyCount} 人有改动）` : ""}`}
                 </button>
@@ -540,13 +555,22 @@ export default function QuickGrade() {
                           </span>
                         </td>
                         <td className={rowHot ? "qg-right qg-savecol qg-rowhead" : "qg-right qg-savecol"}>
-                          <button
-                            className="btn"
-                            disabled={savingIds.has(s.id) || savingAll}
-                            onClick={() => saveOne(s.id, s.name)}
-                          >
-                            {savingIds.has(s.id) ? "…" : "保存"}
-                          </button>
+                          <div className="qg-row-actions">
+                            <button
+                              className="btn"
+                              disabled={savingIds.has(s.id) || savingAll || trackingSaving}
+                              onClick={() => setTrackingStudentId(s.id)}
+                            >
+                              登记
+                            </button>
+                            <button
+                              className="btn"
+                              disabled={savingIds.has(s.id) || savingAll || trackingSaving}
+                              onClick={() => saveOne(s.id, s.name)}
+                            >
+                              {savingIds.has(s.id) ? "…" : "保存"}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -573,6 +597,16 @@ export default function QuickGrade() {
           onImported={load}
         />
       )}
+      <TrackingModal
+        open={trackingStudentId !== null}
+        onClose={() => setTrackingStudentId(null)}
+        student={tracking?.students.find((student) => student.id === trackingStudentId) || null}
+        items={tracking?.items || []}
+        pendingCells={trackingPendingCells}
+        onToggle={toggleTrackingCell}
+        error={trackingError}
+        saveFailed={trackingSaveFailed}
+      />
     </div>
   );
 }

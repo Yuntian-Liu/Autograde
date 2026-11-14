@@ -37,6 +37,7 @@ async def init_db() -> None:
     from builtin_phrases import ensure_builtin_rating_phrases
     from slug_ids import backfill_slugs
     from codes import backfill_codes
+    from tracking import backfill_tracking_items
 
     await ensure_builtin_rating_phrases()
     async with SessionLocal() as session:
@@ -49,6 +50,9 @@ async def init_db() -> None:
                 "业务编码回填：班级 %d / 学生 %d / 批次 %d / 笔记 %d",
                 n_cls, n_student, n_assignment, n_note,
             )
+        n_tracking = await backfill_tracking_items(session)
+        if n_tracking:
+            logger.info("主作业登记项回填：%d 条", n_tracking)
 
 
 def _ensure_columns(conn) -> None:

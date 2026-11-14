@@ -42,12 +42,14 @@ from models import (
     Setting,
     Student,
     Submission,
+    TrackingItem,
+    TrackingMark,
     WeeklyReport,
 )
 
-APP_VERSION = "0.24.0"
+APP_VERSION = "0.25.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
-AGREEMENT_VERSION = "2026-11-08"
+AGREEMENT_VERSION = "2026-11-14"
 _STARTED_AT = datetime.now(timezone.utc)
 
 MAX_LOG_ENTRIES = 500
@@ -427,6 +429,57 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                     .join(Assignment, Submission.assignment_id == Assignment.id)
                     .join(Class, Assignment.class_id == Class.id)
                     .where(Class.owner_uid == user.uid)
+                )
+            ).scalar_one(),
+            # 提交登记（V0.25.0）：配置与手动打勾数量、主作业缺失和孤儿行健康；不导出项目或学生正文
+            "tracking_items": (
+                await db.execute(
+                    select(func.count(TrackingItem.id))
+                    .join(Assignment, TrackingItem.assignment_id == Assignment.id)
+                    .join(Class, Assignment.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid)
+                )
+            ).scalar_one(),
+            "tracking_marks": (
+                await db.execute(
+                    select(func.count(TrackingMark.id))
+                    .join(TrackingItem, TrackingMark.item_id == TrackingItem.id)
+                    .join(Assignment, TrackingItem.assignment_id == Assignment.id)
+                    .join(Class, Assignment.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid)
+                )
+            ).scalar_one(),
+            "tracking_main_items_missing": (
+                await db.execute(
+                    select(func.count(Assignment.id))
+                    .join(Class, Assignment.class_id == Class.id)
+                    .outerjoin(
+                        TrackingItem,
+                        and_(
+                            TrackingItem.assignment_id == Assignment.id,
+                            TrackingItem.is_main.is_(True),
+                        ),
+                    )
+                    .where(Class.owner_uid == user.uid, TrackingItem.id.is_(None))
+                )
+            ).scalar_one(),
+            "tracking_orphan_marks": (
+                await db.execute(
+                    select(func.count(TrackingMark.id))
+                    .join(Student, TrackingMark.student_id == Student.id)
+                    .join(Class, Student.class_id == Class.id)
+                    .outerjoin(TrackingItem, TrackingMark.item_id == TrackingItem.id)
+                    .where(Class.owner_uid == user.uid, TrackingItem.id.is_(None))
+                )
+            ).scalar_one()
+            + (
+                await db.execute(
+                    select(func.count(TrackingMark.id))
+                    .join(TrackingItem, TrackingMark.item_id == TrackingItem.id)
+                    .join(Assignment, TrackingItem.assignment_id == Assignment.id)
+                    .join(Class, Assignment.class_id == Class.id)
+                    .outerjoin(Student, TrackingMark.student_id == Student.id)
+                    .where(Class.owner_uid == user.uid, Student.id.is_(None))
                 )
             ).scalar_one(),
             # 题库/错题/快照同样按归属过滤（经 assignment 或 student 链路）

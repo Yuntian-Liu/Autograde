@@ -269,6 +269,9 @@ export default function AssignmentDetail() {
           <Link className="btn" to={`/assignments/${assignment.slug || assignment.id}/analysis`}>
             批次分析
           </Link>
+          <Link className="btn" to={`/assignments/${assignment.slug || assignment.id}/tracking`}>
+            提交登记
+          </Link>
           <button className="btn" onClick={() => setAiOpen(true)}>
             AI 录题
           </button>
