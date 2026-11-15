@@ -250,6 +250,7 @@ a.row:hover { background: var(--bg-soft); }
 
 /* ---------- 录题验收表格（按板块分卡片） ---------- */
 .modal-actions { display: flex; gap: var(--s2); justify-content: flex-end; }
+.guard-actions { margin-top: var(--s4); }
 .sec-card {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
@@ -1918,6 +1919,7 @@ mark.search-hit {
 .tracking-modal-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
 .tracking-modal-name { min-width: 0; overflow-wrap: anywhere; }
 .tracking-modal-row .tracking-cell { flex: none; }
+.tracking-modal-footer { display: flex; align-items: center; justify-content: flex-end; gap: var(--s2); }
 
 @media (max-width: 900px) {
   .dashboard-shortcut-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

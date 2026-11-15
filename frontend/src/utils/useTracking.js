@@ -101,5 +101,59 @@ export default function useTracking(assignmentId) {
     [assignmentId, tracking, pendingCells, message]
   );
 
-  return { tracking, loading, error, saveFailed, reload, toggleCell, pendingCells };
+  const confirmTracking = useCallback(
+    async (studentId) => {
+      const key = `${studentId}:confirmation`;
+      if (pendingCells.size > 0 || pendingCells.has(key)) return false;
+      setPendingCells((current) => new Set(current).add(key));
+      try {
+        const result = await apiPut(
+          `/assignments/${assignmentId}/students/${studentId}/tracking/confirmation`,
+          {}
+        );
+        setTracking((current) => current ? {
+          ...current,
+          students: current.students.map((student) =>
+            student.id === studentId ? { ...student, confirmed_at: result.confirmed_at } : student
+          ),
+        } : current);
+        setError(null);
+        setSaveFailed(false);
+        message.success("登记已完成");
+        clientLog.operation("tracking_confirm", "success", {
+          assignment: assignmentId,
+          student: studentId,
+        });
+        return true;
+      } catch (e) {
+        setError(e.message);
+        setSaveFailed(true);
+        clientLog.operation("tracking_confirm", "error", {
+          assignment: assignmentId,
+          student: studentId,
+          error: e.message,
+        });
+        message.error(e.message);
+        return false;
+      } finally {
+        setPendingCells((current) => {
+          const next = new Set(current);
+          next.delete(key);
+          return next;
+        });
+      }
+    },
+    [assignmentId, pendingCells, message]
+  );
+
+  return {
+    tracking,
+    loading,
+    error,
+    saveFailed,
+    reload,
+    toggleCell,
+    confirmTracking,
+    pendingCells,
+  };
 }

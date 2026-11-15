@@ -51,6 +51,7 @@ export default function QuickGrade() {
     saveFailed: trackingSaveFailed,
     reload: reloadTracking,
     toggleCell: toggleTrackingCell,
+    confirmTracking,
     pendingCells: trackingPendingCells,
   } = useTracking(id);
 
@@ -604,6 +605,9 @@ export default function QuickGrade() {
         items={tracking?.items || []}
         pendingCells={trackingPendingCells}
         onToggle={toggleTrackingCell}
+        onComplete={async (studentId) => {
+          if (await confirmTracking(studentId)) setTrackingStudentId(null);
+        }}
         error={trackingError}
         saveFailed={trackingSaveFailed}
       />

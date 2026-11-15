@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Assignment, TrackingItem, TrackingMark
+from models import Assignment, TrackingCompletion, TrackingItem, TrackingMark
 
 MAIN_TRACKING_NAME = "本次作业"
 MAX_TRACKING_ITEMS = 30
@@ -102,6 +102,10 @@ async def replace_tracking_items(
                 )
             )
             inserted += 1
+    if inserted:
+        await db.execute(
+            delete(TrackingCompletion).where(TrackingCompletion.assignment_id == assignment_id)
+        )
     return {
         "updated": len(incoming_ids),
         "inserted": inserted,

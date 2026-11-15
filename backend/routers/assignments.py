@@ -24,6 +24,7 @@ from models import (
     Question,
     Student,
     Submission,
+    TrackingCompletion,
     TrackingItem,
     TrackingMark,
     utcnow,
@@ -504,6 +505,9 @@ async def delete_assignment(
     assignment_id = a.id  # slug 入口归一化为主键，正文查询不受影响
     question_ids = select(Question.id).where(Question.assignment_id == assignment_id)
     tracking_item_ids = select(TrackingItem.id).where(TrackingItem.assignment_id == assignment_id)
+    await db.execute(
+        delete(TrackingCompletion).where(TrackingCompletion.assignment_id == assignment_id)
+    )
     await db.execute(delete(TrackingMark).where(TrackingMark.item_id.in_(tracking_item_ids)))
     await db.execute(delete(TrackingItem).where(TrackingItem.assignment_id == assignment_id))
     await db.execute(delete(ErrorRecord).where(ErrorRecord.question_id.in_(question_ids)))

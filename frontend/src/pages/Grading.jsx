@@ -102,12 +102,17 @@ export default function Grading() {
   const [dirtyMap, setDirtyMap] = useState({}); // studentId -> 有未保存的表单编辑（脏标记）
   const [thresholds, setThresholds] = useState(null); // 生效分数线（null=用默认校准值）
   const [trackingOpen, setTrackingOpen] = useState(false);
+  const [switchTargetId, setSwitchTargetId] = useState(null);
+  const [switchGuardOpen, setSwitchGuardOpen] = useState(false);
+  const [registrationGuardOpen, setRegistrationGuardOpen] = useState(false);
+  const activityRef = useRef(new Set());
   const {
     tracking,
     error: trackingError,
     saveFailed: trackingSaveFailed,
     reload: reloadTracking,
     toggleCell: toggleTrackingCell,
+    confirmTracking,
     pendingCells: trackingPendingCells,
   } = useTracking(assignmentId);
 
@@ -119,6 +124,7 @@ export default function Grading() {
       apiGet("/rating-thresholds").catch(() => null), // 分数线失败回退默认
     ])
       .then(([a, s, p, t]) => {
+        activityRef.current = new Set();
         setAssignment(a);
         setStudents(s);
         setPhrases(p);
@@ -195,10 +201,85 @@ export default function Grading() {
   });
   const transferTarget = transferStudents.find((s) => s.id === transferTargetId) || null;
   const transferNameWidth = Math.max(4, ...transferStudents.map((s) => s.name.length));
+
+  function finishStudentSwitch(targetId) {
+    setCurrentId(targetId);
+    setSwitchTargetId(null);
+    setSwitchGuardOpen(false);
+    setRegistrationGuardOpen(false);
+    setTrackingOpen(false);
+  }
+
+  function continueStudentSwitch(targetId, studentToCheck = current) {
+    if (!targetId || !studentToCheck) return;
+    if (trackingPendingCells.size > 0) {
+      modal.warning({
+        title: "登记正在保存",
+        content: "请等待保存完成后再切换学生。",
+        okText: "继续等待",
+        centered: true,
+      });
+      return;
+    }
+    const trackingStudent = tracking?.students.find((student) => student.id === studentToCheck.id);
+    const hasCustomItems = Boolean(tracking?.items.some((item) => !item.is_main));
+    const hasActivity =
+      activityRef.current.has(studentToCheck.id) ||
+      Boolean(studentToCheck.submission && PROCESSED_STATUSES.has(studentToCheck.submission.status));
+    if (hasCustomItems && hasActivity && trackingStudent && !trackingStudent.confirmed_at) {
+      setSwitchGuardOpen(false);
+      setRegistrationGuardOpen(true);
+      clientLog.operation("tracking_switch_guard", "show", {
+        student: studentToCheck.id,
+        target: targetId,
+      });
+      return;
+    }
+    finishStudentSwitch(targetId);
+  }
+
+  function requestStudentSwitch(targetId) {
+    if (!current || targetId === current.id) return;
+    setSwitchTargetId(targetId);
+    if (dirtyMap[current.id]) {
+      setSwitchGuardOpen(true);
+      clientLog.operation("grading_switch_guard", "show", {
+        student: current.id,
+        target: targetId,
+      });
+      return;
+    }
+    continueStudentSwitch(targetId);
+  }
+
   function stepStudent(offset) {
     const next = students[currentIndex + offset];
-    if (next) setCurrentId(next.id);
+    if (next) requestStudentSwitch(next.id);
   }
+
+  async function saveCurrentAndSwitch() {
+    const targetId = switchTargetId;
+    if (!targetId || saving) return;
+    clientLog.operation("grading_switch_guard", "save", {
+      student: currentId,
+      target: targetId,
+    });
+    await saveGrading(null, () => continueStudentSwitch(targetId));
+  }
+
+  async function completeTrackingAndSwitch(studentId) {
+    const confirmed = await confirmTracking(studentId);
+    if (!confirmed) return;
+    const targetId = switchTargetId;
+    if (targetId) finishStudentSwitch(targetId);
+    else setTrackingOpen(false);
+  }
+
+  function closeTracking() {
+    setTrackingOpen(false);
+    setSwitchTargetId(null);
+  }
+
   const checkedIds = current ? checkedMap[current.id] || [] : [];
   const checkedSet = useMemo(() => new Set(checkedIds), [checkedIds]);
   const currentNotes = current ? notesMap[current.id] || {} : {};
@@ -363,6 +444,7 @@ export default function Grading() {
   // 任何表单编辑动作都把当前学生标脏：有快照但 dirty 时预览切回实时拼装
   function markDirty() {
     if (!current) return;
+    activityRef.current.add(current.id);
     setDirtyMap((prev) => (prev[current.id] ? prev : { ...prev, [current.id]: true }));
   }
 
@@ -628,8 +710,13 @@ export default function Grading() {
 
   // 批改落库：分数/等级由后端按 score_weight 复算，成功后学生状态灯与分数改由后端数据驱动
   // finalOverride：补录模式粘贴的已有反馈全文（白名单——预览区始终只读，编辑只发生在表单弹窗）
-  async function saveGrading(finalOverride = null) {
-    if (!current || saving) return;
+  async function saveGrading(finalOverride = null, afterSaved = null) {
+    if (!current || saving) return false;
+    const complete = async () => {
+      const success = await doSaveGrading(finalOverride, Boolean(afterSaved));
+      if (success && afterSaved) afterSaved();
+      return success;
+    };
     // 改回「待批改」= 完整复位（清除错题/分数/快照），保存时二次确认防呆
     if (
       finalOverride === null &&
@@ -643,16 +730,17 @@ export default function Grading() {
         okText: "确认复位",
         cancelText: "取消",
         centered: true,
+        zIndex: 1010,
         okButtonProps: { danger: true },
-        onOk: () => doSaveGrading(null),
+        onOk: complete,
       });
-      return;
+      return false;
     }
-    await doSaveGrading(finalOverride);
+    return complete();
   }
 
-  async function doSaveGrading(finalOverride = null) {
-    if (!current || saving) return;
+  async function doSaveGrading(finalOverride = null, suppressCelebrate = false) {
+    if (!current || saving) return false;
     setSaving(true);
     try {
       const body = buildPlainText();
@@ -678,10 +766,11 @@ export default function Grading() {
       const fresh = await apiGet(`/assignments/${assignmentId}/students`);
       await reloadTracking();
       setStudents(fresh);
-      maybeCelebrate(fresh);
+      if (!suppressCelebrate) maybeCelebrate(fresh);
       // 快照回显：落库后预览立即显示存档原文；dirty 清除
       setSnapshotMap(Object.fromEntries(fresh.map((s) => [s.id, s.feedback_text ?? null])));
       setDirtyMap((prev) => ({ ...prev, [current.id]: false }));
+      activityRef.current.add(current.id);
       const me = fresh.find((s) => s.id === current.id);
       if (me) {
         setCheckedMap((prev) => ({ ...prev, [me.id]: [...me.error_question_ids] }));
@@ -696,9 +785,11 @@ export default function Grading() {
       );
       setSaveFailed(false);
       message.success(`已保存：${current.name}`);
+      return true;
     } catch (e) {
       setSaveFailed(true);
       message.error(e.message);
+      return false;
     } finally {
       setSaving(false);
     }
@@ -786,10 +877,13 @@ export default function Grading() {
         [targetFresh.id]: pvPhrase && targetPreviewCount ? { [pvPhrase.id]: targetPreviewCount } : {},
       }));
       setDirtyMap((prev) => ({ ...prev, [sourceFresh.id]: false, [targetFresh.id]: false }));
+      activityRef.current.add(targetFresh.id);
       setCurrentId(targetFresh.id);
+      setSwitchTargetId(targetFresh.id);
       setTransferOpen(false);
       setTransferTargetId(null);
       setSaveFailed(false);
+      continueStudentSwitch(targetFresh.id, targetFresh);
       clientLog.add(
         "ui",
         `grading_transfer_success assignment=${assignment.id} source=${sourceFresh.id} target=${targetFresh.id} errors=${targetFresh.error_question_ids.length} len=${result.target.final_text_length} fp=${result.target.final_text_fingerprint}`
@@ -1006,7 +1100,7 @@ export default function Grading() {
               >
                 <div
                   className={s.id === currentId ? "stu active" : "stu"}
-                  onClick={() => setCurrentId(s.id)}
+                  onClick={() => requestStudentSwitch(s.id)}
                 >
                   <span className={`state ${state}`} />
                   <span className="name">{s.name}</span>
@@ -1632,13 +1726,96 @@ export default function Grading() {
         </p>
       </Modal>
 
+      <Modal
+        centered
+        open={switchGuardOpen}
+        onCancel={() => {
+          setSwitchGuardOpen(false);
+          setSwitchTargetId(null);
+        }}
+        footer={null}
+        title="当前批改尚未保存"
+        width={440}
+      >
+        <p>
+          {current?.name} 的批改有未保存修改，切换到 {students.find((student) => student.id === switchTargetId)?.name || "另一位学生"} 前先选择处理方式。
+        </p>
+        <div className="modal-actions guard-actions">
+          <button
+            className="btn"
+            disabled={saving}
+            onClick={() => {
+              setSwitchGuardOpen(false);
+              setSwitchTargetId(null);
+            }}
+          >
+            留在当前
+          </button>
+          <button
+            className="btn"
+            disabled={saving}
+            onClick={() => {
+              clientLog.operation("grading_switch_guard", "keep_draft", {
+                student: currentId,
+                target: switchTargetId,
+              });
+              setSwitchGuardOpen(false);
+              continueStudentSwitch(switchTargetId);
+            }}
+          >
+            保留草稿并切换
+          </button>
+          <button className="btn primary" disabled={saving} onClick={saveCurrentAndSwitch}>
+            {saving ? "保存中…" : "保存并切换"}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        centered
+        open={registrationGuardOpen}
+        onCancel={() => {
+          setRegistrationGuardOpen(false);
+          setSwitchTargetId(null);
+        }}
+        footer={null}
+        title="切换前完成提交登记"
+        width={440}
+      >
+        <p>{current?.name} 的其他提交项目尚未完成登记确认，主作业自动打勾不等于已完成登记。</p>
+        <div className="modal-actions guard-actions">
+          <button
+            className="btn"
+            onClick={() => {
+              clientLog.operation("tracking_switch_guard", "continue", {
+                student: currentId,
+                target: switchTargetId,
+              });
+              finishStudentSwitch(switchTargetId);
+            }}
+          >
+            继续切换
+          </button>
+          <button
+            className="btn primary"
+            onClick={() => {
+              setRegistrationGuardOpen(false);
+              setTrackingOpen(true);
+            }}
+          >
+            去登记
+          </button>
+        </div>
+      </Modal>
+
       <TrackingModal
         open={trackingOpen}
-        onClose={() => setTrackingOpen(false)}
+        onClose={closeTracking}
         student={tracking?.students.find((student) => student.id === currentId) || null}
         items={tracking?.items || []}
         pendingCells={trackingPendingCells}
         onToggle={toggleTrackingCell}
+        onComplete={completeTrackingAndSwitch}
         error={trackingError}
         saveFailed={trackingSaveFailed}
       />

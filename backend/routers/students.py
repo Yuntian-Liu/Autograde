@@ -17,6 +17,7 @@ from models import (
     Question,
     Student,
     Submission,
+    TrackingCompletion,
     TrackingMark,
 )
 from rating import gpa_for_submission
@@ -54,6 +55,7 @@ async def delete_student(
 ) -> None:
     s = await owned_student(db, student_id, user)
     # 连同该学生的批改与登记数据一起清理，避免孤儿行（含能力报告存档，隐私政策承诺连带删除）
+    await db.execute(delete(TrackingCompletion).where(TrackingCompletion.student_id == student_id))
     await db.execute(delete(TrackingMark).where(TrackingMark.student_id == student_id))
     await db.execute(delete(ErrorRecord).where(ErrorRecord.student_id == student_id))
     await db.execute(delete(Submission).where(Submission.student_id == student_id))

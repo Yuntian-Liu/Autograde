@@ -9,11 +9,15 @@ export default function TrackingModal({
   items = [],
   pendingCells,
   onToggle,
+  onComplete,
   error,
   saveFailed,
 }) {
   const { modal } = AntApp.useApp();
   const saving = pendingCells.size > 0;
+  const confirming = student ? pendingCells.has(`${student.id}:confirmation`) : false;
+  const confirmed = Boolean(student?.confirmed_at);
+  const hasCustomItems = items.some((item) => !item.is_main);
 
   function requestClose() {
     if (!saving) {
@@ -29,6 +33,15 @@ export default function TrackingModal({
     });
   }
 
+  async function complete() {
+    if (!student || saving) return;
+    if (confirmed) {
+      onClose();
+      return;
+    }
+    await onComplete(student.id);
+  }
+
   return (
     <Modal
       centered
@@ -36,7 +49,21 @@ export default function TrackingModal({
       onCancel={requestClose}
       maskClosable={!saving}
       keyboard={!saving}
-      footer={null}
+      footer={
+        <div className="tracking-modal-footer">
+          <button type="button" className="btn" onClick={requestClose}>关闭</button>
+          {hasCustomItems && (
+            <button
+              type="button"
+              className="btn primary"
+              disabled={saving || !student}
+              onClick={complete}
+            >
+              {confirming ? "保存中…" : confirmed ? "已完成登记" : "完成登记"}
+            </button>
+          )}
+        </div>
+      }
       title={
         <div className="tracking-modal-title">
           <span>{student ? `提交登记 · ${student.name}` : "提交登记"}</span>

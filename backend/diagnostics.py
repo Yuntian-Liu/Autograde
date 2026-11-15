@@ -42,14 +42,15 @@ from models import (
     Setting,
     Student,
     Submission,
+    TrackingCompletion,
     TrackingItem,
     TrackingMark,
     WeeklyReport,
 )
 
-APP_VERSION = "0.25.0"
+APP_VERSION = "0.26.0"
 # 与 frontend/src/legal/changelog.js 的 AGREEMENT_VERSION 保持同步（核对用户看到的协议是否最新）
-AGREEMENT_VERSION = "2026-11-14"
+AGREEMENT_VERSION = "2026-11-15"
 _STARTED_AT = datetime.now(timezone.utc)
 
 MAX_LOG_ENTRIES = 500
@@ -479,6 +480,32 @@ async def build_diagnostics(db: AsyncSession, user: User) -> dict:
                     .join(Assignment, TrackingItem.assignment_id == Assignment.id)
                     .join(Class, Assignment.class_id == Class.id)
                     .outerjoin(Student, TrackingMark.student_id == Student.id)
+                    .where(Class.owner_uid == user.uid, Student.id.is_(None))
+                )
+            ).scalar_one(),
+            "tracking_completions": (
+                await db.execute(
+                    select(func.count(TrackingCompletion.id))
+                    .join(Assignment, TrackingCompletion.assignment_id == Assignment.id)
+                    .join(Class, Assignment.class_id == Class.id)
+                    .where(Class.owner_uid == user.uid)
+                )
+            ).scalar_one(),
+            "tracking_orphan_completions": (
+                await db.execute(
+                    select(func.count(TrackingCompletion.id))
+                    .join(Student, TrackingCompletion.student_id == Student.id)
+                    .join(Class, Student.class_id == Class.id)
+                    .outerjoin(Assignment, TrackingCompletion.assignment_id == Assignment.id)
+                    .where(Class.owner_uid == user.uid, Assignment.id.is_(None))
+                )
+            ).scalar_one()
+            + (
+                await db.execute(
+                    select(func.count(TrackingCompletion.id))
+                    .join(Assignment, TrackingCompletion.assignment_id == Assignment.id)
+                    .join(Class, Assignment.class_id == Class.id)
+                    .outerjoin(Student, TrackingCompletion.student_id == Student.id)
                     .where(Class.owner_uid == user.uid, Student.id.is_(None))
                 )
             ).scalar_one(),

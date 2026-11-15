@@ -11,7 +11,7 @@ from access import owned_assignment
 from auth.dependencies import get_current_user
 from auth.models import User
 from database import get_db
-from models import Student, Submission, TrackingItem, TrackingMark
+from models import Student, Submission, TrackingCompletion, TrackingItem, TrackingMark, utcnow
 from serializers import GRADED_STATUSES, assignment_student_condition
 from tracking import MAIN_TRACKING_NAME
 
@@ -64,6 +64,12 @@ async def get_tracking(
         )
     ).scalars().all()
     marked = {(mark.student_id, mark.item_id) for mark in marks}
+    completions = (
+        await db.execute(
+            select(TrackingCompletion).where(TrackingCompletion.assignment_id == a.id)
+        )
+    ).scalars().all()
+    confirmed_by_student = {completion.student_id: completion.confirmed_at for completion in completions}
 
     rows = []
     counts = {item.id: 0 for item in items}
@@ -79,7 +85,13 @@ async def get_tracking(
             cells[str(item.id)] = cell
             if cell["submitted"]:
                 counts[item.id] += 1
-        rows.append({"id": student.id, "name": student.name, "cells": cells})
+        confirmed_at = confirmed_by_student.get(student.id)
+        rows.append({
+            "id": student.id,
+            "name": student.name,
+            "cells": cells,
+            "confirmed_at": confirmed_at.isoformat() if confirmed_at else None,
+        })
 
     return {
         "assignment_id": a.id,
@@ -96,6 +108,59 @@ async def get_tracking(
         "students": rows,
         "total_students": len(rows),
     }
+
+
+@router.put("/{assignment_id}/students/{student_id}/tracking/confirmation")
+async def confirm_tracking(
+    assignment_id: str,
+    student_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    a = await owned_assignment(db, assignment_id, user)
+    student = await db.get(Student, student_id)
+    expected_assignment_id = a.id if a.series is not None else None
+    if (
+        student is None
+        or student.class_id != a.class_id
+        or student.assignment_id != expected_assignment_id
+    ):
+        raise HTTPException(status_code=400, detail="学生不属于该批次")
+    custom_count = (
+        await db.execute(
+            select(TrackingItem.id).where(
+                TrackingItem.assignment_id == a.id,
+                TrackingItem.is_main.is_(False),
+            )
+        )
+    ).scalars().first()
+    if custom_count is None:
+        raise HTTPException(status_code=400, detail="本批次没有其他提交项目，无需完成登记")
+
+    completion = (
+        await db.execute(
+            select(TrackingCompletion).where(
+                TrackingCompletion.assignment_id == a.id,
+                TrackingCompletion.student_id == student_id,
+            )
+        )
+    ).scalars().first()
+    if completion is None:
+        completion = TrackingCompletion(assignment_id=a.id, student_id=student_id)
+        db.add(completion)
+    completion.confirmed_at = utcnow()
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    logger.info(
+        "tracking_confirm uid=%s assignment=%s student=%s confirmed=true",
+        user.uid,
+        a.id,
+        student_id,
+    )
+    return {"student_id": student_id, "confirmed_at": completion.confirmed_at.isoformat()}
 
 
 class TrackingMarkIn(BaseModel):

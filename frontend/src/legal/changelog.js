@@ -1,10 +1,10 @@
 // 版本日志数据源（设置页「版本日志」弹窗 + 登录后更新提醒弹窗；发版时与 CHANGELOG.md 同步）
 // 结构：minor 为主条目，patch 嵌套在 patches 数组里（主界面只呈现 minor，展开后见 patch）
 // ⚠️ 公开文件：不得出现私人信息
-export const APP_VERSION = "V0.25.0";
+export const APP_VERSION = "V0.26.0";
 
 /** 协议版本（用户协议/隐私政策最后更新日期，改协议时同步递增；触发登录后协议变更提醒） */
-export const AGREEMENT_VERSION = "2026-11-14";
+export const AGREEMENT_VERSION = "2026-11-15";
 
 /** 取全站最新更新条目（最新 minor 有 patch 取最新 patch，否则取最新 minor） */
 export function getLatestUpdate() {
@@ -18,6 +18,17 @@ export function getLatestUpdate() {
 }
 
 export const CHANGELOG = [
+  {
+    version: "V0.26.0",
+    date: "2026-11-15",
+    items: [
+      "详情批改切换学生前检查未保存修改：可保存并切换、保留草稿并切换或留在当前；点名、上下按钮与快捷键规则一致",
+      "已开始或已处理的学生切换前会检查提交登记；未编辑的待批改学生与无自定义项目批次不做无意义提醒",
+      "登记弹窗新增「完成登记」：全部待提交也可确认；只有手动点击才消除提醒，主作业自动打勾不会冒充完成登记",
+      "去登记并完成确认后自动切换；保存或确认失败留当前，保留草稿后返回仍能继续修改",
+      "新增自定义项目会让旧确认重新失效；诊断与隐私说明同步更新，无新增 AI 或第三方共享（协议版本 2026-11-15）",
+    ],
+  },
   {
     version: "V0.25.0",
     date: "2026-11-14",

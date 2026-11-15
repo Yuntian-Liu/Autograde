@@ -172,6 +172,21 @@ class TrackingMark(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
+class TrackingCompletion(Base):
+    """登记完成确认：仅由老师手动点击「完成登记」写入。"""
+
+    __tablename__ = "tracking_completions"
+    __table_args__ = (
+        UniqueConstraint("assignment_id", "student_id", name="uq_tracking_completion_student"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    assignment_id: Mapped[int] = mapped_column(ForeignKey("assignments.id"), index=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), index=True)
+    confirmed_at: Mapped[datetime] = mapped_column(default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class FeedbackSnapshot(Base):
     """最终反馈全文存档（纯文本），供 AI 薄弱点分析双料喂养。"""
 
