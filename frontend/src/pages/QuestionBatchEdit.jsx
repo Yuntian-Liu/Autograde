@@ -5,7 +5,13 @@ import { App as AntApp } from "antd";
 import { apiGet, apiPut } from "../api";
 import AppHeader from "../components/AppHeader";
 import PageSkeleton from "../components/PageSkeleton";
-import { SectionsEditor, groupRows, optionsFromText, validateRows } from "../components/QuestionEntry";
+import {
+  SectionsEditor,
+  groupRows,
+  optionsFromText,
+  revealQuestionError,
+  validateRows,
+} from "../components/QuestionEntry";
 import { seriesLabel } from "../meta";
 
 // 整批编辑页：把题库拉回验收表格（行带 id），保存走 PUT 整批 diff——
@@ -57,7 +63,11 @@ export default function QuestionBatchEdit() {
 
   async function save() {
     const err = validateRows(rows);
-    if (err) return message.error(err);
+    if (err) {
+      message.error(err);
+      revealQuestionError(rows);
+      return;
+    }
     setSaving(true);
     try {
       const sectionOrder = groupRows(rows).map((g) => g.section);

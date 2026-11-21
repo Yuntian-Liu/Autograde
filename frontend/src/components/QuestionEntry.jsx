@@ -28,6 +28,12 @@ export function optionsFromText(text) {
     .filter(Boolean);
 }
 
+export function invalidQuestionSeq(seq) {
+  if (seq === null || seq === undefined || seq === "") return false;
+  if (typeof seq === "number") return !Number.isInteger(seq) || seq < 1;
+  return !(typeof seq === "string" && /^[1-9]\d*$/.test(seq.trim()));
+}
+
 // 按板块分组（保持首次出现顺序），返回 [{ section, indices }]
 export function groupRows(rows) {
   const groups = [];
@@ -58,8 +64,16 @@ function moveGroup(rows, section, dir) {
 // 验收区：一个板块一张卡片，卡片头可编辑板块名 + 整组统一分值；movable 时带上移/下移（板块排序）
 export function SectionsEditor({ rows, setRows, sections, movable = false }) {
   const { message } = AntApp.useApp();
+  const editorRef = useRef(null);
   const sectionOptions = sections.map((s) => ({ value: s }));
   const groups = groupRows(rows);
+
+  function jumpToSection(index) {
+    editorRef.current
+      ?.querySelector(`[data-section-card="${index}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    clientLog.operation("question_section_nav", "click", { section: index + 1 });
+  }
 
   // 统一补「解析：」前缀：不以「解析」开头的非空解析补前缀；已有/空的不动
   function fillExplanationPrefix() {
@@ -112,7 +126,7 @@ export function SectionsEditor({ rows, setRows, sections, movable = false }) {
   }
 
   return (
-    <div>
+    <div className="sections-editor" ref={editorRef}>
       <div className="editor-toolbar">
         <button type="button" className="btn" onClick={fillExplanationPrefix}>
           统一补「解析：」前缀
@@ -121,69 +135,102 @@ export function SectionsEditor({ rows, setRows, sections, movable = false }) {
           「解析：」独立成行
         </button>
       </div>
+      <nav className="section-jump-nav" aria-label="板块目录">
+        {groups.map((group, index) => (
+          <button
+            type="button"
+            className="section-jump-item"
+            key={group.indices[0]}
+            title={group.section || "未命名板块"}
+            onClick={() => jumpToSection(index)}
+          >
+            <span className="section-jump-index">{String(index + 1).padStart(2, "0")}</span>
+            <span className="section-jump-name">{group.section || "未命名板块"}</span>
+            <span className="section-jump-count">{group.indices.length} 题</span>
+          </button>
+        ))}
+      </nav>
       {groups.map((g, gi) => {
         const first = rows[g.indices[0]];
+        const totalWeight = Math.round(
+          g.indices.reduce((sum, idx) => sum + Number(rows[idx].score_weight || 0), 0) * 100
+        ) / 100;
         const missingSec = !g.section.trim(); // 缺板块名：实时红标，不等提交才发现
         // key 用首行索引而非板块名：板块名一改就 remount 会导致输入框每敲一个字丢焦点
         return (
-          <div className={`sec-card${missingSec ? " sec-card-err" : ""}`} key={g.indices[0]}>
+          <div
+            className={`sec-card${missingSec ? " sec-card-err" : ""}`}
+            data-section-card={gi}
+            key={g.indices[0]}
+          >
             <div className="sec-card-head">
-              <AutoComplete
-                className="grow"
-                status={missingSec ? "error" : ""}
-                value={g.section}
-                options={sectionOptions}
-                onChange={(v) => patchGroup(g.indices, { section: v })}
-                placeholder="板块名，如 Task 1 · Vocabulary"
-              />
-              {missingSec && <span className="sec-err-tag">缺板块名</span>}
-              {movable && (
-                <span className="sec-move">
-                  <button
-                    type="button"
-                    className="btn"
-                    title="上移板块"
-                    disabled={gi === 0}
-                    onClick={() => setRows(moveGroup(rows, g.section, -1))}
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    title="下移板块"
-                    disabled={gi === groups.length - 1}
-                    onClick={() => setRows(moveGroup(rows, g.section, 1))}
-                  >
-                    ↓
-                  </button>
-                </span>
-              )}
-              <InputNumber
-                min={0.5}
-                step={0.5}
-                value={first?.score_weight}
-                onChange={(v) => patchGroup(g.indices, { score_weight: v })}
-                addonBefore="统一分值"
-              />
-              <button className="btn" onClick={() => addRowTo(g)}>
-                + 加题
-              </button>
-              <button className="btn" onClick={() => removeGroup(g.indices)}>
-                删板块
-              </button>
+              <div className="sec-card-title">
+                <span className="sec-index">板块 {String(gi + 1).padStart(2, "0")}</span>
+                <AutoComplete
+                  className="grow sec-name-input"
+                  status={missingSec ? "error" : ""}
+                  value={g.section}
+                  options={sectionOptions}
+                  onChange={(v) => patchGroup(g.indices, { section: v })}
+                  placeholder="板块名，如 Task 1 · Vocabulary"
+                />
+                <span className="sec-summary">{g.indices.length} 题 · 共 {totalWeight} 分</span>
+                {missingSec && <span className="sec-err-tag">缺板块名</span>}
+              </div>
+              <div className="sec-card-tools">
+                {movable && (
+                  <span className="sec-move">
+                    <button
+                      type="button"
+                      className="btn"
+                      title="上移板块"
+                      disabled={gi === 0}
+                      onClick={() => setRows(moveGroup(rows, g.section, -1))}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      title="下移板块"
+                      disabled={gi === groups.length - 1}
+                      onClick={() => setRows(moveGroup(rows, g.section, 1))}
+                    >
+                      ↓
+                    </button>
+                  </span>
+                )}
+                <InputNumber
+                  min={0.5}
+                  step={0.5}
+                  value={first?.score_weight}
+                  onChange={(v) => patchGroup(g.indices, { score_weight: v })}
+                  addonBefore="统一分值"
+                />
+                <button type="button" className="btn" onClick={() => addRowTo(g)}>
+                  + 加题
+                </button>
+                <button type="button" className="btn" onClick={() => removeGroup(g.indices)}>
+                  删板块
+                </button>
+              </div>
             </div>
+            <div className="sec-card-body">
             {g.indices.map((idx) => {
               const r = rows[idx];
+              const seqInvalid = invalidQuestionSeq(r.seq);
               return (
-                <div className="qrow" key={idx}>
+                <div className={`qrow${seqInvalid ? " qrow-err" : ""}`} data-question-row={idx} key={idx}>
                   <div className="qrow-head">
                     <InputNumber
                       min={1}
                       value={r.seq}
+                      status={seqInvalid ? "error" : ""}
+                      aria-label={`第 ${idx + 1} 题题号`}
                       onChange={(v) => patchRow(idx, "seq", v)}
                       placeholder="题号"
                     />
+                    {seqInvalid && <span className="sec-err-tag">题号无效</span>}
                     <Select
                       value={r.mode}
                       onChange={(v) => patchRow(idx, "mode", v)}
@@ -223,6 +270,7 @@ export function SectionsEditor({ rows, setRows, sections, movable = false }) {
                 </div>
               );
             })}
+            </div>
           </div>
         );
       })}
@@ -251,9 +299,27 @@ export function validateRows(rows) {
   if (rows.length === 0) return "题目列表不能为空";
   for (const [i, r] of rows.entries()) {
     if (!r.section.trim()) return `第 ${i + 1} 题缺少板块名`;
+    if (invalidQuestionSeq(r.seq)) {
+      return `第 ${i + 1} 题（${r.section.trim() || "未命名板块"}）的题号「${String(r.seq).slice(0, 40)}」不是正整数，请修改或清空`;
+    }
     if (!r.standard_answer.trim()) return `第 ${i + 1} 题缺少标准答案`;
   }
   return null;
+}
+
+export function revealQuestionError(rows) {
+  const invalidSeqIndex = rows.findIndex((row) => invalidQuestionSeq(row.seq));
+  requestAnimationFrame(() => {
+    const target = invalidSeqIndex >= 0
+      ? document.querySelector(`[data-question-row="${invalidSeqIndex}"]`)
+      : document.querySelector(".sec-card-err, .ant-input-status-error, .ant-select-status-error");
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (invalidSeqIndex >= 0) {
+      const input = target?.querySelector(".ant-input-number input");
+      input?.focus({ preventScroll: true });
+      input?.select();
+    }
+  });
 }
 
 export function ManualEntryModal({ open, onClose, assignmentId, sections, initialSection, onSaved, existingCount = 0 }) {
@@ -267,7 +333,11 @@ export function ManualEntryModal({ open, onClose, assignmentId, sections, initia
 
   async function submit() {
     const error = validateRows(rows);
-    if (error) return message.error(error);
+    if (error) {
+      message.error(error);
+      revealQuestionError(rows);
+      return;
+    }
     setSaving(true);
     try {
       await freezeQuestions(assignmentId, rows);
@@ -453,13 +523,14 @@ export function AiEntryModal({ open, onClose, assignmentId, sections, onSaved, e
   async function freeze() {
     const error = validateRows(rows);
     if (error) {
+      const invalidSeqIndex = rows.findIndex((row) => invalidQuestionSeq(row.seq));
+      clientLog.operation("ai_freeze_validation", "error", {
+        assignment: assignmentId,
+        field: invalidSeqIndex >= 0 ? "seq" : "content",
+        row: invalidSeqIndex >= 0 ? invalidSeqIndex + 1 : undefined,
+      });
       message.error(error);
-      // 红标已在表格里实时显示；提交失败时把第一个问题块滚到视野中央
-      requestAnimationFrame(() =>
-        document
-          .querySelector(".sec-card-err, .ant-input-status-error, .ant-select-status-error")
-          ?.scrollIntoView({ behavior: "smooth", block: "center" })
-      );
+      revealQuestionError(rows);
       return;
     }
     setSaving(true);

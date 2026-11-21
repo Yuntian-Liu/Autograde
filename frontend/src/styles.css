@@ -251,14 +251,28 @@ a.row:hover { background: var(--bg-soft); }
 /* ---------- 录题验收表格（按板块分卡片） ---------- */
 .modal-actions { display: flex; gap: var(--s2); justify-content: flex-end; }
 .guard-actions { margin-top: var(--s4); }
+.sections-editor { min-width: 0; }
+.section-jump-nav { display: flex; gap: var(--s2); overflow-x: auto; padding: 0 0 var(--s2); margin-bottom: var(--s4); }
+.section-jump-item { flex: none; max-width: 20rem; min-height: var(--s6); display: inline-flex; align-items: center; gap: var(--s2); padding: var(--s1) var(--s3); border: 1px solid var(--accent-line); border-radius: var(--r-sm); background: var(--surface); color: var(--ink-2); font: inherit; font-size: var(--t-caption); cursor: pointer; }
+.section-jump-item:hover { background: var(--accent-bg); color: var(--accent-hover); }
+.section-jump-index { flex: none; color: var(--accent); font-family: var(--font-mono); }
+.section-jump-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.section-jump-count { flex: none; margin-left: auto; color: var(--ink-2); font-family: var(--font-mono); white-space: nowrap; }
 .sec-card {
-  border: 1px solid var(--line);
+  border: 1px solid var(--accent-line);
   border-radius: var(--r-md);
-  padding: var(--s3);
-  margin-bottom: var(--s3);
+  padding: 0;
+  margin-bottom: var(--s5);
 }
-.sec-card-head { display: flex; gap: var(--s2); align-items: center; margin-bottom: var(--s3); }
-.sec-card-head .grow { flex: 1; }
+.sec-card-head { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; padding: var(--s3); margin: 0; background: var(--accent-bg); border-bottom: 1px solid var(--accent-line); border-left: 3px solid var(--accent); border-radius: var(--r-md) var(--r-md) 0 0; }
+.sec-card-title { flex: 1; min-width: 18rem; display: flex; align-items: center; gap: var(--s2); }
+.sec-card-title .grow { flex: 1; min-width: 10rem; }
+.sec-index { flex: none; color: var(--accent-hover); font-family: var(--font-mono); font-size: var(--t-caption); font-weight: 600; white-space: nowrap; }
+.sec-name-input { color: var(--accent-hover); font-size: var(--t-title); font-weight: 600; }
+.sec-summary { flex: none; padding: var(--s1) var(--s2); border: 1px solid var(--accent-line); border-radius: 999px; background: var(--surface); color: var(--accent-hover); font-family: var(--font-mono); font-size: var(--t-caption); white-space: nowrap; }
+.sec-card-tools { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; margin-left: auto; }
+.sec-card-body { padding: 0 var(--s3) var(--s3); }
+.sec-card-err .sec-card-head { border-left-color: var(--danger); }
 .qrow {
   display: flex;
   flex-direction: column;
@@ -1817,8 +1831,9 @@ mark.search-hit {
 .dup-hint { font-size: var(--t-caption); color: var(--ink-2); line-height: 1.7; }
 .dup-actions { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s3); }
 
-/* 录题验收：缺板块名红标 */
+/* 录题验收：缺板块名 / 非法题号红标 */
 .sec-card-err { border-color: var(--danger); }
+.qrow-err { border-left: 2px solid var(--danger); padding-left: var(--s2); }
 .sec-err-tag { color: var(--danger); font-size: var(--t-caption); font-weight: 600; white-space: nowrap; }
 
 /* 弹窗全局限高（V0.16.1）：内容超高时主体内部滚动，标题与底部按钮常驻 */
@@ -1946,4 +1961,10 @@ mark.search-hit {
   .tracking-config-row { grid-template-columns: repeat(3, auto); }
   .tracking-config-row .ant-input { grid-column: 1 / -1; }
   .tracking-actions { flex-wrap: wrap; }
+  .section-jump-item { max-width: 16rem; }
+  .sec-card-head { position: static; }
+  .sec-card-title { min-width: 100%; flex-wrap: wrap; }
+  .sec-card-title .grow { min-width: 0; }
+  .sec-summary { margin-left: auto; }
+  .sec-card-tools { width: 100%; margin-left: 0; }
 }
