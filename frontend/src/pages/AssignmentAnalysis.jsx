@@ -289,10 +289,10 @@ function QuestionStatistics({ sections, assignmentId }) {
                   </div>
                 }
               >
-                <button type="button" className="btn sm">答错 {wrongStudents.length} 人</button>
+                <button type="button" className="analysis-wrong-count clickable">答错 {wrongStudents.length} 人</button>
               </Popover>
             ) : (
-              <span className="analysis-wrong-empty">答错 0 人</span>
+              <span className="analysis-wrong-count">答错 0 人</span>
             )}
           </div>
         );

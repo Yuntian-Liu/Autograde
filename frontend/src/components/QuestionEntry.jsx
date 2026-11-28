@@ -62,7 +62,7 @@ function moveGroup(rows, section, dir) {
 }
 
 // 验收区：一个板块一张卡片，卡片头可编辑板块名 + 整组统一分值；movable 时带上移/下移（板块排序）
-export function SectionsEditor({ rows, setRows, sections, movable = false }) {
+export function SectionsEditor({ rows, setRows, sections, movable = false, enhancedLayout = true }) {
   const { message } = AntApp.useApp();
   const editorRef = useRef(null);
   const sectionOptions = sections.map((s) => ({ value: s }));
@@ -126,7 +126,7 @@ export function SectionsEditor({ rows, setRows, sections, movable = false }) {
   }
 
   return (
-    <div className="sections-editor" ref={editorRef}>
+    <div className={`sections-editor ${enhancedLayout ? "sections-editor-enhanced" : "sections-editor-legacy"}`} ref={editorRef}>
       <div className="editor-toolbar">
         <button type="button" className="btn" onClick={fillExplanationPrefix}>
           统一补「解析：」前缀
@@ -135,21 +135,23 @@ export function SectionsEditor({ rows, setRows, sections, movable = false }) {
           「解析：」独立成行
         </button>
       </div>
-      <nav className="section-jump-nav" aria-label="板块目录">
-        {groups.map((group, index) => (
-          <button
-            type="button"
-            className="section-jump-item"
-            key={group.indices[0]}
-            title={group.section || "未命名板块"}
-            onClick={() => jumpToSection(index)}
-          >
-            <span className="section-jump-index">{String(index + 1).padStart(2, "0")}</span>
-            <span className="section-jump-name">{group.section || "未命名板块"}</span>
-            <span className="section-jump-count">{group.indices.length} 题</span>
-          </button>
-        ))}
-      </nav>
+      {enhancedLayout && (
+        <nav className="section-jump-nav" aria-label="板块目录">
+          {groups.map((group, index) => (
+            <button
+              type="button"
+              className="section-jump-item"
+              key={group.indices[0]}
+              title={group.section || "未命名板块"}
+              onClick={() => jumpToSection(index)}
+            >
+              <span className="section-jump-index">{String(index + 1).padStart(2, "0")}</span>
+              <span className="section-jump-name">{group.section || "未命名板块"}</span>
+              <span className="section-jump-count">{group.indices.length} 题</span>
+            </button>
+          ))}
+        </nav>
+      )}
       {groups.map((g, gi) => {
         const first = rows[g.indices[0]];
         const totalWeight = Math.round(
@@ -367,7 +369,7 @@ export function ManualEntryModal({ open, onClose, assignmentId, sections, initia
       {existingCount > 0 && (
         <p className="append-hint">本题库已有 {existingCount} 题，本次录入将<strong>追加</strong>（不覆盖、不去重）。</p>
       )}
-      <SectionsEditor rows={rows} setRows={setRows} sections={sections} />
+      <SectionsEditor rows={rows} setRows={setRows} sections={sections} enhancedLayout={false} />
     </Modal>
   );
 }

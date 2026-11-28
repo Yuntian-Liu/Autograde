@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { App as AntApp, Input, Modal } from "antd";
+import { useEffect, useState } from "react";
+import { App as AntApp, Checkbox, Input, Modal } from "antd";
+import { clientLog } from "../utils/clientLog";
 
 export default function StudentImportModal({
   open,
@@ -9,11 +10,17 @@ export default function StudentImportModal({
   onImported,
   title = "导入名单",
   existingLabel = "班内已有",
+  offerHistoricalAbsence = false,
 }) {
   const { message } = AntApp.useApp();
   const [importText, setImportText] = useState("");
   const [importing, setImporting] = useState(false);
   const [dupOpen, setDupOpen] = useState(null);
+  const [backfillAbsent, setBackfillAbsent] = useState(true);
+
+  useEffect(() => {
+    if (open) setBackfillAbsent(true);
+  }, [open]);
 
   function parseNames() {
     return importText
@@ -25,16 +32,31 @@ export default function StudentImportModal({
   async function doImport(allowDup) {
     setImporting(true);
     try {
-      const res = await onImport(parseNames(), allowDup);
+      const res = await onImport(parseNames(), allowDup, {
+        backfill_absent: offerHistoricalAbsence && backfillAbsent,
+      });
+      if (offerHistoricalAbsence) {
+        clientLog.operation("students_import_backfill", "success", {
+          added: res.added,
+          enabled: backfillAbsent,
+          marked: res.backfill?.marked || 0,
+          conflicts: res.backfill?.conflict_count || 0,
+        });
+      }
       message.success(
         `成功导入 ${res.added} 人` +
-          (res.skipped.length ? `，跳过重复 ${res.skipped.length} 人（${res.skipped.join("、")}）` : "")
+          (res.skipped.length ? `，跳过重复 ${res.skipped.length} 人（${res.skipped.join("、")}）` : "") +
+          (res.backfill?.marked ? `，历史批次标为未交 ${res.backfill.marked} 份` : "") +
+          (res.backfill?.conflict_count ? `，跳过冲突 ${res.backfill.conflict_count} 份` : "")
       );
       setDupOpen(null);
       setImportText("");
       onClose();
       onImported?.(res);
     } catch (e) {
+      if (offerHistoricalAbsence) {
+        clientLog.operation("students_import_backfill", "error", { enabled: backfillAbsent, error: e.message });
+      }
       message.error(e.message);
     } finally {
       setImporting(false);
@@ -79,6 +101,15 @@ export default function StudentImportModal({
           rows={10}
           placeholder={"一行一个名字\nAmy\nBob"}
         />
+        {offerHistoricalAbsence && (
+          <Checkbox
+            className="import-history-option"
+            checked={backfillAbsent}
+            onChange={(event) => setBackfillAbsent(event.target.checked)}
+          >
+            将转入前已完成批次标为未交
+          </Checkbox>
+        )}
       </Modal>
       <Modal
         centered

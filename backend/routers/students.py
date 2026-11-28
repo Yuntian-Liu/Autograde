@@ -1,5 +1,7 @@
 """学生写接口：改名 / 备注（note 仅自己可见）/ 删除；个人统计只读接口。"""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
@@ -9,9 +11,11 @@ from access import owned_student
 from auth.dependencies import get_current_user
 from auth.models import User
 from database import get_db
+from enrollment import backfill_historical_absence, preview_historical_absence
 from models import (
     AbilityReport,
     Assignment,
+    Class,
     ErrorRecord,
     FeedbackSnapshot,
     Question,
@@ -63,6 +67,49 @@ async def delete_student(
     await db.execute(delete(AbilityReport).where(AbilityReport.student_id == student_id))
     await db.delete(s)
     await db.commit()
+
+
+async def _owned_formal_student(db: AsyncSession, student_id: int, user: User) -> Student:
+    student = await owned_student(db, student_id, user)
+    class_ = await db.get(Class, student.class_id)
+    if class_.is_temp or student.assignment_id is not None:
+        raise HTTPException(status_code=400, detail="临时学生无需处理历史批次")
+    return student
+
+
+@router.get("/{student_id}/pre-enrollment-absence")
+async def preview_student_historical_absence(
+    student_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    student = await _owned_formal_student(db, student_id, user)
+    return await preview_historical_absence(db, student)
+
+
+@router.post("/{student_id}/pre-enrollment-absence")
+async def apply_student_historical_absence(
+    student_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    student = await _owned_formal_student(db, student_id, user)
+    try:
+        result = await backfill_historical_absence(db, student)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    logging.getLogger("autograde.business").info(
+        "student_historical_absence uid=%s class=%s student=%s marked=%s conflicts=%s assignments=%s",
+        user.uid,
+        student.class_id,
+        student.id,
+        result["marked"],
+        result["conflict_count"],
+        result["assignment_ids"],
+    )
+    return result
 
 
 @router.get("/{student_id}/stats")

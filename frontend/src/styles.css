@@ -259,20 +259,32 @@ a.row:hover { background: var(--bg-soft); }
 .section-jump-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .section-jump-count { flex: none; margin-left: auto; color: var(--ink-2); font-family: var(--font-mono); white-space: nowrap; }
 .sec-card {
-  border: 1px solid var(--accent-line);
+  border: 1px solid var(--line);
   border-radius: var(--r-md);
+  padding: var(--s3);
+  margin-bottom: var(--s3);
+}
+.sec-card-head { display: flex; gap: var(--s2); align-items: center; margin-bottom: var(--s3); }
+.sec-card-head .grow { flex: 1; }
+.sections-editor-legacy .sec-card-title,
+.sections-editor-legacy .sec-card-tools,
+.sections-editor-legacy .sec-card-body { display: contents; }
+.sections-editor-legacy .sec-index,
+.sections-editor-legacy .sec-summary { display: none; }
+.sections-editor-enhanced .sec-card {
+  border-color: var(--accent-line);
   padding: 0;
   margin-bottom: var(--s5);
 }
-.sec-card-head { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; padding: var(--s3); margin: 0; background: var(--accent-bg); border-bottom: 1px solid var(--accent-line); border-left: 3px solid var(--accent); border-radius: var(--r-md) var(--r-md) 0 0; }
-.sec-card-title { flex: 1; min-width: 18rem; display: flex; align-items: center; gap: var(--s2); }
-.sec-card-title .grow { flex: 1; min-width: 10rem; }
-.sec-index { flex: none; color: var(--accent-hover); font-family: var(--font-mono); font-size: var(--t-caption); font-weight: 600; white-space: nowrap; }
-.sec-name-input { color: var(--accent-hover); font-size: var(--t-title); font-weight: 600; }
-.sec-summary { flex: none; padding: var(--s1) var(--s2); border: 1px solid var(--accent-line); border-radius: 999px; background: var(--surface); color: var(--accent-hover); font-family: var(--font-mono); font-size: var(--t-caption); white-space: nowrap; }
-.sec-card-tools { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; margin-left: auto; }
-.sec-card-body { padding: 0 var(--s3) var(--s3); }
-.sec-card-err .sec-card-head { border-left-color: var(--danger); }
+.sections-editor-enhanced .sec-card-head { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; padding: var(--s3); margin: 0; background: var(--accent-bg); border-bottom: 1px solid var(--accent-line); border-left: 3px solid var(--accent); border-radius: var(--r-md) var(--r-md) 0 0; }
+.sections-editor-enhanced .sec-card-title { flex: 1; min-width: 18rem; display: flex; align-items: center; gap: var(--s2); }
+.sections-editor-enhanced .sec-card-title .grow { flex: 1; min-width: 10rem; }
+.sections-editor-enhanced .sec-index { flex: none; color: var(--accent-hover); font-family: var(--font-mono); font-size: var(--t-caption); font-weight: 600; white-space: nowrap; }
+.sections-editor-enhanced .sec-name-input { color: var(--accent-hover); font-size: var(--t-title); font-weight: 600; }
+.sections-editor-enhanced .sec-summary { flex: none; padding: var(--s1) var(--s2); border: 1px solid var(--accent-line); border-radius: 999px; background: var(--surface); color: var(--accent-hover); font-family: var(--font-mono); font-size: var(--t-caption); white-space: nowrap; }
+.sections-editor-enhanced .sec-card-tools { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; margin-left: auto; }
+.sections-editor-enhanced .sec-card-body { padding: 0 var(--s3) var(--s3); }
+.sections-editor-enhanced .sec-card-err .sec-card-head { border-left-color: var(--danger); }
 .qrow {
   display: flex;
   flex-direction: column;
@@ -1127,8 +1139,13 @@ a.qg-name:hover { color: var(--accent); }
 
 /* ---------- 学生列表栏式对齐：名字定宽（超长省略+悬浮全文）、编码列定宽对齐、备注截断悬浮居中 ---------- */
 /* 编码列定宽 12rem、操作列定宽 4.5rem：每行是独立 grid 容器，列宽不跨容器共享，只有全定宽（除 1fr 备注列）表头与行才能对齐 */
-.stu-grid { display: grid; grid-template-columns: 12ch 12rem 1fr 4.5rem 4.5rem; gap: var(--s2); align-items: center; }
+.stu-grid { display: grid; grid-template-columns: 12ch 12rem 1fr repeat(3, 4.5rem); gap: var(--s2); align-items: center; }
 .stu-grid .btn { width: 4.5rem; padding-left: 0; padding-right: 0; text-align: center; }
+.import-history-option { margin-top: var(--s3); }
+.history-absence-list { max-height: calc(var(--s8) * 6); overflow-y: auto; border-top: 1px solid var(--line); }
+.history-absence-row { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
+.history-absence-row strong { flex: 1; }
+.history-absence-row span { color: var(--ink-2); font-size: var(--t-caption); text-align: right; }
 .stu-grid-6 { display: grid; grid-template-columns: auto 12ch 12rem 1fr auto auto auto; gap: var(--s2); align-items: center; }
 .stu-grid .c-name, .stu-grid-6 .c-name {
   font-weight: 500;
@@ -1886,7 +1903,26 @@ mark.search-hit {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.analysis-wrong-empty { flex: none; color: var(--ink-2); font-size: var(--t-caption); }
+.analysis-question .rate-wrap { flex: none; }
+.analysis-question .rate-cap { width: calc(var(--s8) + var(--s5)); justify-content: center; }
+.analysis-wrong-count {
+  flex: none;
+  width: calc(var(--s8) + var(--s5));
+  height: calc(var(--s4) + var(--s1));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--t-caption);
+  white-space: nowrap;
+}
+.analysis-wrong-count.clickable { cursor: pointer; }
+.analysis-wrong-count.clickable:hover { color: var(--accent-hover); background: var(--accent-bg); }
 .analysis-report-head { margin-bottom: var(--s3); }
 .analysis-report-head .sec-title { margin-bottom: 0; }
 .analysis-actual { margin-bottom: var(--s4); }
@@ -1962,9 +1998,9 @@ mark.search-hit {
   .tracking-config-row .ant-input { grid-column: 1 / -1; }
   .tracking-actions { flex-wrap: wrap; }
   .section-jump-item { max-width: 16rem; }
-  .sec-card-head { position: static; }
-  .sec-card-title { min-width: 100%; flex-wrap: wrap; }
-  .sec-card-title .grow { min-width: 0; }
-  .sec-summary { margin-left: auto; }
-  .sec-card-tools { width: 100%; margin-left: 0; }
+  .sections-editor-enhanced .sec-card-head { position: static; }
+  .sections-editor-enhanced .sec-card-title { min-width: 100%; flex-wrap: wrap; }
+  .sections-editor-enhanced .sec-card-title .grow { min-width: 0; }
+  .sections-editor-enhanced .sec-summary { margin-left: auto; }
+  .sections-editor-enhanced .sec-card-tools { width: 100%; margin-left: 0; }
 }

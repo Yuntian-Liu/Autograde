@@ -10,6 +10,7 @@ import CodeChip from "../components/CodeChip";
 import PageSkeleton from "../components/PageSkeleton";
 import StudentImportModal from "../components/StudentImportModal";
 import { classMeta, seriesLabel } from "../meta";
+import { clientLog } from "../utils/clientLog";
 
 function batchStatus(a) {
   if (a.status === "已完成") return <span className="status-done">已完成</span>;
@@ -27,6 +28,10 @@ export default function ClassDetail() {
   const [importOpen, setImportOpen] = useState(false);
   const [noteStudent, setNoteStudent] = useState(null); // 备注编辑目标
   const [noteText, setNoteText] = useState("");
+  const [historyStudent, setHistoryStudent] = useState(null);
+  const [historyPreview, setHistoryPreview] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyApplying, setHistoryApplying] = useState(false);
   const [deleteStep, setDeleteStep] = useState(0); // 删除班级双重确认：0=关 1=警示 2=输名确认
   const [deleteNameInput, setDeleteNameInput] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -48,6 +53,52 @@ export default function ClassDetail() {
       reload();
     } catch (e) {
       message.error(e.message);
+    }
+  }
+
+  async function openHistory(student) {
+    setHistoryStudent(student);
+    setHistoryPreview(null);
+    setHistoryLoading(true);
+    try {
+      const preview = await apiGet(`/students/${student.id}/pre-enrollment-absence`);
+      setHistoryPreview(preview);
+    } catch (e) {
+      message.error(e.message);
+      setHistoryStudent(null);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  function closeHistory() {
+    if (historyApplying) return;
+    setHistoryStudent(null);
+    setHistoryPreview(null);
+  }
+
+  async function applyHistory() {
+    if (!historyStudent || historyApplying) return;
+    setHistoryApplying(true);
+    try {
+      const result = await apiPost(`/students/${historyStudent.id}/pre-enrollment-absence`);
+      clientLog.operation("student_historical_absence", "success", {
+        student: historyStudent.id,
+        marked: result.marked,
+        conflicts: result.conflict_count,
+      });
+      message.success(`已将 ${result.marked} 份历史批次标为未交`);
+      setHistoryStudent(null);
+      setHistoryPreview(null);
+      reload();
+    } catch (e) {
+      clientLog.operation("student_historical_absence", "error", {
+        student: historyStudent.id,
+        error: e.message,
+      });
+      message.error(e.message);
+    } finally {
+      setHistoryApplying(false);
     }
   }
 
@@ -165,6 +216,7 @@ export default function ClassDetail() {
               <span>备注</span>
               <span />
               <span />
+              <span />
             </div>
           )}
           {data.students.map((s) => (
@@ -176,6 +228,9 @@ export default function ClassDetail() {
               <span className="c-note" title={s.note || undefined}>
                 {s.note}
               </span>
+              <button className="btn" onClick={() => openHistory(s)}>
+                历史
+              </button>
               <button
                 className="btn"
                 onClick={() => {
@@ -215,14 +270,50 @@ export default function ClassDetail() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         students={data.students}
-        onImport={(names, allowDuplicates) =>
+        offerHistoricalAbsence
+        onImport={(names, allowDuplicates, options) =>
           apiPost(`/classes/${id}/students/batch`, {
             names,
             allow_duplicates: allowDuplicates,
+            ...options,
           })
         }
         onImported={reload}
       />
+      <Modal
+        centered
+        open={historyStudent !== null}
+        onCancel={closeHistory}
+        onOk={applyHistory}
+        confirmLoading={historyApplying}
+        title={historyStudent ? `${historyStudent.name} · 转入前历史批次` : "转入前历史批次"}
+        okText="标为未交"
+        cancelText="取消"
+        okButtonProps={{ disabled: historyLoading || !historyPreview?.assignments.length }}
+        width={520}
+        destroyOnHidden
+      >
+        {historyLoading ? (
+          <div className="row">正在检查历史批次…</div>
+        ) : historyPreview?.assignments.length ? (
+          <>
+            <p>仅处理该生在以下原班已完成批次中的空记录或待批改记录，不影响其他学生。</p>
+            <div className="history-absence-list">
+              {historyPreview.assignments.map((assignment) => (
+                <div className="history-absence-row" key={assignment.id}>
+                  <strong>{assignment.unit_label}</strong>
+                  <span>第 {assignment.lesson_no} 次课{assignment.class_time ? ` · ${assignment.class_time}` : ""}</span>
+                </div>
+              ))}
+            </div>
+            {historyPreview.conflict_count > 0 && (
+              <p className="tone-bad">另有 {historyPreview.conflict_count} 份记录存在已有数据或手动登记，已跳过。</p>
+            )}
+          </>
+        ) : (
+          <div className="row">没有需要处理的历史批次</div>
+        )}
+      </Modal>
       <Modal
         centered
         open={noteStudent !== null}

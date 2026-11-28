@@ -11,6 +11,7 @@ from slug_ids import unique_slug
 from auth.dependencies import get_current_user
 from auth.models import User
 from database import get_db
+from enrollment import backfill_historical_absence
 from feedback import (
     SERIES_DEFAULT_LESSON_TYPE,
     sync_unit_label,
@@ -35,12 +36,14 @@ router = APIRouter(prefix="/api/classes", tags=["classes"])
 class StudentCreate(BaseModel):
     name: str
     note: str = ""
+    backfill_absent: bool = False
 
 
 class StudentsBatchIn(BaseModel):
     names: list[str]  # 前端负责按行 split，这里收数组
     # 重名处理：默认跳过（防重复粘贴名单）；前端弹窗让用户决定后传 true 照常录入（SID 区分）
     allow_duplicates: bool = False
+    backfill_absent: bool = False
 
 
 class ClassCreate(BaseModel):
@@ -316,6 +319,7 @@ async def _import_students(
     names: list[str],
     allow_duplicates: bool,
     assignment: Assignment | None = None,
+    backfill_absent: bool = False,
 ) -> dict:
     assignment_id = assignment.id if assignment is not None else None
     scope = Student.assignment_id == assignment_id if assignment is not None else Student.assignment_id.is_(None)
@@ -329,32 +333,51 @@ async def _import_students(
     added = []
     skipped = []
     seen = set()
-    for raw in names:
-        name = raw.strip()
-        if not name:
-            continue
-        if not allow_duplicates and (name in seen or name in existing):
-            skipped.append(name)
-            continue
-        seen.add(name)
-        s = Student(
-            name=name,
-            class_id=c.id,
-            assignment_id=assignment_id,
-            code=await issue_code(db, "S", c, assignment),
-        )
-        db.add(s)
-        added.append(s)
-    await db.commit()
+    backfill = {"marked": 0, "conflict_count": 0}
+    try:
+        for raw in names:
+            name = raw.strip()
+            if not name:
+                continue
+            if not allow_duplicates and (name in seen or name in existing):
+                skipped.append(name)
+                continue
+            seen.add(name)
+            s = Student(
+                name=name,
+                class_id=c.id,
+                assignment_id=assignment_id,
+                code=await issue_code(db, "S", c, assignment),
+            )
+            db.add(s)
+            added.append(s)
+        await db.flush()
+        if backfill_absent and assignment is None and added:
+            cohort_ids = {s.id for s in added}
+            for s in added:
+                result = await backfill_historical_absence(db, s, cohort_ids)
+                backfill["marked"] += result["marked"]
+                backfill["conflict_count"] += result["conflict_count"]
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     logging.getLogger("autograde.business").info(
-        "students_import uid=%s class=%s assignment=%s added=%s skipped=%s",
+        "students_import uid=%s class=%s assignment=%s added=%s skipped=%s backfill=%s conflicts=%s",
         c.owner_uid,
         c.id,
         assignment_id,
         len(added),
         len(skipped),
+        backfill["marked"],
+        backfill["conflict_count"],
     )
-    return {"added": len(added), "skipped": skipped, "students": [student_brief(s) for s in added]}
+    return {
+        "added": len(added),
+        "skipped": skipped,
+        "students": [student_brief(s) for s in added],
+        "backfill": backfill,
+    }
 
 
 @router.post("/{class_id}/students/batch", status_code=201)
@@ -370,7 +393,7 @@ async def import_students(
     c = await owned_class(db, class_id, user)
     if c.is_temp:
         raise HTTPException(status_code=400, detail="临时学生请按批次导入")
-    return await _import_students(db, c, body.names, body.allow_duplicates)
+    return await _import_students(db, c, body.names, body.allow_duplicates, backfill_absent=body.backfill_absent)
 
 
 @router.post("/{class_id}/students", status_code=201)
@@ -388,8 +411,25 @@ async def create_student(
         raise HTTPException(status_code=400, detail="学生姓名不能为空")
     s = Student(name=name, class_id=class_id, note=body.note, code=await issue_code(db, "S", c))
     db.add(s)
-    await db.commit()
-    return student_brief(s)
+    backfill = {"marked": 0, "conflict_count": 0}
+    try:
+        await db.flush()
+        if body.backfill_absent:
+            result = await backfill_historical_absence(db, s)
+            backfill = {"marked": result["marked"], "conflict_count": result["conflict_count"]}
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    logging.getLogger("autograde.business").info(
+        "student_create uid=%s class=%s student=%s backfill=%s conflicts=%s",
+        user.uid,
+        c.id,
+        s.id,
+        backfill["marked"],
+        backfill["conflict_count"],
+    )
+    return {**student_brief(s), "backfill": backfill}
 
 
 @router.post("/{class_id}/assignments", status_code=201)
